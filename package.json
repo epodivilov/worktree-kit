@@ -1,0 +1,21 @@
+{
+	"name": "worktree-kit",
+	"version": "0.1.0",
+	"description": "CLI tool to simplify git-worktree workflow with automatic config file copying",
+	"type": "module",
+	"bin": {
+		"wt": "./dist/wt"
+	},
+	"scripts": {
+		"dev": "bun run src/index.ts",
+		"build": "bun build ./src/index.ts --compile --outfile dist/wt",
+		"typecheck": "tsc --noEmit",
+		"lint": "biome check .",
+		"format": "biome format . --write"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.3.13",
+		"@types/bun": "latest",
+		"typescript": "^5"
+	}
+}
