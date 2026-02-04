@@ -38,21 +38,105 @@ export function createBunGitAdapter(): GitPort {
 		},
 
 		async listWorktrees(): Promise<Result<Worktree[], GitError>> {
-			return Result.ok([]);
+			try {
+				const proc = Bun.spawn(["git", "worktree", "list", "--porcelain"], { stdout: "pipe", stderr: "pipe" });
+				const exitCode = await proc.exited;
+				if (exitCode !== 0) {
+					return Result.err({
+						code: "NOT_A_REPO",
+						message: "Not inside a git repository",
+					});
+				}
+				const output = await new Response(proc.stdout).text();
+				return Result.ok(parseWorktreesPorcelain(output));
+			} catch {
+				return Result.err({
+					code: "UNKNOWN",
+					message: "Failed to list worktrees",
+				});
+			}
 		},
 
-		async createWorktree(_branch: string, _path: string): Promise<Result<Worktree, GitError>> {
-			return Result.err({
-				code: "UNKNOWN",
-				message: "Not implemented",
-			});
+		async createWorktree(branch: string, path: string): Promise<Result<Worktree, GitError>> {
+			try {
+				const proc = Bun.spawn(["git", "worktree", "add", path, branch], { stdout: "pipe", stderr: "pipe" });
+				const exitCode = await proc.exited;
+				if (exitCode !== 0) {
+					const stderr = await new Response(proc.stderr).text();
+					return Result.err(mapCreateError(stderr));
+				}
+
+				const headProc = Bun.spawn(["git", "-C", path, "rev-parse", "HEAD"], { stdout: "pipe", stderr: "pipe" });
+				await headProc.exited;
+				const head = (await new Response(headProc.stdout).text()).trim();
+
+				return Result.ok({ path, branch, head, isMain: false });
+			} catch {
+				return Result.err({
+					code: "UNKNOWN",
+					message: "Failed to create worktree",
+				});
+			}
 		},
 
-		async removeWorktree(_path: string): Promise<Result<void, GitError>> {
-			return Result.err({
-				code: "UNKNOWN",
-				message: "Not implemented",
-			});
+		async removeWorktree(path: string): Promise<Result<void, GitError>> {
+			try {
+				const proc = Bun.spawn(["git", "worktree", "remove", path], { stdout: "pipe", stderr: "pipe" });
+				const exitCode = await proc.exited;
+				if (exitCode !== 0) {
+					const stderr = await new Response(proc.stderr).text();
+					return Result.err({
+						code: stderr.toLowerCase().includes("not a git repository") ? "NOT_A_REPO" : "UNKNOWN",
+						message: stderr.trim() || "Failed to remove worktree",
+					});
+				}
+				return Result.ok(undefined);
+			} catch {
+				return Result.err({
+					code: "UNKNOWN",
+					message: "Failed to remove worktree",
+				});
+			}
 		},
 	};
+}
+
+function parseWorktreesPorcelain(output: string): Worktree[] {
+	const blocks = output.trim().split("\n\n").filter(Boolean);
+
+	return blocks.map((block, index) => {
+		const lines = block.split("\n");
+
+		let path = "";
+		let head = "";
+		let branch = "";
+
+		for (const line of lines) {
+			if (line.startsWith("worktree ")) {
+				path = line.slice("worktree ".length);
+			} else if (line.startsWith("HEAD ")) {
+				head = line.slice("HEAD ".length);
+			} else if (line.startsWith("branch ")) {
+				branch = line.slice("branch ".length).replace("refs/heads/", "");
+			}
+		}
+
+		return { path, branch, head, isMain: index === 0 };
+	});
+}
+
+function mapCreateError(stderr: string): GitError {
+	const lower = stderr.toLowerCase();
+
+	if (lower.includes("already checked out") || lower.includes("already used by worktree")) {
+		return { code: "BRANCH_EXISTS", message: stderr.trim() };
+	}
+	if (lower.includes("already exists")) {
+		return { code: "WORKTREE_EXISTS", message: stderr.trim() };
+	}
+	if (lower.includes("not a git repository")) {
+		return { code: "NOT_A_REPO", message: stderr.trim() };
+	}
+
+	return { code: "UNKNOWN", message: stderr.trim() || "Failed to create worktree" };
 }
