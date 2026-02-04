@@ -1,4 +1,5 @@
 import { defineCommand } from "citty";
+import pc from "picocolors";
 import { listWorktrees } from "../application/use-cases/list-worktrees.ts";
 import { removeWorktree } from "../application/use-cases/remove-worktree.ts";
 import type { Container } from "../infrastructure/container.ts";
@@ -67,14 +68,18 @@ export function removeCommand(container: Container) {
 				branch = selected;
 			}
 
+			const spinner = ui.createSpinner();
+			spinner.start("Removing worktree...");
+
 			const result = await removeWorktree({ branch }, { git });
 
 			if (Result.isErr(result)) {
+				spinner.stop(pc.red("Failed"));
 				ui.error(result.error.message);
 				process.exit(1);
 			}
 
-			ui.success(`Removed worktree: ${branch}`);
+			spinner.stop(pc.green("Worktree removed"));
 			ui.outro("Done!");
 		},
 	});
