@@ -1,3 +1,9 @@
+export interface SpinnerHandle {
+	start(message: string): void;
+	message(message: string): void;
+	stop(message?: string): void;
+}
+
 export interface UiPort {
 	intro(message: string): void;
 	outro(message: string): void;
@@ -6,6 +12,7 @@ export interface UiPort {
 	warn(message: string): void;
 	error(message: string): void;
 	spinner<T>(message: string, fn: () => Promise<T>): Promise<T>;
+	createSpinner(): SpinnerHandle;
 	text(options: { message: string; placeholder?: string; defaultValue?: string }): Promise<string | symbol>;
 	confirm(options: { message: string; initialValue?: boolean }): Promise<boolean | symbol>;
 	select<T>(options: {
