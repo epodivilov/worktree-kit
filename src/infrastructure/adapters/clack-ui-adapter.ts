@@ -56,6 +56,16 @@ export function createClackUiAdapter(): UiPort {
 			});
 		},
 
+		async select<T>(options: {
+			message: string;
+			options: Array<{ value: T; label: string; hint?: string }>;
+		}): Promise<T | symbol> {
+			return clack.select({
+				message: options.message,
+				options: options.options as Parameters<typeof clack.select<T>>[0]["options"],
+			});
+		},
+
 		isCancel(value: unknown): value is symbol {
 			return clack.isCancel(value);
 		},
