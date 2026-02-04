@@ -10,6 +10,20 @@ describe("WorktreeConfigSchema", () => {
 		if (result.success) {
 			expect(result.output.rootDir).toBe("../wt");
 			expect(result.output.copy).toEqual([".env", ".env.local"]);
+			expect(result.output.hooks).toEqual({ "post-create": [] });
+		}
+	});
+
+	test("valid config with hooks parses correctly", () => {
+		const input = {
+			rootDir: "../wt",
+			copy: [".env"],
+			hooks: { "post-create": ["pnpm install", "cp .env.example .env"] },
+		};
+		const result = v.safeParse(WorktreeConfigSchema, input);
+		expect(result.success).toBe(true);
+		if (result.success) {
+			expect(result.output.hooks["post-create"]).toEqual(["pnpm install", "cp .env.example .env"]);
 		}
 	});
 
@@ -20,6 +34,30 @@ describe("WorktreeConfigSchema", () => {
 			expect(result.output.rootDir).toBe("../wt");
 			expect(result.output.copy).toEqual([]);
 		}
+	});
+
+	test("config without hooks defaults to empty post-create", () => {
+		const result = v.safeParse(WorktreeConfigSchema, { rootDir: "../wt" });
+		expect(result.success).toBe(true);
+		if (result.success) {
+			expect(result.output.hooks).toEqual({ "post-create": [] });
+		}
+	});
+
+	test("config with empty hooks object defaults post-create", () => {
+		const result = v.safeParse(WorktreeConfigSchema, { rootDir: "../wt", hooks: {} });
+		expect(result.success).toBe(true);
+		if (result.success) {
+			expect(result.output.hooks).toEqual({ "post-create": [] });
+		}
+	});
+
+	test("rejects non-string items in hooks.post-create", () => {
+		const result = v.safeParse(WorktreeConfigSchema, {
+			rootDir: "../wt",
+			hooks: { "post-create": [123] },
+		});
+		expect(result.success).toBe(false);
 	});
 
 	test("rejects config without rootDir", () => {
