@@ -1,5 +1,6 @@
 import { defineCommand } from "citty";
 import { createWorktree } from "../application/use-cases/create-worktree.ts";
+import { renderNotifications } from "../cli/render-notifications.ts";
 import type { Container } from "../infrastructure/container.ts";
 import { Result } from "../shared/result.ts";
 
@@ -33,6 +34,8 @@ export function createCommand(container: Container) {
 				ui.error(result.error.message);
 				process.exit(1);
 			}
+
+			renderNotifications(ui, result.data.notifications);
 
 			ui.success(`Created worktree for branch: ${args.branch}`);
 			ui.outro("Done!");

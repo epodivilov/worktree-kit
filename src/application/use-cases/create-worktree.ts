@@ -4,6 +4,7 @@ import type { WorktreeConfig } from "../../domain/entities/config.ts";
 import type { Worktree } from "../../domain/entities/worktree.ts";
 import type { FilesystemPort } from "../../domain/ports/filesystem-port.ts";
 import type { GitPort } from "../../domain/ports/git-port.ts";
+import { Notification as N, type Notification } from "../../shared/notification.ts";
 import type { Result } from "../../shared/result.ts";
 import { Result as R } from "../../shared/result.ts";
 import { loadConfig } from "./load-config.ts";
@@ -15,6 +16,7 @@ export interface CreateWorktreeInput {
 
 export interface CreateWorktreeOutput {
 	worktree: Worktree;
+	notifications: Notification[];
 }
 
 export interface CreateWorktreeDeps {
@@ -27,6 +29,7 @@ export async function createWorktree(
 	deps: CreateWorktreeDeps,
 ): Promise<Result<CreateWorktreeOutput, Error>> {
 	const { git, fs } = deps;
+	const notifications: Notification[] = [];
 
 	const rootResult = await git.getRepositoryRoot();
 	if (!rootResult.success) {
@@ -35,7 +38,14 @@ export async function createWorktree(
 	const repoRoot = rootResult.data;
 
 	const configResult = await loadConfig({ git, fs });
-	const config: WorktreeConfig = configResult.success ? configResult.data.config : { rootDir: INIT_ROOT_DIR, copy: [] };
+	let config: WorktreeConfig;
+
+	if (configResult.success) {
+		config = configResult.data.config;
+	} else {
+		config = { rootDir: INIT_ROOT_DIR, copy: [] };
+		notifications.push(N.warn("Config not found, using defaults. Run 'wt init' to create one."));
+	}
 
 	const worktreePath = resolve(repoRoot, config.rootDir, input.branch);
 
@@ -50,5 +60,5 @@ export async function createWorktree(
 		await fs.copyFile(src, dest);
 	}
 
-	return R.ok({ worktree: createResult.data });
+	return R.ok({ worktree: createResult.data, notifications });
 }
