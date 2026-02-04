@@ -1,6 +1,6 @@
 import * as clack from "@clack/prompts";
 import pc from "picocolors";
-import type { UiPort } from "../../domain/ports/ui-port.ts";
+import type { SpinnerHandle, UiPort } from "../../domain/ports/ui-port.ts";
 
 export function createClackUiAdapter(): UiPort {
 	return {
@@ -39,6 +39,15 @@ export function createClackUiAdapter(): UiPort {
 				s.stop(pc.red("Failed"));
 				throw error;
 			}
+		},
+
+		createSpinner(): SpinnerHandle {
+			const s = clack.spinner();
+			return {
+				start: (message: string) => s.start(message),
+				message: (message: string) => s.message(message),
+				stop: (message?: string) => s.stop(message ?? pc.green("Done")),
+			};
 		},
 
 		async text(options: { message: string; placeholder?: string; defaultValue?: string }): Promise<string | symbol> {
