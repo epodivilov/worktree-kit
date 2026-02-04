@@ -4,34 +4,40 @@ import type { WorktreeConfig } from "../../domain/entities/config.ts";
 import type { Worktree } from "../../domain/entities/worktree.ts";
 import type { FilesystemPort } from "../../domain/ports/filesystem-port.ts";
 import type { GitPort } from "../../domain/ports/git-port.ts";
-import type { ShellPort } from "../../domain/ports/shell-port.ts";
 import { Notification as N, type Notification } from "../../shared/notification.ts";
 import type { Result } from "../../shared/result.ts";
 import { Result as R } from "../../shared/result.ts";
 import { loadConfig } from "./load-config.ts";
-import { runHooks } from "./run-hooks.ts";
+import type { HookContext } from "./run-hooks.ts";
 
 export interface CreateWorktreeInput {
 	branch: string;
 	baseBranch?: string;
 }
 
+export interface FileToCopy {
+	src: string;
+	dest: string;
+}
+
 export interface CreateWorktreeOutput {
 	worktree: Worktree;
 	notifications: Notification[];
+	filesToCopy: FileToCopy[];
+	hookContext: HookContext | null;
+	hookCommands: readonly string[];
 }
 
 export interface CreateWorktreeDeps {
 	git: GitPort;
 	fs: FilesystemPort;
-	shell: ShellPort;
 }
 
 export async function createWorktree(
 	input: CreateWorktreeInput,
 	deps: CreateWorktreeDeps,
 ): Promise<Result<CreateWorktreeOutput, Error>> {
-	const { git, fs, shell } = deps;
+	const { git, fs } = deps;
 	const notifications: Notification[] = [];
 
 	const rootResult = await git.getRepositoryRoot();
@@ -57,30 +63,27 @@ export async function createWorktree(
 		return R.err(new Error(createResult.error.message));
 	}
 
-	for (const file of config.copy) {
-		const src = join(repoRoot, file);
-		const dest = join(worktreePath, file);
-		await fs.copyFile(src, dest);
-	}
+	const filesToCopy: FileToCopy[] = config.copy.map((file) => ({
+		src: join(repoRoot, file),
+		dest: join(worktreePath, file),
+	}));
 
-	if (config.hooks["post-create"].length > 0) {
-		const hooksResult = await runHooks(
-			{
-				commands: config.hooks["post-create"],
-				context: {
+	const hookCommands = config.hooks["post-create"];
+	const hookContext: HookContext | null =
+		hookCommands.length > 0
+			? {
 					worktreePath,
 					branch: input.branch,
 					repoRoot,
 					baseBranch: input.baseBranch,
-				},
-			},
-			{ shell },
-		);
+				}
+			: null;
 
-		if (hooksResult.success) {
-			notifications.push(...hooksResult.data.notifications);
-		}
-	}
-
-	return R.ok({ worktree: createResult.data, notifications });
+	return R.ok({
+		worktree: createResult.data,
+		notifications,
+		filesToCopy,
+		hookContext,
+		hookCommands,
+	});
 }

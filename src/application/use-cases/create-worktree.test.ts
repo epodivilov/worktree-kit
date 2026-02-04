@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import { expectErr, expectOk } from "../../test-utils/assertions.ts";
 import { createFakeFilesystem } from "../../test-utils/fake-filesystem.ts";
 import { createFakeGit } from "../../test-utils/fake-git.ts";
-import { createFakeShell } from "../../test-utils/fake-shell.ts";
 import { createWorktree } from "./create-worktree.ts";
 
 describe("createWorktree", () => {
@@ -15,26 +14,25 @@ describe("createWorktree", () => {
 			files: { [`${ROOT}/.worktreekitrc`]: CONFIG, [`${ROOT}/.env`]: "SECRET=123" },
 			cwd: ROOT,
 		});
-		const shell = createFakeShell();
-		const result = await createWorktree({ branch: "feat-x" }, { git, fs, shell });
+		const result = await createWorktree({ branch: "feat-x" }, { git, fs });
 
 		const { worktree } = expectOk(result);
 		expect(worktree.branch).toBe("feat-x");
 		expect(worktree.isMain).toBe(false);
 	});
 
-	test("copies configured files from main worktree to new worktree", async () => {
+	test("returns files to copy from config", async () => {
 		const git = createFakeGit({ root: ROOT, worktrees: [] });
 		const fs = createFakeFilesystem({
 			files: { [`${ROOT}/.worktreekitrc`]: CONFIG, [`${ROOT}/.env`]: "SECRET=123" },
 			cwd: ROOT,
 		});
-		const shell = createFakeShell();
-		const result = await createWorktree({ branch: "feat-copy" }, { git, fs, shell });
+		const result = await createWorktree({ branch: "feat-copy" }, { git, fs });
 
-		const { worktree } = expectOk(result);
-		const copied = expectOk(await fs.readFile(`${worktree.path}/.env`));
-		expect(copied).toBe("SECRET=123");
+		const { filesToCopy, worktree } = expectOk(result);
+		expect(filesToCopy).toHaveLength(1);
+		expect(filesToCopy[0]?.src).toBe(`${ROOT}/.env`);
+		expect(filesToCopy[0]?.dest).toBe(`${worktree.path}/.env`);
 	});
 
 	test("returns error when branch already exists", async () => {
@@ -43,31 +41,31 @@ describe("createWorktree", () => {
 			worktrees: [{ path: "/other", branch: "existing", head: "abc", isMain: false }],
 		});
 		const fs = createFakeFilesystem({ files: { [`${ROOT}/.worktreekitrc`]: CONFIG }, cwd: ROOT });
-		const shell = createFakeShell();
-		const result = await createWorktree({ branch: "existing" }, { git, fs, shell });
+		const result = await createWorktree({ branch: "existing" }, { git, fs });
 
 		expectErr(result);
 	});
 
-	test("works without .worktree.json (no files to copy)", async () => {
+	test("works without config (no files to copy)", async () => {
 		const git = createFakeGit({ root: ROOT, worktrees: [] });
 		const fs = createFakeFilesystem({ cwd: ROOT });
-		const shell = createFakeShell();
-		const result = await createWorktree({ branch: "feat-noconf" }, { git, fs, shell });
+		const result = await createWorktree({ branch: "feat-noconf" }, { git, fs });
 
-		expectOk(result);
+		const data = expectOk(result);
+		expect(data.filesToCopy).toEqual([]);
+		expect(data.hookCommands).toEqual([]);
+		expect(data.hookContext).toBeNull();
 	});
 
 	test("returns error when not in a git repository", async () => {
 		const git = createFakeGit({ isRepo: false });
 		const fs = createFakeFilesystem({ cwd: ROOT });
-		const shell = createFakeShell();
-		const result = await createWorktree({ branch: "feat-x" }, { git, fs, shell });
+		const result = await createWorktree({ branch: "feat-x" }, { git, fs });
 
 		expectErr(result);
 	});
 
-	test("executes post-create hooks when configured", async () => {
+	test("returns hook context and commands when configured", async () => {
 		const configWithHooks = JSON.stringify({
 			rootDir: "../worktrees",
 			copy: [],
@@ -78,42 +76,43 @@ describe("createWorktree", () => {
 			files: { [`${ROOT}/.worktreekitrc`]: configWithHooks },
 			cwd: ROOT,
 		});
-		const shell = createFakeShell();
-		const result = await createWorktree({ branch: "feat-hooks" }, { git, fs, shell });
+		const result = await createWorktree({ branch: "feat-hooks" }, { git, fs });
 
-		expectOk(result);
-		expect(shell.calls).toHaveLength(2);
-		expect(shell.calls[0]?.command).toBe("pnpm install");
-		expect(shell.calls[1]?.command).toBe("echo done");
+		const data = expectOk(result);
+		expect(data.hookCommands).toEqual(["pnpm install", "echo done"]);
+		expect(data.hookContext).not.toBeNull();
+		expect(data.hookContext?.branch).toBe("feat-hooks");
+		expect(data.hookContext?.worktreePath).toContain("feat-hooks");
+		expect(data.hookContext?.repoRoot).toBe(ROOT);
 	});
 
-	test("does not run hooks when post-create is empty", async () => {
+	test("returns null hookContext when no hooks configured", async () => {
 		const git = createFakeGit({ root: ROOT, worktrees: [] });
 		const fs = createFakeFilesystem({
 			files: { [`${ROOT}/.worktreekitrc`]: CONFIG },
 			cwd: ROOT,
 		});
-		const shell = createFakeShell();
-		await createWorktree({ branch: "feat-no-hooks" }, { git, fs, shell });
+		const result = await createWorktree({ branch: "feat-no-hooks" }, { git, fs });
 
-		expect(shell.calls).toHaveLength(0);
+		const data = expectOk(result);
+		expect(data.hookCommands).toEqual([]);
+		expect(data.hookContext).toBeNull();
 	});
 
-	test("includes hook notifications in result", async () => {
+	test("includes baseBranch in hook context when provided", async () => {
 		const configWithHooks = JSON.stringify({
 			rootDir: "../worktrees",
 			copy: [],
-			hooks: { "post-create": ["pnpm install"] },
+			hooks: { "post-create": ["echo test"] },
 		});
 		const git = createFakeGit({ root: ROOT, worktrees: [] });
 		const fs = createFakeFilesystem({
 			files: { [`${ROOT}/.worktreekitrc`]: configWithHooks },
 			cwd: ROOT,
 		});
-		const shell = createFakeShell();
-		const result = await createWorktree({ branch: "feat-notif" }, { git, fs, shell });
+		const result = await createWorktree({ branch: "feat-base", baseBranch: "develop" }, { git, fs });
 
-		const { notifications } = expectOk(result);
-		expect(notifications.some((n) => n.message.includes("pnpm install"))).toBe(true);
+		const data = expectOk(result);
+		expect(data.hookContext?.baseBranch).toBe("develop");
 	});
 });
