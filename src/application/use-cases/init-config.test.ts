@@ -72,4 +72,17 @@ describe("initConfig", () => {
 
 		expectErr(result);
 	});
+
+	test("creates config in main worktree when in linked worktree", async () => {
+		const MAIN_ROOT = "/fake/main-project";
+		const LINKED_ROOT = "/fake/worktrees/feature";
+		const MAIN_CONFIG_PATH = `${MAIN_ROOT}/${CONFIG_FILENAME}`;
+		const fs = createFakeFilesystem();
+		const git = createFakeGit({ root: LINKED_ROOT, mainRoot: MAIN_ROOT });
+		const result = await initConfig({}, { fs, git });
+
+		const { configPath } = expectOk(result);
+		expect(configPath).toBe(MAIN_CONFIG_PATH);
+		expect(await fs.exists(MAIN_CONFIG_PATH)).toBe(true);
+	});
 });

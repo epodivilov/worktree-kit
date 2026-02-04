@@ -28,6 +28,44 @@ describe("BunGitAdapter", () => {
 		expect(root).toContain("worktree-kit");
 	});
 
+	describe("getMainWorktreeRoot", () => {
+		test("returns same as getRepositoryRoot in main worktree", async () => {
+			await using tmp = await createTempDir();
+			const repoPath = await initTestRepo(tmp.path);
+
+			const originalCwd = process.cwd();
+			process.chdir(repoPath);
+			try {
+				const repoRoot = expectOk(await git.getRepositoryRoot());
+				const mainRoot = expectOk(await git.getMainWorktreeRoot());
+				expect(mainRoot).toBe(repoRoot);
+			} finally {
+				process.chdir(originalCwd);
+			}
+		});
+
+		test("returns main worktree path when in linked worktree", async () => {
+			await using tmp = await createTempDir();
+			const repoPath = await initTestRepo(tmp.path);
+			const wtPath = join(tmp.path, "feature-wt");
+			await Bun.$`git -C ${repoPath} branch feature`.quiet();
+			await Bun.$`git -C ${repoPath} worktree add ${wtPath} feature`.quiet();
+
+			const originalCwd = process.cwd();
+			process.chdir(wtPath);
+			try {
+				const repoRoot = expectOk(await git.getRepositoryRoot());
+				const mainRoot = expectOk(await git.getMainWorktreeRoot());
+				// Use toContain to handle /var vs /private/var symlink on macOS
+				expect(repoRoot).toContain("feature-wt");
+				expect(mainRoot).toContain("repo");
+				expect(mainRoot).not.toContain("feature-wt");
+			} finally {
+				process.chdir(originalCwd);
+			}
+		});
+	});
+
 	describe("listWorktrees", () => {
 		test("returns single main worktree in fresh repo", async () => {
 			await using tmp = await createTempDir();

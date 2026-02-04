@@ -1,3 +1,4 @@
+import { dirname } from "node:path";
 import type { Worktree } from "../../domain/entities/worktree.ts";
 import type { GitError, GitPort } from "../../domain/ports/git-port.ts";
 import { Result } from "../../shared/result.ts";
@@ -33,6 +34,34 @@ export function createBunGitAdapter(): GitPort {
 				return Result.err({
 					code: "UNKNOWN",
 					message: "Failed to get repository root",
+				});
+			}
+		},
+
+		async getMainWorktreeRoot(): Promise<Result<string, GitError>> {
+			try {
+				const proc = Bun.spawn(["git", "rev-parse", "--git-common-dir"], { stdout: "pipe", stderr: "pipe" });
+				const exitCode = await proc.exited;
+				if (exitCode !== 0) {
+					return Result.err({
+						code: "NOT_A_REPO",
+						message: "Not inside a git repository",
+					});
+				}
+				const gitCommonDir = (await new Response(proc.stdout).text()).trim();
+
+				// In main worktree: returns ".git"
+				// In linked worktree: returns absolute path like "/path/to/main/.git"
+				if (gitCommonDir === ".git") {
+					return this.getRepositoryRoot();
+				}
+
+				// For linked worktree, parent of .git is the main worktree root
+				return Result.ok(dirname(gitCommonDir));
+			} catch {
+				return Result.err({
+					code: "UNKNOWN",
+					message: "Failed to get main worktree root",
 				});
 			}
 		},

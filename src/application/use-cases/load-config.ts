@@ -21,7 +21,7 @@ export interface LoadConfigDeps {
 export async function loadConfig(deps: LoadConfigDeps): Promise<Result<LoadConfigOutput, Error>> {
 	const { fs, git } = deps;
 
-	const rootResult = await git.getRepositoryRoot();
+	const rootResult = await git.getMainWorktreeRoot();
 	if (!rootResult.success) {
 		return R.err(new Error(`Not a git repository: ${rootResult.error.message}`));
 	}

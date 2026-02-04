@@ -74,4 +74,18 @@ describe("loadConfig", () => {
 
 		expect(error.message).toContain("Not a git repository");
 	});
+
+	test("loads config from main worktree when in linked worktree", async () => {
+		const MAIN_ROOT = "/fake/main-project";
+		const LINKED_ROOT = "/fake/worktrees/feature";
+		const content = JSON.stringify({ rootDir: "../wt", copy: [".env"] });
+		const fs = createFakeFilesystem({ files: { [`${MAIN_ROOT}/${CONFIG_FILENAME}`]: content } });
+		const git = createFakeGit({ root: LINKED_ROOT, mainRoot: MAIN_ROOT });
+
+		const result = await loadConfig({ fs, git });
+		const { config, configPath } = expectOk(result);
+
+		expect(config.rootDir).toBe("../wt");
+		expect(configPath).toBe(`${MAIN_ROOT}/${CONFIG_FILENAME}`);
+	});
 });

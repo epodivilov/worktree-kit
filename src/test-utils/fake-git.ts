@@ -5,11 +5,12 @@ import { Result } from "../shared/result.ts";
 export interface FakeGitOptions {
 	isRepo?: boolean;
 	root?: string;
+	mainRoot?: string;
 	worktrees?: Worktree[];
 }
 
 export function createFakeGit(options: FakeGitOptions = {}): GitPort {
-	const { isRepo = true, root = "/fake/project", worktrees = [] } = options;
+	const { isRepo = true, root = "/fake/project", mainRoot, worktrees = [] } = options;
 	const store = [...worktrees];
 
 	return {
@@ -22,6 +23,13 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 				return Result.err({ code: "NOT_A_REPO", message: "Not inside a git repository" });
 			}
 			return Result.ok(root);
+		},
+
+		async getMainWorktreeRoot(): Promise<Result<string, GitError>> {
+			if (!isRepo) {
+				return Result.err({ code: "NOT_A_REPO", message: "Not inside a git repository" });
+			}
+			return Result.ok(mainRoot ?? root);
 		},
 
 		async listWorktrees(): Promise<Result<Worktree[], GitError>> {
