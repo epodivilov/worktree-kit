@@ -12,7 +12,9 @@
 		"typecheck": "tsc --noEmit",
 		"lint": "biome check .",
 		"format": "biome format . --write",
-		"test": "bun test"
+		"test": "bun test",
+		"preview": "bash scripts/preview.sh",
+		"clean": "bash scripts/clean.sh"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.3.13",
