@@ -4,10 +4,12 @@ import type { WorktreeConfig } from "../../domain/entities/config.ts";
 import type { Worktree } from "../../domain/entities/worktree.ts";
 import type { FilesystemPort } from "../../domain/ports/filesystem-port.ts";
 import type { GitPort } from "../../domain/ports/git-port.ts";
+import type { ShellPort } from "../../domain/ports/shell-port.ts";
 import { Notification as N, type Notification } from "../../shared/notification.ts";
 import type { Result } from "../../shared/result.ts";
 import { Result as R } from "../../shared/result.ts";
 import { loadConfig } from "./load-config.ts";
+import { runHooks } from "./run-hooks.ts";
 
 export interface CreateWorktreeInput {
 	branch: string;
@@ -22,13 +24,14 @@ export interface CreateWorktreeOutput {
 export interface CreateWorktreeDeps {
 	git: GitPort;
 	fs: FilesystemPort;
+	shell: ShellPort;
 }
 
 export async function createWorktree(
 	input: CreateWorktreeInput,
 	deps: CreateWorktreeDeps,
 ): Promise<Result<CreateWorktreeOutput, Error>> {
-	const { git, fs } = deps;
+	const { git, fs, shell } = deps;
 	const notifications: Notification[] = [];
 
 	const rootResult = await git.getRepositoryRoot();
@@ -43,7 +46,7 @@ export async function createWorktree(
 	if (configResult.success) {
 		config = configResult.data.config;
 	} else {
-		config = { rootDir: INIT_ROOT_DIR, copy: [] };
+		config = { rootDir: INIT_ROOT_DIR, copy: [], hooks: { "post-create": [] } };
 		notifications.push(N.warn("Config not found, using defaults. Run 'wt init' to create one."));
 	}
 
@@ -58,6 +61,25 @@ export async function createWorktree(
 		const src = join(repoRoot, file);
 		const dest = join(worktreePath, file);
 		await fs.copyFile(src, dest);
+	}
+
+	if (config.hooks["post-create"].length > 0) {
+		const hooksResult = await runHooks(
+			{
+				commands: config.hooks["post-create"],
+				context: {
+					worktreePath,
+					branch: input.branch,
+					repoRoot,
+					baseBranch: input.baseBranch,
+				},
+			},
+			{ shell },
+		);
+
+		if (hooksResult.success) {
+			notifications.push(...hooksResult.data.notifications);
+		}
 	}
 
 	return R.ok({ worktree: createResult.data, notifications });
