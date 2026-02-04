@@ -1,4 +1,5 @@
 import { defineCommand, runMain } from "citty";
+import pkg from "../package.json";
 import { createCommand } from "./commands/create.ts";
 import { initCommand } from "./commands/init.ts";
 import { listCommand } from "./commands/list.ts";
@@ -12,7 +13,7 @@ const container = createContainer({ verbose });
 const main = defineCommand({
 	meta: {
 		name: "wt",
-		version: "0.1.0",
+		version: pkg.version,
 		description: "CLI tool for simplifying git-worktree workflow",
 	},
 	subCommands: {
