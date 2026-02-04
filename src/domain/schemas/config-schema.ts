@@ -1,9 +1,8 @@
 import * as v from "valibot";
 
 export const WorktreeConfigSchema = v.object({
-	files: v.optional(v.array(v.string()), []),
-	directories: v.optional(v.array(v.string()), []),
-	ignore: v.optional(v.array(v.string()), ["node_modules", ".git"]),
+	rootDir: v.string(),
+	copy: v.optional(v.array(v.string()), []),
 });
 
 export type WorktreeConfigInput = v.InferInput<typeof WorktreeConfigSchema>;

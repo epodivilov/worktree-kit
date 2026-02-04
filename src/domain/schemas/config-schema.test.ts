@@ -4,42 +4,41 @@ import { WorktreeConfigSchema } from "./config-schema.ts";
 
 describe("WorktreeConfigSchema", () => {
 	test("valid full config parses correctly", () => {
-		const input = {
-			files: [".env", ".env.local"],
-			directories: ["config"],
-			ignore: ["node_modules", "dist"],
-		};
+		const input = { rootDir: "../wt", copy: [".env", ".env.local"] };
 		const result = v.safeParse(WorktreeConfigSchema, input);
 		expect(result.success).toBe(true);
 		if (result.success) {
-			expect(result.output.files).toEqual([".env", ".env.local"]);
-			expect(result.output.directories).toEqual(["config"]);
-			expect(result.output.ignore).toEqual(["node_modules", "dist"]);
+			expect(result.output.rootDir).toBe("../wt");
+			expect(result.output.copy).toEqual([".env", ".env.local"]);
 		}
 	});
 
-	test("empty object gets all defaults", () => {
+	test("config without copy defaults to empty array", () => {
+		const result = v.safeParse(WorktreeConfigSchema, { rootDir: "../wt" });
+		expect(result.success).toBe(true);
+		if (result.success) {
+			expect(result.output.rootDir).toBe("../wt");
+			expect(result.output.copy).toEqual([]);
+		}
+	});
+
+	test("rejects config without rootDir", () => {
+		const result = v.safeParse(WorktreeConfigSchema, { copy: [".env"] });
+		expect(result.success).toBe(false);
+	});
+
+	test("rejects empty object", () => {
 		const result = v.safeParse(WorktreeConfigSchema, {});
-		expect(result.success).toBe(true);
-		if (result.success) {
-			expect(result.output.files).toEqual([]);
-			expect(result.output.directories).toEqual([]);
-			expect(result.output.ignore).toEqual(["node_modules", ".git"]);
-		}
+		expect(result.success).toBe(false);
 	});
 
-	test("partial config fills missing fields with defaults", () => {
-		const result = v.safeParse(WorktreeConfigSchema, { files: [".env"] });
-		expect(result.success).toBe(true);
-		if (result.success) {
-			expect(result.output.files).toEqual([".env"]);
-			expect(result.output.directories).toEqual([]);
-			expect(result.output.ignore).toEqual(["node_modules", ".git"]);
-		}
+	test("rejects non-string rootDir", () => {
+		const result = v.safeParse(WorktreeConfigSchema, { rootDir: 123 });
+		expect(result.success).toBe(false);
 	});
 
-	test("rejects non-string array items in files", () => {
-		const result = v.safeParse(WorktreeConfigSchema, { files: [123] });
+	test("rejects non-string items in copy", () => {
+		const result = v.safeParse(WorktreeConfigSchema, { rootDir: "../wt", copy: [123] });
 		expect(result.success).toBe(false);
 	});
 
