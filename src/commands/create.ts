@@ -37,7 +37,7 @@ export function createCommand(container: Container) {
 
 			renderNotifications(ui, result.data.notifications);
 
-			ui.success(`Created worktree for branch: ${args.branch}`);
+			ui.success(`Created worktree for branch: ${args.branch} at ${result.data.worktree.path}`);
 			ui.outro("Done!");
 		},
 	});
