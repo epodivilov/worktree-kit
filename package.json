@@ -9,6 +9,7 @@
 	"scripts": {
 		"dev": "bun run src/index.ts",
 		"build": "bun build ./src/index.ts --compile --outfile dist/wt",
+		"build:release": "bash scripts/build-release.sh",
 		"typecheck": "tsc --noEmit",
 		"lint": "biome check .",
 		"format": "biome format . --write",
