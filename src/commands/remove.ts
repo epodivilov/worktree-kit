@@ -68,6 +68,18 @@ export function removeCommand(container: Container) {
 				branch = selected;
 			}
 
+			const deleteBranchConfirm = await ui.confirm({
+				message: `Also delete branch "${branch}"?`,
+				initialValue: false,
+			});
+
+			if (ui.isCancel(deleteBranchConfirm)) {
+				ui.cancel();
+				process.exit(0);
+			}
+
+			const shouldDeleteBranch = deleteBranchConfirm === true;
+
 			const spinner = ui.createSpinner();
 			spinner.start("Removing worktree...");
 
@@ -80,6 +92,41 @@ export function removeCommand(container: Container) {
 			}
 
 			spinner.stop(pc.green("Worktree removed"));
+
+			if (shouldDeleteBranch) {
+				spinner.start("Deleting branch...");
+
+				const deleteResult = await git.deleteBranch(branch);
+
+				if (Result.isErr(deleteResult)) {
+					if (deleteResult.error.code === "BRANCH_NOT_MERGED") {
+						spinner.stop(pc.yellow("Branch not merged"));
+
+						const forceConfirm = await ui.confirm({
+							message: `Branch "${branch}" is not merged. Force delete?`,
+							initialValue: false,
+						});
+
+						if (!ui.isCancel(forceConfirm) && forceConfirm) {
+							spinner.start("Force deleting branch...");
+							const forceResult = await git.deleteBranchForce(branch);
+
+							if (Result.isErr(forceResult)) {
+								spinner.stop(pc.red("Failed to delete branch"));
+							} else {
+								spinner.stop(pc.green("Branch deleted"));
+							}
+						} else {
+							ui.info("Branch was not deleted");
+						}
+					} else {
+						spinner.stop(pc.red("Failed to delete branch"));
+					}
+				} else {
+					spinner.stop(pc.green("Branch deleted"));
+				}
+			}
+
 			ui.outro("Done!");
 		},
 	});

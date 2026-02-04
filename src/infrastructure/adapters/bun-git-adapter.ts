@@ -168,6 +168,61 @@ export function createBunGitAdapter(logger: LoggerPort): GitPort {
 				});
 			}
 		},
+
+		async deleteBranch(branch: string): Promise<Result<void, GitError>> {
+			try {
+				const { exitCode, stderr } = await runGit(["branch", "-d", branch]);
+				if (exitCode !== 0) {
+					const lower = stderr.toLowerCase();
+					if (lower.includes("not fully merged")) {
+						return Result.err({
+							code: "BRANCH_NOT_MERGED",
+							message: `Branch "${branch}" is not fully merged`,
+						});
+					}
+					if (lower.includes("not found")) {
+						return Result.err({
+							code: "BRANCH_NOT_FOUND",
+							message: `Branch "${branch}" not found`,
+						});
+					}
+					return Result.err({
+						code: "UNKNOWN",
+						message: stderr || `Failed to delete branch "${branch}"`,
+					});
+				}
+				return Result.ok(undefined);
+			} catch {
+				return Result.err({
+					code: "UNKNOWN",
+					message: `Failed to delete branch "${branch}"`,
+				});
+			}
+		},
+
+		async deleteBranchForce(branch: string): Promise<Result<void, GitError>> {
+			try {
+				const { exitCode, stderr } = await runGit(["branch", "-D", branch]);
+				if (exitCode !== 0) {
+					if (stderr.toLowerCase().includes("not found")) {
+						return Result.err({
+							code: "BRANCH_NOT_FOUND",
+							message: `Branch "${branch}" not found`,
+						});
+					}
+					return Result.err({
+						code: "UNKNOWN",
+						message: stderr || `Failed to delete branch "${branch}"`,
+					});
+				}
+				return Result.ok(undefined);
+			} catch {
+				return Result.err({
+					code: "UNKNOWN",
+					message: `Failed to delete branch "${branch}"`,
+				});
+			}
+		},
 	};
 }
 
