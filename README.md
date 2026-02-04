@@ -10,7 +10,8 @@ When creating a new git worktree, you often need to manually copy configuration 
 
 ```bash
 # Build from source
-bun run build
+pnpm install
+pnpm build
 
 # The binary will be at ./dist/wt
 # Move it to your PATH
@@ -20,62 +21,75 @@ cp ./dist/wt ~/.local/bin/
 ## Usage
 
 ```bash
+# Initialize .worktreekitrc in current project
+wt init
+
 # Create a new worktree with automatic config copying
 wt create feature/my-feature
 
-# Sync configs to an existing worktree
-wt sync
+# Create worktree from specific base branch
+wt create feature/my-feature --base develop
 
 # List all worktrees
 wt list
 
-# Initialize .worktree.json in current project
-wt init
+# Remove a worktree (interactive selection)
+wt remove
+
+# Remove a specific worktree
+wt remove feature/old-feature
+
+# Enable verbose logging
+wt --verbose create feature/my-feature
+# or
+WT_VERBOSE=1 wt create feature/my-feature
 ```
 
 ## Configuration
 
-Create a `.worktree.json` file in your project root:
+Create a `.worktreekitrc` file in your project root (or use `wt init`):
 
 ```json
 {
+  "rootDir": "../worktrees",
   "copy": [
     ".env",
     ".env.local",
     "config/local.json"
   ],
-  "symlink": [
-    "node_modules"
-  ],
-  "postCreate": [
-    "bun install --frozen-lockfile"
-  ]
+  "hooks": {
+    "post-create": [
+      "bun install --frozen-lockfile"
+    ]
+  }
 }
 ```
 
 ### Options
 
-- `copy` — Files to copy from the main worktree
-- `symlink` — Directories to symlink (saves disk space)
-- `postCreate` — Commands to run after creating a worktree
+- `rootDir` — Directory where new worktrees will be created (relative to main worktree)
+- `copy` — Files to copy from the main worktree to new worktrees
+- `hooks.post-create` — Commands to run after creating a worktree
+
+### Hook Environment Variables
+
+Post-create hooks receive the following environment variables:
+
+- `WORKTREE_PATH` — Path to the new worktree
+- `WORKTREE_BRANCH` — Branch name
+- `REPO_ROOT` — Repository root path
+- `BASE_BRANCH` — Base branch (if specified with `--base`)
 
 ## Development
 
 ```bash
-# Run in development mode
-bun run dev --help
-
-# Build binary
-bun run build
-
-# Type checking
-bun run typecheck
-
-# Lint
-bun run lint
-
-# Format
-bun run format
+pnpm install      # Install dependencies
+pnpm dev          # Run in development mode
+pnpm build        # Build binary
+pnpm typecheck    # Type checking
+pnpm lint         # Lint with Biome
+pnpm format       # Format with Biome
+pnpm test         # Run tests
 ```
 
 ## License
