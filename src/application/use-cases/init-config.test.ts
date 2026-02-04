@@ -1,62 +1,74 @@
 import { describe, expect, test } from "bun:test";
+import { CONFIG_FILENAME, INIT_ROOT_DIR } from "../../domain/constants.ts";
 import { Result } from "../../shared/result.ts";
 import { expectErr, expectOk } from "../../test-utils/assertions.ts";
 import { createFakeFilesystem } from "../../test-utils/fake-filesystem.ts";
+import { createFakeGit } from "../../test-utils/fake-git.ts";
 import { initConfig } from "./init-config.ts";
 
 describe("initConfig", () => {
-	const CONFIG_FILENAME = ".worktree.json";
+	const ROOT = "/fake/project";
+	const CONFIG_PATH = `${ROOT}/${CONFIG_FILENAME}`;
 
-	test("creates .worktree.json in cwd with default content", async () => {
-		const fs = createFakeFilesystem({ cwd: "/fake/project" });
-		const result = await initConfig({}, { fs });
+	test("creates config in repo root with default content", async () => {
+		const fs = createFakeFilesystem();
+		const git = createFakeGit({ root: ROOT });
+		const result = await initConfig({}, { fs, git });
 
 		const { configPath } = expectOk(result);
-		expect(configPath).toBe(`/fake/project/${CONFIG_FILENAME}`);
+		expect(configPath).toBe(CONFIG_PATH);
 		expect(await fs.exists(configPath)).toBe(true);
 
 		const parsed = JSON.parse(expectOk(await fs.readFile(configPath)));
-		expect(parsed.files).toEqual([]);
-		expect(parsed.directories).toEqual([]);
-		expect(parsed.ignore).toEqual(["node_modules", ".git"]);
+		expect(parsed.rootDir).toBe(INIT_ROOT_DIR);
+		expect(parsed.copy).toEqual([]);
 	});
 
 	test("returns error when config already exists and force is false", async () => {
-		const configPath = `/fake/project/${CONFIG_FILENAME}`;
-		const fs = createFakeFilesystem({ files: { [configPath]: '{"files": []}' }, cwd: "/fake/project" });
-		const result = await initConfig({}, { fs });
+		const fs = createFakeFilesystem({
+			files: { [CONFIG_PATH]: '{"rootDir": "../wt"}' },
+		});
+		const git = createFakeGit({ root: ROOT });
+		const result = await initConfig({}, { fs, git });
 
 		const error = expectErr(result);
 		expect(error.message).toContain("already exists");
 	});
 
 	test("overwrites existing config when force is true", async () => {
-		const configPath = `/fake/project/${CONFIG_FILENAME}`;
-		const fs = createFakeFilesystem({ files: { [configPath]: '{"files": ["old"]}' }, cwd: "/fake/project" });
-		const result = await initConfig({ force: true }, { fs });
+		const fs = createFakeFilesystem({
+			files: { [CONFIG_PATH]: '{"rootDir": "../old"}' },
+		});
+		const git = createFakeGit({ root: ROOT });
+		const result = await initConfig({ force: true }, { fs, git });
 
 		expectOk(result);
-		const parsed = JSON.parse(expectOk(await fs.readFile(configPath)));
-		expect(parsed.files).toEqual([]);
+		const parsed = JSON.parse(expectOk(await fs.readFile(CONFIG_PATH)));
+		expect(parsed.rootDir).toBe(INIT_ROOT_DIR);
 	});
 
-	test("returns the full config path based on cwd", async () => {
-		const fs = createFakeFilesystem({ cwd: "/some/other/dir" });
-		const result = await initConfig({}, { fs });
+	test("returns error when not a git repository", async () => {
+		const fs = createFakeFilesystem();
+		const git = createFakeGit({ isRepo: false });
+		const result = await initConfig({}, { fs, git });
 
-		const { configPath } = expectOk(result);
-		expect(configPath).toBe(`/some/other/dir/${CONFIG_FILENAME}`);
+		const error = expectErr(result);
+		expect(error.message).toContain("Not a git repository");
 	});
 
 	test("returns error when writeFile fails", async () => {
 		const fs = createFakeFilesystem({
-			cwd: "/fake/project",
 			overrides: {
 				writeFile: async (path) =>
-					Result.err({ code: "PERMISSION_DENIED" as const, message: "Permission denied", path }),
+					Result.err({
+						code: "PERMISSION_DENIED" as const,
+						message: "Permission denied",
+						path,
+					}),
 			},
 		});
-		const result = await initConfig({}, { fs });
+		const git = createFakeGit({ root: ROOT });
+		const result = await initConfig({}, { fs, git });
 
 		expectErr(result);
 	});

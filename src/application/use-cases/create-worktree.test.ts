@@ -6,11 +6,7 @@ import { createWorktree } from "./create-worktree.ts";
 
 describe("createWorktree", () => {
 	const ROOT = "/fake/project";
-	const CONFIG = JSON.stringify({
-		files: [".env"],
-		directories: [],
-		ignore: ["node_modules", ".git"],
-	});
+	const CONFIG = JSON.stringify({ rootDir: "../worktrees", copy: [".env"] });
 
 	test("creates a worktree and returns it on success", async () => {
 		const git = createFakeGit({ root: ROOT, worktrees: [] });

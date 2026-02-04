@@ -7,7 +7,7 @@ export function initCommand(container: Container) {
 	return defineCommand({
 		meta: {
 			name: "init",
-			description: "Create .worktree.json template",
+			description: "Create .worktreekitrc config",
 		},
 		args: {
 			force: {
@@ -18,11 +18,11 @@ export function initCommand(container: Container) {
 			},
 		},
 		async run({ args }) {
-			const { ui, fs } = container;
+			const { ui, fs, git } = container;
 
 			ui.intro("worktree-kit init");
 
-			const result = await initConfig({ force: args.force }, { fs });
+			const result = await initConfig({ force: args.force }, { fs, git });
 
 			if (Result.isErr(result)) {
 				ui.error(result.error.message);
