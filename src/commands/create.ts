@@ -15,7 +15,7 @@ export function createCommand(container: Container) {
 			branch: {
 				type: "positional",
 				description: "Branch name for the new worktree",
-				required: true,
+				required: false,
 			},
 			base: {
 				type: "string",
@@ -29,11 +29,62 @@ export function createCommand(container: Container) {
 
 			ui.intro("worktree-kit create");
 
+			let branch = args.branch as string | undefined;
+
+			// === Interactive mode: select or create branch ===
+			if (!branch) {
+				const branchesResult = await git.listBranches();
+				if (Result.isErr(branchesResult)) {
+					ui.error(branchesResult.error.message);
+					process.exit(1);
+				}
+
+				const worktreesResult = await git.listWorktrees();
+				if (Result.isErr(worktreesResult)) {
+					ui.error(worktreesResult.error.message);
+					process.exit(1);
+				}
+
+				const usedBranches = new Set(worktreesResult.data.map((w) => w.branch));
+				const availableBranches = branchesResult.data.filter((b) => !usedBranches.has(b));
+
+				const CREATE_NEW = "__create_new__";
+
+				const selected = await ui.select<string>({
+					message: "Select branch for worktree",
+					options: [
+						...availableBranches.map((b) => ({ value: b, label: b })),
+						{ value: CREATE_NEW, label: "Create new branch", hint: "Enter a new branch name" },
+					],
+				});
+
+				if (ui.isCancel(selected)) {
+					ui.cancel();
+					process.exit(0);
+				}
+
+				if (selected === CREATE_NEW) {
+					const newBranch = await ui.text({
+						message: "Enter new branch name",
+						placeholder: "feature/my-feature",
+					});
+
+					if (ui.isCancel(newBranch)) {
+						ui.cancel();
+						process.exit(0);
+					}
+
+					branch = newBranch;
+				} else {
+					branch = selected;
+				}
+			}
+
 			// === Stage 1: Create worktree and copy files ===
 			const spinner = ui.createSpinner();
 			spinner.start("Creating worktree...");
 
-			const createResult = await createWorktree({ branch: args.branch, baseBranch: args.base }, { git, fs });
+			const createResult = await createWorktree({ branch, baseBranch: args.base }, { git, fs });
 
 			if (Result.isErr(createResult)) {
 				spinner.stop(pc.red("Failed"));
@@ -89,7 +140,7 @@ export function createCommand(container: Container) {
 				hooksSpinner.stop(pc.green("Hooks completed"));
 			}
 
-			ui.success(`Created worktree for branch: ${args.branch} at ${createResult.data.worktree.path}`);
+			ui.success(`Created worktree for branch: ${branch} at ${createResult.data.worktree.path}`);
 			ui.outro("Done!");
 		},
 	});

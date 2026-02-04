@@ -11,6 +11,7 @@ export interface GitPort {
 	getRepositoryRoot(): Promise<Result<string, GitError>>;
 	getMainWorktreeRoot(): Promise<Result<string, GitError>>;
 	listWorktrees(): Promise<Result<Worktree[], GitError>>;
+	listBranches(): Promise<Result<string[], GitError>>;
 	branchExists(branch: string): Promise<Result<boolean, GitError>>;
 	createWorktree(branch: string, path: string): Promise<Result<Worktree, GitError>>;
 	removeWorktree(path: string): Promise<Result<void, GitError>>;

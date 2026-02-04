@@ -7,11 +7,13 @@ export interface FakeGitOptions {
 	root?: string;
 	mainRoot?: string;
 	worktrees?: Worktree[];
+	branches?: string[];
 }
 
 export function createFakeGit(options: FakeGitOptions = {}): GitPort {
-	const { isRepo = true, root = "/fake/project", mainRoot, worktrees = [] } = options;
+	const { isRepo = true, root = "/fake/project", mainRoot, worktrees = [], branches = [] } = options;
 	const store = [...worktrees];
+	const branchStore = [...branches];
 
 	return {
 		async isGitRepository(): Promise<Result<boolean, GitError>> {
@@ -37,6 +39,13 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 				return Result.err({ code: "NOT_A_REPO", message: "Not inside a git repository" });
 			}
 			return Result.ok([...store]);
+		},
+
+		async listBranches(): Promise<Result<string[], GitError>> {
+			if (!isRepo) {
+				return Result.err({ code: "NOT_A_REPO", message: "Not inside a git repository" });
+			}
+			return Result.ok([...branchStore]);
 		},
 
 		async branchExists(branch: string): Promise<Result<boolean, GitError>> {

@@ -94,6 +94,25 @@ export function createBunGitAdapter(logger: LoggerPort): GitPort {
 			}
 		},
 
+		async listBranches(): Promise<Result<string[], GitError>> {
+			try {
+				const { exitCode, stdout } = await runGit(["branch", "--list", "--format=%(refname:short)"]);
+				if (exitCode !== 0) {
+					return Result.err({
+						code: "NOT_A_REPO",
+						message: "Not inside a git repository",
+					});
+				}
+				const branches = stdout.split("\n").filter(Boolean);
+				return Result.ok(branches);
+			} catch {
+				return Result.err({
+					code: "UNKNOWN",
+					message: "Failed to list branches",
+				});
+			}
+		},
+
 		async branchExists(branch: string): Promise<Result<boolean, GitError>> {
 			try {
 				const { exitCode } = await runGit(["show-ref", "--verify", "--quiet", `refs/heads/${branch}`]);
