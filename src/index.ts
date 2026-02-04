@@ -5,7 +5,9 @@ import { listCommand } from "./commands/list.ts";
 import { removeCommand } from "./commands/remove.ts";
 import { createContainer } from "./infrastructure/container.ts";
 
-const container = createContainer();
+const verbose = process.argv.includes("--verbose") || process.env.WT_VERBOSE === "1";
+
+const container = createContainer({ verbose });
 
 const main = defineCommand({
 	meta: {
