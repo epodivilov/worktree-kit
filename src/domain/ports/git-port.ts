@@ -10,6 +10,7 @@ export interface GitPort {
 	isGitRepository(): Promise<Result<boolean, GitError>>;
 	getRepositoryRoot(): Promise<Result<string, GitError>>;
 	listWorktrees(): Promise<Result<Worktree[], GitError>>;
+	branchExists(branch: string): Promise<Result<boolean, GitError>>;
 	createWorktree(branch: string, path: string): Promise<Result<Worktree, GitError>>;
 	removeWorktree(path: string): Promise<Result<void, GitError>>;
 }

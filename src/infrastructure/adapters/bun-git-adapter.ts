@@ -57,9 +57,34 @@ export function createBunGitAdapter(): GitPort {
 			}
 		},
 
+		async branchExists(branch: string): Promise<Result<boolean, GitError>> {
+			try {
+				const proc = Bun.spawn(["git", "show-ref", "--verify", "--quiet", `refs/heads/${branch}`], {
+					stdout: "pipe",
+					stderr: "pipe",
+				});
+				const exitCode = await proc.exited;
+				return Result.ok(exitCode === 0);
+			} catch {
+				return Result.err({
+					code: "UNKNOWN",
+					message: "Failed to check branch existence",
+				});
+			}
+		},
+
 		async createWorktree(branch: string, path: string): Promise<Result<Worktree, GitError>> {
 			try {
-				const proc = Bun.spawn(["git", "worktree", "add", path, branch], { stdout: "pipe", stderr: "pipe" });
+				const existsResult = await this.branchExists(branch);
+				if (!existsResult.success) {
+					return Result.err(existsResult.error);
+				}
+
+				const args = existsResult.data
+					? ["git", "worktree", "add", path, branch]
+					: ["git", "worktree", "add", "-b", branch, path];
+
+				const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" });
 				const exitCode = await proc.exited;
 				if (exitCode !== 0) {
 					const stderr = await new Response(proc.stderr).text();
@@ -128,7 +153,11 @@ function parseWorktreesPorcelain(output: string): Worktree[] {
 function mapCreateError(stderr: string): GitError {
 	const lower = stderr.toLowerCase();
 
-	if (lower.includes("already checked out") || lower.includes("already used by worktree")) {
+	if (
+		lower.includes("already checked out") ||
+		lower.includes("already used by worktree") ||
+		lower.includes("a branch named")
+	) {
 		return { code: "BRANCH_EXISTS", message: stderr.trim() };
 	}
 	if (lower.includes("already exists")) {

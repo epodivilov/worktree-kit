@@ -31,6 +31,10 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 			return Result.ok([...store]);
 		},
 
+		async branchExists(branch: string): Promise<Result<boolean, GitError>> {
+			return Result.ok(store.some((w) => w.branch === branch));
+		},
+
 		async createWorktree(branch: string, path: string): Promise<Result<Worktree, GitError>> {
 			if (store.some((w) => w.branch === branch)) {
 				return Result.err({ code: "BRANCH_EXISTS", message: `Branch ${branch} already exists` });

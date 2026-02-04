@@ -85,7 +85,56 @@ describe("BunGitAdapter", () => {
 		});
 	});
 
+	describe("branchExists", () => {
+		test("returns true for existing branch", async () => {
+			await using tmp = await createTempDir();
+			const repoPath = await initTestRepo(tmp.path);
+			await Bun.$`git -C ${repoPath} branch feature`.quiet();
+
+			const originalCwd = process.cwd();
+			process.chdir(repoPath);
+			try {
+				const exists = expectOk(await git.branchExists("feature"));
+				expect(exists).toBe(true);
+			} finally {
+				process.chdir(originalCwd);
+			}
+		});
+
+		test("returns false for non-existing branch", async () => {
+			await using tmp = await createTempDir();
+			const repoPath = await initTestRepo(tmp.path);
+
+			const originalCwd = process.cwd();
+			process.chdir(repoPath);
+			try {
+				const exists = expectOk(await git.branchExists("nonexistent"));
+				expect(exists).toBe(false);
+			} finally {
+				process.chdir(originalCwd);
+			}
+		});
+	});
+
 	describe("createWorktree", () => {
+		test("creates worktree with new branch", async () => {
+			await using tmp = await createTempDir();
+			const repoPath = await initTestRepo(tmp.path);
+
+			const originalCwd = process.cwd();
+			process.chdir(repoPath);
+			try {
+				const wtPath = join(tmp.path, "feature-wt");
+				const worktree = expectOk(await git.createWorktree("feature", wtPath));
+				expect(worktree.path).toBe(wtPath);
+				expect(worktree.branch).toBe("feature");
+				expect(worktree.isMain).toBe(false);
+				expect(worktree.head).toMatch(/^[a-f0-9]{40}$/);
+			} finally {
+				process.chdir(originalCwd);
+			}
+		});
+
 		test("creates worktree for existing branch", async () => {
 			await using tmp = await createTempDir();
 			const repoPath = await initTestRepo(tmp.path);
