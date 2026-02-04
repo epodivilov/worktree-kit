@@ -24,11 +24,11 @@ export function createCommand(container: Container) {
 			},
 		},
 		async run({ args }) {
-			const { ui, git, fs } = container;
+			const { ui, git, fs, shell } = container;
 
 			ui.intro("worktree-kit create");
 
-			const result = await createWorktree({ branch: args.branch, baseBranch: args.base }, { git, fs });
+			const result = await createWorktree({ branch: args.branch, baseBranch: args.base }, { git, fs, shell });
 
 			if (Result.isErr(result)) {
 				ui.error(result.error.message);
