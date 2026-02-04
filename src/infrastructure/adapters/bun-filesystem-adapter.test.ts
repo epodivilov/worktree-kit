@@ -1,11 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { expectErr, expectOk } from "../../test-utils/assertions.ts";
+import { createNoopLogger } from "../../test-utils/noop-logger.ts";
 import { createTempDir } from "../../test-utils/temp-dir.ts";
 import { createBunFilesystemAdapter } from "./bun-filesystem-adapter.ts";
 
 describe("BunFilesystemAdapter", () => {
-	const fs = createBunFilesystemAdapter();
+	const fs = createBunFilesystemAdapter(createNoopLogger());
 
 	test("writeFile then readFile roundtrips content", async () => {
 		await using tmp = await createTempDir();

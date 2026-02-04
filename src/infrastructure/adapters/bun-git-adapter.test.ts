@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { expectErr, expectOk } from "../../test-utils/assertions.ts";
+import { createNoopLogger } from "../../test-utils/noop-logger.ts";
 import { createTempDir } from "../../test-utils/temp-dir.ts";
 import { createBunGitAdapter } from "./bun-git-adapter.ts";
 
@@ -16,7 +17,7 @@ async function initTestRepo(parentDir: string): Promise<string> {
 }
 
 describe("BunGitAdapter", () => {
-	const git = createBunGitAdapter();
+	const git = createBunGitAdapter(createNoopLogger());
 
 	test("isGitRepository returns true when run inside a git repo", async () => {
 		const isRepo = expectOk(await git.isGitRepository());
