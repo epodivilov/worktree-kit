@@ -8,13 +8,23 @@ When creating a new git worktree, you often need to manually copy configuration 
 
 ## Installation
 
+**macOS / Linux:**
+
 ```bash
-# Build from source
+curl -fsSL https://raw.githubusercontent.com/epodivilov/worktree-kit/main/scripts/install.sh | sh
+```
+
+**Windows (PowerShell):**
+
+```powershell
+irm https://raw.githubusercontent.com/epodivilov/worktree-kit/main/scripts/install.ps1 | iex
+```
+
+### Build from source
+
+```bash
 pnpm install
 pnpm build
-
-# The binary will be at ./dist/wt
-# Move it to your PATH
 cp ./dist/wt ~/.local/bin/
 ```
 
@@ -41,8 +51,6 @@ wt remove feature/old-feature
 
 # Enable verbose logging
 wt --verbose create feature/my-feature
-# or
-WT_VERBOSE=1 wt create feature/my-feature
 ```
 
 ## Configuration
