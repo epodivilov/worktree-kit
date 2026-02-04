@@ -2,6 +2,7 @@ import { defineCommand, runMain } from "citty";
 import { createCommand } from "./commands/create.ts";
 import { initCommand } from "./commands/init.ts";
 import { listCommand } from "./commands/list.ts";
+import { removeCommand } from "./commands/remove.ts";
 import { createContainer } from "./infrastructure/container.ts";
 
 const container = createContainer();
@@ -15,6 +16,7 @@ const main = defineCommand({
 	subCommands: {
 		create: createCommand(container),
 		list: listCommand(container),
+		remove: removeCommand(container),
 		init: initCommand(container),
 	},
 });
