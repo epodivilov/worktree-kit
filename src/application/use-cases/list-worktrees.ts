@@ -11,6 +11,13 @@ export interface ListWorktreesDeps {
 	git: GitPort;
 }
 
-export async function listWorktrees(_deps: ListWorktreesDeps): Promise<Result<ListWorktreesOutput, Error>> {
-	return R.err(new Error("Not implemented"));
+export async function listWorktrees(deps: ListWorktreesDeps): Promise<Result<ListWorktreesOutput, Error>> {
+	const { git } = deps;
+
+	const result = await git.listWorktrees();
+	if (!result.success) {
+		return R.err(new Error(`Failed to list worktrees: ${result.error.message}`));
+	}
+
+	return R.ok({ worktrees: result.data });
 }
