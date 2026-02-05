@@ -12,4 +12,6 @@ export interface FilesystemPort {
 	writeFile(path: string, content: string): Promise<Result<void, FilesystemError>>;
 	copyFile(source: string, destination: string): Promise<Result<void, FilesystemError>>;
 	getCwd(): string;
+	isDirectoryEmpty(path: string): Promise<Result<boolean, FilesystemError>>;
+	removeDirectory(path: string): Promise<Result<void, FilesystemError>>;
 }

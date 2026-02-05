@@ -1,3 +1,4 @@
+import { readdir, rmdir } from "node:fs/promises";
 import type { FilesystemError, FilesystemPort } from "../../domain/ports/filesystem-port.ts";
 import type { LoggerPort } from "../../domain/ports/logger-port.ts";
 import { Result } from "../../shared/result.ts";
@@ -80,6 +81,62 @@ export function createBunFilesystemAdapter(logger: LoggerPort): FilesystemPort {
 			const cwd = process.cwd();
 			logger.debug("fs", `getCwd -> ${cwd}`);
 			return cwd;
+		},
+
+		async isDirectoryEmpty(path: string): Promise<Result<boolean, FilesystemError>> {
+			logger.debug("fs", `isDirectoryEmpty ${path}`);
+			try {
+				const entries = await readdir(path);
+				const isEmpty = entries.length === 0;
+				logger.debug("fs", `-> ${isEmpty}`);
+				return Result.ok(isEmpty);
+			} catch (error) {
+				logger.debug("fs", "-> ERROR");
+				const code = (error as NodeJS.ErrnoException).code;
+				if (code === "ENOENT") {
+					return Result.err({
+						code: "NOT_FOUND",
+						message: "Directory not found",
+						path,
+					});
+				}
+				return Result.err({
+					code: "UNKNOWN",
+					message: "Failed to check directory",
+					path,
+				});
+			}
+		},
+
+		async removeDirectory(path: string): Promise<Result<void, FilesystemError>> {
+			logger.debug("fs", `removeDirectory ${path}`);
+			try {
+				await rmdir(path);
+				logger.debug("fs", "-> OK");
+				return Result.ok(undefined);
+			} catch (error) {
+				logger.debug("fs", "-> ERROR");
+				const code = (error as NodeJS.ErrnoException).code;
+				if (code === "ENOENT") {
+					return Result.err({
+						code: "NOT_FOUND",
+						message: "Directory not found",
+						path,
+					});
+				}
+				if (code === "ENOTEMPTY") {
+					return Result.err({
+						code: "UNKNOWN",
+						message: "Directory is not empty",
+						path,
+					});
+				}
+				return Result.err({
+					code: "UNKNOWN",
+					message: "Failed to remove directory",
+					path,
+				});
+			}
 		},
 	};
 }

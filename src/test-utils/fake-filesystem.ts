@@ -41,6 +41,26 @@ export function createFakeFilesystem(options: FakeFilesystemOptions = {}): Files
 		getCwd(): string {
 			return cwd;
 		},
+
+		async isDirectoryEmpty(path: string): Promise<Result<boolean, FilesystemError>> {
+			// Check if any stored paths start with this directory
+			for (const key of store.keys()) {
+				if (key.startsWith(`${path}/`)) {
+					return Result.ok(false);
+				}
+			}
+			return Result.ok(true);
+		},
+
+		async removeDirectory(path: string): Promise<Result<void, FilesystemError>> {
+			// Check if directory has any files
+			for (const key of store.keys()) {
+				if (key.startsWith(`${path}/`)) {
+					return Result.err({ code: "UNKNOWN", message: "Directory is not empty", path });
+				}
+			}
+			return Result.ok(undefined);
+		},
 	};
 
 	return { ...base, ...overrides };

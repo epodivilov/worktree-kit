@@ -1,7 +1,10 @@
+import { resolve } from "node:path";
 import { defineCommand } from "citty";
 import pc from "picocolors";
 import { listWorktrees } from "../application/use-cases/list-worktrees.ts";
+import { loadConfig } from "../application/use-cases/load-config.ts";
 import { removeWorktree } from "../application/use-cases/remove-worktree.ts";
+import { INIT_ROOT_DIR } from "../domain/constants.ts";
 import type { Container } from "../infrastructure/container.ts";
 import { Result } from "../shared/result.ts";
 
@@ -19,7 +22,7 @@ export function removeCommand(container: Container) {
 			},
 		},
 		async run({ args }) {
-			const { ui, git } = container;
+			const { ui, git, fs } = container;
 
 			ui.intro("worktree-kit remove");
 
@@ -124,6 +127,41 @@ export function removeCommand(container: Container) {
 					}
 				} else {
 					spinner.stop(pc.green("Branch deleted"));
+				}
+			}
+
+			// Check if root directory should be cleaned up
+			const remainingResult = await listWorktrees({ git });
+			if (Result.isOk(remainingResult)) {
+				const nonMainWorktrees = remainingResult.data.worktrees.filter((w) => !w.isMain);
+
+				if (nonMainWorktrees.length === 0) {
+					// All worktrees removed, check if we should clean up root directory
+					const configResult = await loadConfig({ fs, git });
+					const rootDir = Result.isOk(configResult) ? configResult.data.config.rootDir : INIT_ROOT_DIR;
+
+					const mainRoot = await git.getMainWorktreeRoot();
+					if (Result.isOk(mainRoot)) {
+						const worktreesRootPath = resolve(mainRoot.data, rootDir);
+
+						if (await fs.exists(worktreesRootPath)) {
+							const isEmptyResult = await fs.isDirectoryEmpty(worktreesRootPath);
+
+							if (Result.isOk(isEmptyResult) && isEmptyResult.data) {
+								const cleanupConfirm = await ui.confirm({
+									message: `Remove empty worktrees directory "${worktreesRootPath}"?`,
+									initialValue: true,
+								});
+
+								if (!ui.isCancel(cleanupConfirm) && cleanupConfirm) {
+									const removeResult = await fs.removeDirectory(worktreesRootPath);
+									if (Result.isOk(removeResult)) {
+										ui.info("Worktrees directory removed");
+									}
+								}
+							}
+						}
+					}
 				}
 			}
 
