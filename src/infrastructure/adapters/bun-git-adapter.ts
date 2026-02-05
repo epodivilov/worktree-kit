@@ -96,7 +96,12 @@ export function createBunGitAdapter(logger: LoggerPort): GitPort {
 
 		async listBranches(): Promise<Result<string[], GitError>> {
 			try {
-				const { exitCode, stdout } = await runGit(["branch", "--list", "--format=%(refname:short)"]);
+				const { exitCode, stdout } = await runGit([
+					"branch",
+					"--list",
+					"--sort=-committerdate",
+					"--format=%(refname:short)",
+				]);
 				if (exitCode !== 0) {
 					return Result.err({
 						code: "NOT_A_REPO",
@@ -115,7 +120,12 @@ export function createBunGitAdapter(logger: LoggerPort): GitPort {
 
 		async listRemoteBranches(): Promise<Result<string[], GitError>> {
 			try {
-				const { exitCode, stdout } = await runGit(["branch", "-r", "--format=%(refname:short)"]);
+				const { exitCode, stdout } = await runGit([
+					"branch",
+					"-r",
+					"--sort=-committerdate",
+					"--format=%(refname:short)",
+				]);
 				if (exitCode !== 0) {
 					return Result.err({
 						code: "NOT_A_REPO",
