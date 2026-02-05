@@ -61,19 +61,25 @@ export function createCommand(container: Container) {
 				);
 
 				const CREATE_NEW = "__create_new__";
-				const REMOTE_PREFIX = "__remote__:";
+				const REMOTE_BRANCHES = "__remote_branches__";
+
+				// Build first-level options: Create new, local branches, and Remote branches submenu
+				const firstLevelOptions: Array<{ value: string; label: string; hint?: string }> = [
+					{ value: CREATE_NEW, label: "Create new branch", hint: "Enter a new branch name" },
+					...availableLocalBranches.map((b) => ({ value: b, label: b })),
+				];
+
+				if (availableRemoteBranches.length > 0) {
+					firstLevelOptions.push({
+						value: REMOTE_BRANCHES,
+						label: "Remote branches...",
+						hint: `${availableRemoteBranches.length} available`,
+					});
+				}
 
 				const selected = await ui.select<string>({
 					message: "Select branch for worktree",
-					options: [
-						{ value: CREATE_NEW, label: "Create new branch", hint: "Enter a new branch name" },
-						...availableLocalBranches.map((b) => ({ value: b, label: b })),
-						...availableRemoteBranches.map((b) => ({
-							value: `${REMOTE_PREFIX}${b}`,
-							label: b,
-							hint: "remote",
-						})),
-					],
+					options: firstLevelOptions,
 				});
 
 				if (ui.isCancel(selected)) {
@@ -93,8 +99,18 @@ export function createCommand(container: Container) {
 					}
 
 					branch = newBranch;
-				} else if (selected.startsWith(REMOTE_PREFIX)) {
-					branch = selected.slice(REMOTE_PREFIX.length);
+				} else if (selected === REMOTE_BRANCHES) {
+					const remoteBranch = await ui.select<string>({
+						message: "Select remote branch",
+						options: availableRemoteBranches.map((b) => ({ value: b, label: b })),
+					});
+
+					if (ui.isCancel(remoteBranch)) {
+						ui.cancel();
+						process.exit(0);
+					}
+
+					branch = remoteBranch;
 					isRemoteBranch = true;
 				} else {
 					branch = selected;
