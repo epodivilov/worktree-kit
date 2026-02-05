@@ -66,13 +66,13 @@ export function createCommand(container: Container) {
 				const selected = await ui.select<string>({
 					message: "Select branch for worktree",
 					options: [
+						{ value: CREATE_NEW, label: "Create new branch", hint: "Enter a new branch name" },
 						...availableLocalBranches.map((b) => ({ value: b, label: b })),
 						...availableRemoteBranches.map((b) => ({
 							value: `${REMOTE_PREFIX}${b}`,
 							label: b,
 							hint: "remote",
 						})),
-						{ value: CREATE_NEW, label: "Create new branch", hint: "Enter a new branch name" },
 					],
 				});
 
