@@ -8,6 +8,7 @@ export interface FakeGitOptions {
 	mainRoot?: string;
 	worktrees?: Worktree[];
 	branches?: string[];
+	remoteBranches?: string[];
 	mergedBranches?: string[];
 }
 
@@ -18,6 +19,7 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 		mainRoot,
 		worktrees = [],
 		branches = [],
+		remoteBranches = [],
 		mergedBranches = [],
 	} = options;
 	const store = [...worktrees];
@@ -58,11 +60,27 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 			return Result.ok([...branchStore]);
 		},
 
+		async listRemoteBranches(): Promise<Result<string[], GitError>> {
+			if (!isRepo) {
+				return Result.err({ code: "NOT_A_REPO", message: "Not inside a git repository" });
+			}
+			return Result.ok([...remoteBranches]);
+		},
+
 		async branchExists(branch: string): Promise<Result<boolean, GitError>> {
 			return Result.ok(store.some((w) => w.branch === branch));
 		},
 
 		async createWorktree(branch: string, path: string): Promise<Result<Worktree, GitError>> {
+			if (store.some((w) => w.branch === branch)) {
+				return Result.err({ code: "BRANCH_EXISTS", message: `Branch ${branch} already exists` });
+			}
+			const wt: Worktree = { path, branch, head: "abc1234", isMain: false };
+			store.push(wt);
+			return Result.ok(wt);
+		},
+
+		async createWorktreeFromRemote(branch: string, path: string, _remote: string): Promise<Result<Worktree, GitError>> {
 			if (store.some((w) => w.branch === branch)) {
 				return Result.err({ code: "BRANCH_EXISTS", message: `Branch ${branch} already exists` });
 			}

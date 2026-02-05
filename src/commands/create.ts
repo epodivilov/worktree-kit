@@ -32,10 +32,18 @@ export function createCommand(container: Container) {
 			let branch = args.branch as string | undefined;
 
 			// === Interactive mode: select or create branch ===
+			let isRemoteBranch = false;
+
 			if (!branch) {
 				const branchesResult = await git.listBranches();
 				if (Result.isErr(branchesResult)) {
 					ui.error(branchesResult.error.message);
+					process.exit(1);
+				}
+
+				const remoteBranchesResult = await git.listRemoteBranches();
+				if (Result.isErr(remoteBranchesResult)) {
+					ui.error(remoteBranchesResult.error.message);
 					process.exit(1);
 				}
 
@@ -46,14 +54,24 @@ export function createCommand(container: Container) {
 				}
 
 				const usedBranches = new Set(worktreesResult.data.map((w) => w.branch));
-				const availableBranches = branchesResult.data.filter((b) => !usedBranches.has(b));
+				const localBranches = new Set(branchesResult.data);
+				const availableLocalBranches = branchesResult.data.filter((b) => !usedBranches.has(b));
+				const availableRemoteBranches = remoteBranchesResult.data.filter(
+					(b) => !localBranches.has(b) && !usedBranches.has(b),
+				);
 
 				const CREATE_NEW = "__create_new__";
+				const REMOTE_PREFIX = "__remote__:";
 
 				const selected = await ui.select<string>({
 					message: "Select branch for worktree",
 					options: [
-						...availableBranches.map((b) => ({ value: b, label: b })),
+						...availableLocalBranches.map((b) => ({ value: b, label: b })),
+						...availableRemoteBranches.map((b) => ({
+							value: `${REMOTE_PREFIX}${b}`,
+							label: b,
+							hint: "remote",
+						})),
 						{ value: CREATE_NEW, label: "Create new branch", hint: "Enter a new branch name" },
 					],
 				});
@@ -75,6 +93,9 @@ export function createCommand(container: Container) {
 					}
 
 					branch = newBranch;
+				} else if (selected.startsWith(REMOTE_PREFIX)) {
+					branch = selected.slice(REMOTE_PREFIX.length);
+					isRemoteBranch = true;
 				} else {
 					branch = selected;
 				}
@@ -84,7 +105,10 @@ export function createCommand(container: Container) {
 			const spinner = ui.createSpinner();
 			spinner.start("Creating worktree...");
 
-			const createResult = await createWorktree({ branch, baseBranch: args.base }, { git, fs });
+			const createResult = await createWorktree(
+				{ branch, baseBranch: args.base, fromRemote: isRemoteBranch ? "origin" : undefined },
+				{ git, fs },
+			);
 
 			if (Result.isErr(createResult)) {
 				spinner.stop(pc.red("Failed"));

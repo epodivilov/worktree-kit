@@ -18,8 +18,10 @@ export interface GitPort {
 	getMainWorktreeRoot(): Promise<Result<string, GitError>>;
 	listWorktrees(): Promise<Result<Worktree[], GitError>>;
 	listBranches(): Promise<Result<string[], GitError>>;
+	listRemoteBranches(): Promise<Result<string[], GitError>>;
 	branchExists(branch: string): Promise<Result<boolean, GitError>>;
 	createWorktree(branch: string, path: string): Promise<Result<Worktree, GitError>>;
+	createWorktreeFromRemote(branch: string, path: string, remote: string): Promise<Result<Worktree, GitError>>;
 	removeWorktree(path: string): Promise<Result<void, GitError>>;
 	deleteBranch(branch: string): Promise<Result<void, GitError>>;
 	deleteBranchForce(branch: string): Promise<Result<void, GitError>>;

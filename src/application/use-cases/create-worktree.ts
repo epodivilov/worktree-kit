@@ -13,6 +13,7 @@ import type { HookContext } from "./run-hooks.ts";
 export interface CreateWorktreeInput {
 	branch: string;
 	baseBranch?: string;
+	fromRemote?: string;
 }
 
 export interface FileToCopy {
@@ -58,7 +59,9 @@ export async function createWorktree(
 
 	const worktreePath = resolve(repoRoot, config.rootDir, input.branch);
 
-	const createResult = await git.createWorktree(input.branch, worktreePath);
+	const createResult = input.fromRemote
+		? await git.createWorktreeFromRemote(input.branch, worktreePath, input.fromRemote)
+		: await git.createWorktree(input.branch, worktreePath);
 	if (!createResult.success) {
 		return R.err(new Error(createResult.error.message));
 	}

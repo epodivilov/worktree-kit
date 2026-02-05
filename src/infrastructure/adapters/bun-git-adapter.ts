@@ -113,6 +113,29 @@ export function createBunGitAdapter(logger: LoggerPort): GitPort {
 			}
 		},
 
+		async listRemoteBranches(): Promise<Result<string[], GitError>> {
+			try {
+				const { exitCode, stdout } = await runGit(["branch", "-r", "--format=%(refname:short)"]);
+				if (exitCode !== 0) {
+					return Result.err({
+						code: "NOT_A_REPO",
+						message: "Not inside a git repository",
+					});
+				}
+				const branches = stdout
+					.split("\n")
+					.filter(Boolean)
+					.filter((b) => !b.includes("HEAD"))
+					.map((b) => b.replace(/^origin\//, ""));
+				return Result.ok(branches);
+			} catch {
+				return Result.err({
+					code: "UNKNOWN",
+					message: "Failed to list remote branches",
+				});
+			}
+		},
+
 		async branchExists(branch: string): Promise<Result<boolean, GitError>> {
 			try {
 				const { exitCode } = await runGit(["show-ref", "--verify", "--quiet", `refs/heads/${branch}`]);
@@ -147,6 +170,28 @@ export function createBunGitAdapter(logger: LoggerPort): GitPort {
 				return Result.err({
 					code: "UNKNOWN",
 					message: "Failed to create worktree",
+				});
+			}
+		},
+
+		async createWorktreeFromRemote(branch: string, path: string, remote: string): Promise<Result<Worktree, GitError>> {
+			try {
+				// git worktree add --track -b <branch> <path> <remote>/<branch>
+				const args = ["worktree", "add", "--track", "-b", branch, path, `${remote}/${branch}`];
+
+				const { exitCode, stderr } = await runGit(args);
+				if (exitCode !== 0) {
+					return Result.err(mapCreateError(stderr));
+				}
+
+				const headResult = await runGit(["-C", path, "rev-parse", "HEAD"]);
+				const head = headResult.stdout;
+
+				return Result.ok({ path, branch, head, isMain: false });
+			} catch {
+				return Result.err({
+					code: "UNKNOWN",
+					message: "Failed to create worktree from remote",
 				});
 			}
 		},
