@@ -26,7 +26,11 @@ export function removeCommand(container: Container) {
 
 			ui.intro("worktree-kit remove");
 
-			let branch = args.branch as string | undefined;
+			const branch = args.branch as string | undefined;
+
+			const REMOVE_ALL = "__remove_all__";
+			let branchesToRemove: string[] = [];
+			let shouldDeleteBranches = false;
 
 			if (!branch) {
 				const listResult = await listWorktrees({ git });
@@ -44,13 +48,25 @@ export function removeCommand(container: Container) {
 					return;
 				}
 
-				const selected = await ui.select<string>({
-					message: "Select worktree to remove",
-					options: removable.map((w) => ({
+				const options = [
+					...removable.map((w) => ({
 						value: w.branch,
 						label: w.branch,
 						hint: w.path,
 					})),
+				];
+
+				if (removable.length > 1) {
+					options.push({
+						value: REMOVE_ALL,
+						label: "Remove all worktrees",
+						hint: `${removable.length} worktrees`,
+					});
+				}
+
+				const selected = await ui.select<string>({
+					message: "Select worktree to remove",
+					options,
 				});
 
 				if (ui.isCancel(selected)) {
@@ -58,21 +74,45 @@ export function removeCommand(container: Container) {
 					process.exit(0);
 				}
 
-				const confirmed = await ui.confirm({
-					message: `Remove worktree "${selected}"?`,
-					initialValue: false,
-				});
+				if (selected === REMOVE_ALL) {
+					ui.info("The following worktrees will be removed:");
+					for (const w of removable) {
+						ui.info(`  - ${w.branch} (${w.path})`);
+					}
 
-				if (ui.isCancel(confirmed) || !confirmed) {
-					ui.cancel();
-					process.exit(0);
+					const confirmed = await ui.confirm({
+						message: `Remove all ${removable.length} worktrees?`,
+						initialValue: false,
+					});
+
+					if (ui.isCancel(confirmed) || !confirmed) {
+						ui.cancel();
+						process.exit(0);
+					}
+
+					branchesToRemove = removable.map((w) => w.branch);
+				} else {
+					const confirmed = await ui.confirm({
+						message: `Remove worktree "${selected}"?`,
+						initialValue: false,
+					});
+
+					if (ui.isCancel(confirmed) || !confirmed) {
+						ui.cancel();
+						process.exit(0);
+					}
+
+					branchesToRemove = [selected];
 				}
-
-				branch = selected;
+			} else {
+				branchesToRemove = [branch];
 			}
 
 			const deleteBranchConfirm = await ui.confirm({
-				message: `Also delete branch "${branch}"?`,
+				message:
+					branchesToRemove.length > 1
+						? `Also delete ${branchesToRemove.length} branches?`
+						: `Also delete branch "${branchesToRemove[0]}"?`,
 				initialValue: false,
 			});
 
@@ -81,52 +121,55 @@ export function removeCommand(container: Container) {
 				process.exit(0);
 			}
 
-			const shouldDeleteBranch = deleteBranchConfirm === true;
+			shouldDeleteBranches = deleteBranchConfirm === true;
 
 			const spinner = ui.createSpinner();
-			spinner.start("Removing worktree...");
 
-			const result = await removeWorktree({ branch }, { git });
+			for (const branchToRemove of branchesToRemove) {
+				spinner.start(`Removing worktree "${branchToRemove}"...`);
 
-			if (Result.isErr(result)) {
-				spinner.stop(pc.red("Failed"));
-				ui.error(result.error.message);
-				process.exit(1);
-			}
+				const result = await removeWorktree({ branch: branchToRemove }, { git });
 
-			spinner.stop(pc.green("Worktree removed"));
+				if (Result.isErr(result)) {
+					spinner.stop(pc.red(`Failed to remove "${branchToRemove}"`));
+					ui.error(result.error.message);
+					continue;
+				}
 
-			if (shouldDeleteBranch) {
-				spinner.start("Deleting branch...");
+				spinner.stop(pc.green(`Worktree "${branchToRemove}" removed`));
 
-				const deleteResult = await git.deleteBranch(branch);
+				if (shouldDeleteBranches) {
+					spinner.start(`Deleting branch "${branchToRemove}"...`);
 
-				if (Result.isErr(deleteResult)) {
-					if (deleteResult.error.code === "BRANCH_NOT_MERGED") {
-						spinner.stop(pc.yellow("Branch not merged"));
+					const deleteResult = await git.deleteBranch(branchToRemove);
 
-						const forceConfirm = await ui.confirm({
-							message: `Branch "${branch}" is not merged. Force delete?`,
-							initialValue: false,
-						});
+					if (Result.isErr(deleteResult)) {
+						if (deleteResult.error.code === "BRANCH_NOT_MERGED") {
+							spinner.stop(pc.yellow(`Branch "${branchToRemove}" not merged`));
 
-						if (!ui.isCancel(forceConfirm) && forceConfirm) {
-							spinner.start("Force deleting branch...");
-							const forceResult = await git.deleteBranchForce(branch);
+							const forceConfirm = await ui.confirm({
+								message: `Branch "${branchToRemove}" is not merged. Force delete?`,
+								initialValue: false,
+							});
 
-							if (Result.isErr(forceResult)) {
-								spinner.stop(pc.red("Failed to delete branch"));
+							if (!ui.isCancel(forceConfirm) && forceConfirm) {
+								spinner.start(`Force deleting branch "${branchToRemove}"...`);
+								const forceResult = await git.deleteBranchForce(branchToRemove);
+
+								if (Result.isErr(forceResult)) {
+									spinner.stop(pc.red(`Failed to delete branch "${branchToRemove}"`));
+								} else {
+									spinner.stop(pc.green(`Branch "${branchToRemove}" deleted`));
+								}
 							} else {
-								spinner.stop(pc.green("Branch deleted"));
+								ui.info(`Branch "${branchToRemove}" was not deleted`);
 							}
 						} else {
-							ui.info("Branch was not deleted");
+							spinner.stop(pc.red(`Failed to delete branch "${branchToRemove}"`));
 						}
 					} else {
-						spinner.stop(pc.red("Failed to delete branch"));
+						spinner.stop(pc.green(`Branch "${branchToRemove}" deleted`));
 					}
-				} else {
-					spinner.stop(pc.green("Branch deleted"));
 				}
 			}
 
