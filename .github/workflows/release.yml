@@ -2,6 +2,17 @@ name: Release
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version bump type'
+        required: false
+        default: 'auto'
+        type: choice
+        options:
+          - auto      # git-cliff determines from commits
+          - patch
+          - minor
+          - major
 
 permissions:
   contents: write
@@ -11,6 +22,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -18,22 +32,62 @@ jobs:
 
       - uses: pnpm/action-setup@v4
         with:
-            version: 10
+          version: 10
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Get version
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Determine version
         id: version
-        run: echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+        run: |
+          if [ "${{ inputs.version }}" = "auto" ]; then
+            # git-cliff determines version from conventional commits
+            VERSION=$(git-cliff --bumped-version | sed 's/^v//')
+          else
+            CURRENT=$(node -p "require('./package.json').version")
+            # semver bump
+            VERSION=$(npx semver -i ${{ inputs.version }} $CURRENT)
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Update package.json
+        run: pnpm version ${{ steps.version.outputs.version }} --no-git-tag-version
+
+      - name: Generate changelog
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --tag v${{ steps.version.outputs.version }}
+        env:
+          OUTPUT: CHANGELOG.md
+
+      - name: Generate release notes
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --latest --strip header --tag v${{ steps.version.outputs.version }}
+        env:
+          OUTPUT: RELEASE_NOTES.md
 
       - name: Build binaries
         run: bash scripts/build-release.sh
 
-      - name: Create Release
+      - name: Commit and tag
+        run: |
+          git add package.json CHANGELOG.md
+          git commit -m "chore: release v${{ steps.version.outputs.version }}"
+          git tag "v${{ steps.version.outputs.version }}"
+          git push origin main --tags
+
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.version }}
           name: v${{ steps.version.outputs.version }}
-          generate_release_notes: true
+          body_path: RELEASE_NOTES.md
           files: dist/*
