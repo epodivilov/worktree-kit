@@ -9,6 +9,7 @@ export const WorktreeConfigSchema = v.pipe(
 		rootDir: v.string(),
 		copy: v.optional(v.array(v.string())),
 		hooks: v.optional(HooksInputSchema),
+		defaultBase: v.optional(v.picklist(["current", "default", "ask"])),
 	}),
 	v.transform((input) => ({
 		rootDir: input.rootDir,
@@ -16,6 +17,7 @@ export const WorktreeConfigSchema = v.pipe(
 		hooks: {
 			"post-create": input.hooks?.["post-create"] ?? [],
 		},
+		defaultBase: input.defaultBase ?? "ask",
 	})),
 );
 
