@@ -21,7 +21,7 @@ describe("createWorktree", () => {
 		expect(worktree.isMain).toBe(false);
 	});
 
-	test("returns files to copy from config", async () => {
+	test("returns files to copy from config with isDirectory false", async () => {
 		const git = createFakeGit({ root: ROOT, worktrees: [] });
 		const fs = createFakeFilesystem({
 			files: { [`${ROOT}/.worktreekitrc`]: CONFIG, [`${ROOT}/.env`]: "SECRET=123" },
@@ -33,6 +33,27 @@ describe("createWorktree", () => {
 		expect(filesToCopy).toHaveLength(1);
 		expect(filesToCopy[0]?.src).toBe(`${ROOT}/.env`);
 		expect(filesToCopy[0]?.dest).toBe(`${worktree.path}/.env`);
+		expect(filesToCopy[0]?.isDirectory).toBe(false);
+	});
+
+	test("marks directories in filesToCopy with isDirectory true", async () => {
+		const configWithDir = JSON.stringify({ rootDir: "../worktrees", copy: [".env", "config"] });
+		const git = createFakeGit({ root: ROOT, worktrees: [] });
+		const fs = createFakeFilesystem({
+			files: {
+				[`${ROOT}/.worktreekitrc`]: configWithDir,
+				[`${ROOT}/.env`]: "SECRET=123",
+				[`${ROOT}/config/settings.json`]: "{}",
+			},
+			directories: [`${ROOT}/config`],
+			cwd: ROOT,
+		});
+		const result = await createWorktree({ branch: "feat-dir" }, { git, fs });
+
+		const { filesToCopy } = expectOk(result);
+		expect(filesToCopy).toHaveLength(2);
+		expect(filesToCopy[0]?.isDirectory).toBe(false);
+		expect(filesToCopy[1]?.isDirectory).toBe(true);
 	});
 
 	test("returns error when branch already exists", async () => {

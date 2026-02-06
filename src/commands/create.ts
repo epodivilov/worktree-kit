@@ -184,12 +184,16 @@ export function createCommand(container: Container) {
 				process.exit(1);
 			}
 
-			// Copy files with spinner updates
+			// Copy files and directories with spinner updates
 			const { filesToCopy } = createResult.data;
-			for (const { src, dest } of filesToCopy) {
-				const fileName = src.split("/").pop();
-				spinner.message(`Copying ${fileName}...`);
-				await fs.copyFile(src, dest);
+			for (const { src, dest, isDirectory } of filesToCopy) {
+				const name = src.split("/").pop();
+				spinner.message(`Copying ${name}...`);
+				if (isDirectory) {
+					await fs.copyDirectory(src, dest);
+				} else {
+					await fs.copyFile(src, dest);
+				}
 			}
 
 			spinner.stop(pc.green("Worktree created"));

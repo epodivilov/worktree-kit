@@ -19,6 +19,7 @@ export interface CreateWorktreeInput {
 export interface FileToCopy {
 	src: string;
 	dest: string;
+	isDirectory: boolean;
 }
 
 export interface CreateWorktreeOutput {
@@ -66,10 +67,16 @@ export async function createWorktree(
 		return R.err(new Error(createResult.error.message));
 	}
 
-	const filesToCopy: FileToCopy[] = config.copy.map((file) => ({
-		src: join(repoRoot, file),
-		dest: join(worktreePath, file),
-	}));
+	const filesToCopy: FileToCopy[] = await Promise.all(
+		config.copy.map(async (file) => {
+			const src = join(repoRoot, file);
+			return {
+				src,
+				dest: join(worktreePath, file),
+				isDirectory: await fs.isDirectory(src),
+			};
+		}),
+	);
 
 	const hookCommands = config.hooks["post-create"];
 	const hookContext: HookContext | null =
