@@ -158,14 +158,49 @@ export function createBunGitAdapter(logger: LoggerPort): GitPort {
 			}
 		},
 
-		async createWorktree(branch: string, path: string): Promise<Result<Worktree, GitError>> {
+		async getDefaultBranch(): Promise<Result<string, GitError>> {
+			try {
+				const { exitCode, stdout } = await runGit(["symbolic-ref", "refs/remotes/origin/HEAD"]);
+				if (exitCode === 0 && stdout) {
+					const branch = stdout.replace("refs/remotes/origin/", "");
+					return Result.ok(branch);
+				}
+
+				// Fallback: check if main or master exists
+				const mainResult = await this.branchExists("main");
+				if (mainResult.success && mainResult.data) {
+					return Result.ok("main");
+				}
+
+				const masterResult = await this.branchExists("master");
+				if (masterResult.success && masterResult.data) {
+					return Result.ok("master");
+				}
+
+				return Result.err({
+					code: "UNKNOWN",
+					message: "Could not determine default branch",
+				});
+			} catch {
+				return Result.err({
+					code: "UNKNOWN",
+					message: "Failed to get default branch",
+				});
+			}
+		},
+
+		async createWorktree(branch: string, path: string, baseBranch?: string): Promise<Result<Worktree, GitError>> {
 			try {
 				const existsResult = await this.branchExists(branch);
 				if (!existsResult.success) {
 					return Result.err(existsResult.error);
 				}
 
-				const args = existsResult.data ? ["worktree", "add", path, branch] : ["worktree", "add", "-b", branch, path];
+				const args = existsResult.data
+					? ["worktree", "add", path, branch]
+					: baseBranch
+						? ["worktree", "add", "-b", branch, path, baseBranch]
+						: ["worktree", "add", "-b", branch, path];
 
 				const { exitCode, stderr } = await runGit(args);
 				if (exitCode !== 0) {

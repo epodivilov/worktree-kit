@@ -10,6 +10,7 @@ export interface FakeGitOptions {
 	branches?: string[];
 	remoteBranches?: string[];
 	mergedBranches?: string[];
+	defaultBranch?: string;
 }
 
 export function createFakeGit(options: FakeGitOptions = {}): GitPort {
@@ -21,6 +22,7 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 		branches = [],
 		remoteBranches = [],
 		mergedBranches = [],
+		defaultBranch = "main",
 	} = options;
 	const store = [...worktrees];
 	const branchStore = [...branches];
@@ -67,11 +69,18 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 			return Result.ok([...remoteBranches]);
 		},
 
+		async getDefaultBranch(): Promise<Result<string, GitError>> {
+			if (!isRepo) {
+				return Result.err({ code: "NOT_A_REPO", message: "Not inside a git repository" });
+			}
+			return Result.ok(defaultBranch);
+		},
+
 		async branchExists(branch: string): Promise<Result<boolean, GitError>> {
 			return Result.ok(store.some((w) => w.branch === branch));
 		},
 
-		async createWorktree(branch: string, path: string): Promise<Result<Worktree, GitError>> {
+		async createWorktree(branch: string, path: string, _baseBranch?: string): Promise<Result<Worktree, GitError>> {
 			if (store.some((w) => w.branch === branch)) {
 				return Result.err({ code: "BRANCH_EXISTS", message: `Branch ${branch} already exists` });
 			}
