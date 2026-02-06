@@ -123,6 +123,24 @@ export function createBunFilesystemAdapter(logger: LoggerPort): FilesystemPort {
 			}
 		},
 
+		async glob(pattern: string, options?: { cwd?: string }): Promise<string[]> {
+			const cwd = options?.cwd ?? process.cwd();
+			logger.debug("fs", `glob ${pattern} in ${cwd}`);
+			try {
+				const g = new Bun.Glob(pattern);
+				const matches: string[] = [];
+				for await (const file of g.scan({ cwd, absolute: true })) {
+					matches.push(file);
+				}
+				matches.sort();
+				logger.debug("fs", `-> ${matches.length} matches`);
+				return matches;
+			} catch {
+				logger.debug("fs", "-> ERROR");
+				return [];
+			}
+		},
+
 		getCwd(): string {
 			const cwd = process.cwd();
 			logger.debug("fs", `getCwd -> ${cwd}`);

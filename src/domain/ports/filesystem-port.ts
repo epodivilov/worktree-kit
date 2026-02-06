@@ -13,6 +13,7 @@ export interface FilesystemPort {
 	writeFile(path: string, content: string): Promise<Result<void, FilesystemError>>;
 	copyFile(source: string, destination: string): Promise<Result<void, FilesystemError>>;
 	copyDirectory(source: string, destination: string): Promise<Result<void, FilesystemError>>;
+	glob(pattern: string, options?: { cwd?: string }): Promise<string[]>;
 	getCwd(): string;
 	isDirectoryEmpty(path: string): Promise<Result<boolean, FilesystemError>>;
 	removeDirectory(path: string): Promise<Result<void, FilesystemError>>;

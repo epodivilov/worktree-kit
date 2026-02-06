@@ -66,6 +66,31 @@ export function createFakeFilesystem(options: FakeFilesystemOptions = {}): Files
 			return Result.ok(undefined);
 		},
 
+		async glob(pattern: string, options?: { cwd?: string }): Promise<string[]> {
+			const base = options?.cwd ?? cwd;
+			// Convert glob pattern to regex
+			const escaped = pattern
+				.replace(/\./g, "\\.")
+				.replace(/\*\*/g, "\0")
+				.replace(/\*/g, "[^/]*")
+				.replace(/\0/g, ".*")
+				.replace(/\?/g, ".");
+			const regex = new RegExp(`^${base}/${escaped}$`);
+
+			const matches: string[] = [];
+			for (const path of store.keys()) {
+				if (regex.test(path)) {
+					matches.push(path);
+				}
+			}
+			for (const dir of dirs) {
+				if (regex.test(dir)) {
+					matches.push(dir);
+				}
+			}
+			return matches.sort();
+		},
+
 		getCwd(): string {
 			return cwd;
 		},
