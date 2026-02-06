@@ -84,4 +84,27 @@ describe("WorktreeConfigSchema", () => {
 		const result = v.safeParse(WorktreeConfigSchema, "not an object");
 		expect(result.success).toBe(false);
 	});
+
+	test("config without defaultBase defaults to ask", () => {
+		const result = v.safeParse(WorktreeConfigSchema, { rootDir: "../wt" });
+		expect(result.success).toBe(true);
+		if (result.success) {
+			expect(result.output.defaultBase).toBe("ask");
+		}
+	});
+
+	test("config with valid defaultBase values parses correctly", () => {
+		for (const value of ["current", "default", "ask"] as const) {
+			const result = v.safeParse(WorktreeConfigSchema, { rootDir: "../wt", defaultBase: value });
+			expect(result.success).toBe(true);
+			if (result.success) {
+				expect(result.output.defaultBase).toBe(value);
+			}
+		}
+	});
+
+	test("rejects invalid defaultBase value", () => {
+		const result = v.safeParse(WorktreeConfigSchema, { rootDir: "../wt", defaultBase: "invalid" });
+		expect(result.success).toBe(false);
+	});
 });
