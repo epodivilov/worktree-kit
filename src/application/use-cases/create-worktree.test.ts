@@ -136,4 +136,117 @@ describe("createWorktree", () => {
 		const data = expectOk(result);
 		expect(data.hookContext?.baseBranch).toBe("develop");
 	});
+
+	test("expands glob pattern to matching files", async () => {
+		const config = JSON.stringify({ rootDir: "../worktrees", copy: ["config/*.json"] });
+		const git = createFakeGit({ root: ROOT, worktrees: [] });
+		const fs = createFakeFilesystem({
+			files: {
+				[`${ROOT}/.worktreekitrc`]: config,
+				[`${ROOT}/config/db.json`]: "{}",
+				[`${ROOT}/config/api.json`]: "{}",
+				[`${ROOT}/config/readme.txt`]: "not matched",
+			},
+			directories: [`${ROOT}/config`],
+			cwd: ROOT,
+		});
+		const result = await createWorktree({ branch: "feat-glob" }, { git, fs });
+
+		const { filesToCopy } = expectOk(result);
+		expect(filesToCopy).toHaveLength(2);
+		const srcs = filesToCopy.map((f) => f.src).sort();
+		expect(srcs).toEqual([`${ROOT}/config/api.json`, `${ROOT}/config/db.json`]);
+	});
+
+	test("expands recursive glob pattern", async () => {
+		const config = JSON.stringify({ rootDir: "../worktrees", copy: ["config/**/*.json"] });
+		const git = createFakeGit({ root: ROOT, worktrees: [] });
+		const fs = createFakeFilesystem({
+			files: {
+				[`${ROOT}/.worktreekitrc`]: config,
+				[`${ROOT}/config/db/settings.json`]: "{}",
+				[`${ROOT}/config/api/endpoints.json`]: "{}",
+			},
+			directories: [`${ROOT}/config`, `${ROOT}/config/db`, `${ROOT}/config/api`],
+			cwd: ROOT,
+		});
+		const result = await createWorktree({ branch: "feat-glob-deep" }, { git, fs });
+
+		const { filesToCopy } = expectOk(result);
+		expect(filesToCopy).toHaveLength(2);
+		expect(filesToCopy[0]?.dest).toContain("config/");
+		expect(filesToCopy[1]?.dest).toContain("config/");
+	});
+
+	test("warns when glob matches no files", async () => {
+		const config = JSON.stringify({ rootDir: "../worktrees", copy: ["nonexistent/*.json"] });
+		const git = createFakeGit({ root: ROOT, worktrees: [] });
+		const fs = createFakeFilesystem({
+			files: { [`${ROOT}/.worktreekitrc`]: config },
+			cwd: ROOT,
+		});
+		const result = await createWorktree({ branch: "feat-no-match" }, { git, fs });
+
+		const { filesToCopy, notifications } = expectOk(result);
+		expect(filesToCopy).toHaveLength(0);
+		expect(notifications.some((n) => n.level === "warn" && n.message.includes("No files matched"))).toBe(true);
+	});
+
+	test("mixes literal paths and glob patterns", async () => {
+		const config = JSON.stringify({ rootDir: "../worktrees", copy: [".env", "config/*.json"] });
+		const git = createFakeGit({ root: ROOT, worktrees: [] });
+		const fs = createFakeFilesystem({
+			files: {
+				[`${ROOT}/.worktreekitrc`]: config,
+				[`${ROOT}/.env`]: "SECRET=123",
+				[`${ROOT}/config/db.json`]: "{}",
+			},
+			directories: [`${ROOT}/config`],
+			cwd: ROOT,
+		});
+		const result = await createWorktree({ branch: "feat-mixed" }, { git, fs });
+
+		const { filesToCopy } = expectOk(result);
+		expect(filesToCopy).toHaveLength(2);
+		expect(filesToCopy[0]?.src).toBe(`${ROOT}/.env`);
+		expect(filesToCopy[1]?.src).toBe(`${ROOT}/config/db.json`);
+	});
+
+	test("glob matching directories marks isDirectory true", async () => {
+		const config = JSON.stringify({ rootDir: "../worktrees", copy: ["config/*"] });
+		const git = createFakeGit({ root: ROOT, worktrees: [] });
+		const fs = createFakeFilesystem({
+			files: {
+				[`${ROOT}/.worktreekitrc`]: config,
+				[`${ROOT}/config/settings.json`]: "{}",
+				[`${ROOT}/config/nested/deep.json`]: "{}",
+			},
+			directories: [`${ROOT}/config`, `${ROOT}/config/nested`],
+			cwd: ROOT,
+		});
+		const result = await createWorktree({ branch: "feat-glob-dir" }, { git, fs });
+
+		const { filesToCopy } = expectOk(result);
+		const dirEntry = filesToCopy.find((f) => f.isDirectory);
+		expect(dirEntry).toBeDefined();
+		expect(dirEntry?.src).toBe(`${ROOT}/config/nested`);
+	});
+
+	test("deduplicates overlapping glob and literal paths", async () => {
+		const config = JSON.stringify({ rootDir: "../worktrees", copy: [".env", ".*"] });
+		const git = createFakeGit({ root: ROOT, worktrees: [] });
+		const fs = createFakeFilesystem({
+			files: {
+				[`${ROOT}/.worktreekitrc`]: config,
+				[`${ROOT}/.env`]: "SECRET=123",
+				[`${ROOT}/.gitignore`]: "node_modules",
+			},
+			cwd: ROOT,
+		});
+		const result = await createWorktree({ branch: "feat-dedup" }, { git, fs });
+
+		const { filesToCopy } = expectOk(result);
+		const envEntries = filesToCopy.filter((f) => f.src === `${ROOT}/.env`);
+		expect(envEntries).toHaveLength(1);
+	});
 });

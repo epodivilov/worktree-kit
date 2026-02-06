@@ -10,6 +10,10 @@ import { Result as R } from "../../shared/result.ts";
 import { loadConfig } from "./load-config.ts";
 import type { HookContext } from "./run-hooks.ts";
 
+function isGlobPattern(str: string): boolean {
+	return /[*?[\]{}]/.test(str);
+}
+
 export interface CreateWorktreeInput {
 	branch: string;
 	baseBranch?: string;
@@ -67,16 +71,39 @@ export async function createWorktree(
 		return R.err(new Error(createResult.error.message));
 	}
 
-	const filesToCopy: FileToCopy[] = await Promise.all(
-		config.copy.map(async (file) => {
-			const src = join(repoRoot, file);
-			return {
+	const rawFiles: FileToCopy[] = [];
+
+	for (const entry of config.copy) {
+		if (isGlobPattern(entry)) {
+			const matches = await fs.glob(entry, { cwd: repoRoot });
+			if (matches.length === 0) {
+				notifications.push(N.warn(`No files matched pattern: ${entry}`));
+				continue;
+			}
+			for (const matchedPath of matches) {
+				const relativePath = matchedPath.slice(repoRoot.length + 1);
+				rawFiles.push({
+					src: matchedPath,
+					dest: join(worktreePath, relativePath),
+					isDirectory: await fs.isDirectory(matchedPath),
+				});
+			}
+		} else {
+			const src = join(repoRoot, entry);
+			rawFiles.push({
 				src,
-				dest: join(worktreePath, file),
+				dest: join(worktreePath, entry),
 				isDirectory: await fs.isDirectory(src),
-			};
-		}),
-	);
+			});
+		}
+	}
+
+	const seen = new Set<string>();
+	const filesToCopy = rawFiles.filter((f) => {
+		if (seen.has(f.src)) return false;
+		seen.add(f.src);
+		return true;
+	});
 
 	const hookCommands = config.hooks["post-create"];
 	const hookContext: HookContext | null =
