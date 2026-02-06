@@ -3,6 +3,17 @@
 
 ## Features
 
+- add defaultBase config and source branch support
+- implement getDefaultBranch and baseBranch in worktree creation
+- pass baseBranch through to git and update init defaults
+- prompt for source branch when creating new branch
+
+## Testing
+
+- add tests for defaultBase schema validation
+
+## Features
+
 - use wt-preview command instead of replacing wt
 - add main and current badges to worktree list
 - prompt to remove empty worktrees directory after last worktree removed
@@ -16,6 +27,7 @@
 ## Miscellaneous
 
 - add *.local pattern to gitignore
+- release v0.1.3
 
 ## Bug Fixes
 
