@@ -8,9 +8,11 @@ export interface FilesystemError {
 
 export interface FilesystemPort {
 	exists(path: string): Promise<boolean>;
+	isDirectory(path: string): Promise<boolean>;
 	readFile(path: string): Promise<Result<string, FilesystemError>>;
 	writeFile(path: string, content: string): Promise<Result<void, FilesystemError>>;
 	copyFile(source: string, destination: string): Promise<Result<void, FilesystemError>>;
+	copyDirectory(source: string, destination: string): Promise<Result<void, FilesystemError>>;
 	getCwd(): string;
 	isDirectoryEmpty(path: string): Promise<Result<boolean, FilesystemError>>;
 	removeDirectory(path: string): Promise<Result<void, FilesystemError>>;

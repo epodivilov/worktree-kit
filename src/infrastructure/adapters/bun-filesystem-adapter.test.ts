@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { expectErr, expectOk } from "../../test-utils/assertions.ts";
 import { createNoopLogger } from "../../test-utils/noop-logger.ts";
@@ -42,5 +43,42 @@ describe("BunFilesystemAdapter", () => {
 		expectOk(await fs.copyFile(src, dst));
 		const content = expectOk(await fs.readFile(dst));
 		expect(content).toBe("copied content");
+	});
+
+	test("isDirectory returns true for directories, false for files", async () => {
+		await using tmp = await createTempDir();
+		const dirPath = join(tmp.path, "subdir");
+		const filePath = join(tmp.path, "file.txt");
+
+		await mkdir(dirPath);
+		await fs.writeFile(filePath, "data");
+
+		expect(await fs.isDirectory(dirPath)).toBe(true);
+		expect(await fs.isDirectory(filePath)).toBe(false);
+		expect(await fs.isDirectory(join(tmp.path, "nonexistent"))).toBe(false);
+	});
+
+	test("copyDirectory copies nested structure recursively", async () => {
+		await using tmp = await createTempDir();
+		const srcDir = join(tmp.path, "src-dir");
+		const dstDir = join(tmp.path, "dst-dir");
+
+		await mkdir(join(srcDir, "nested"), { recursive: true });
+		await fs.writeFile(join(srcDir, "a.txt"), "file-a");
+		await fs.writeFile(join(srcDir, "nested", "b.txt"), "file-b");
+
+		expectOk(await fs.copyDirectory(srcDir, dstDir));
+
+		const contentA = expectOk(await fs.readFile(join(dstDir, "a.txt")));
+		expect(contentA).toBe("file-a");
+		const contentB = expectOk(await fs.readFile(join(dstDir, "nested", "b.txt")));
+		expect(contentB).toBe("file-b");
+	});
+
+	test("copyDirectory returns NOT_FOUND for missing source", async () => {
+		await using tmp = await createTempDir();
+
+		const error = expectErr(await fs.copyDirectory(join(tmp.path, "nope"), join(tmp.path, "dst")));
+		expect(error.code).toBe("NOT_FOUND");
 	});
 });

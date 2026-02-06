@@ -3,17 +3,23 @@ import { Result } from "../shared/result.ts";
 
 export interface FakeFilesystemOptions {
 	files?: Record<string, string>;
+	directories?: string[];
 	cwd?: string;
 	overrides?: Partial<FilesystemPort>;
 }
 
 export function createFakeFilesystem(options: FakeFilesystemOptions = {}): FilesystemPort {
-	const { files = {}, cwd = "/fake/project", overrides = {} } = options;
+	const { files = {}, directories = [], cwd = "/fake/project", overrides = {} } = options;
 	const store = new Map<string, string>(Object.entries(files));
+	const dirs = new Set<string>(directories);
 
 	const base: FilesystemPort = {
 		async exists(path: string): Promise<boolean> {
-			return store.has(path);
+			return store.has(path) || dirs.has(path);
+		},
+
+		async isDirectory(path: string): Promise<boolean> {
+			return dirs.has(path);
 		},
 
 		async readFile(path: string): Promise<Result<string, FilesystemError>> {
@@ -35,6 +41,28 @@ export function createFakeFilesystem(options: FakeFilesystemOptions = {}): Files
 				return Result.err({ code: "NOT_FOUND", message: "Source file not found", path: source });
 			}
 			store.set(destination, content);
+			return Result.ok(undefined);
+		},
+
+		async copyDirectory(source: string, destination: string): Promise<Result<void, FilesystemError>> {
+			if (!dirs.has(source)) {
+				return Result.err({ code: "NOT_FOUND", message: "Source directory not found", path: source });
+			}
+			dirs.add(destination);
+			// Copy all files under the source directory to the destination
+			for (const [key, value] of store.entries()) {
+				if (key.startsWith(`${source}/`)) {
+					const relativePath = key.slice(source.length);
+					store.set(`${destination}${relativePath}`, value);
+				}
+			}
+			// Copy nested directories
+			for (const dir of dirs) {
+				if (dir.startsWith(`${source}/`)) {
+					const relativePath = dir.slice(source.length);
+					dirs.add(`${destination}${relativePath}`);
+				}
+			}
 			return Result.ok(undefined);
 		},
 
