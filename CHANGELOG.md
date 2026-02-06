@@ -3,10 +3,21 @@
 
 ## Features
 
+- add isDirectory and copyDirectory to FilesystemPort
+- support directory copying in copy config
+- add glob method to FilesystemPort
+- support glob patterns in copy config
+
+## Features
+
 - add defaultBase config and source branch support
 - implement getDefaultBranch and baseBranch in worktree creation
 - pass baseBranch through to git and update init defaults
 - prompt for source branch when creating new branch
+
+## Miscellaneous
+
+- release v0.1.4
 
 ## Testing
 
