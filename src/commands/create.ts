@@ -1,7 +1,9 @@
 import { defineCommand } from "citty";
 import pc from "picocolors";
 import { createWorktree } from "../application/use-cases/create-worktree.ts";
+import { loadConfig } from "../application/use-cases/load-config.ts";
 import { renderNotifications } from "../cli/render-notifications.ts";
+import type { DefaultBase } from "../domain/entities/config.ts";
 import type { Container } from "../infrastructure/container.ts";
 import { Result } from "../shared/result.ts";
 
@@ -29,10 +31,16 @@ export function createCommand(container: Container) {
 
 			ui.intro("worktree-kit create");
 
+			// Load config early to access defaultBase setting
+			const configResult = await loadConfig({ git, fs });
+			const defaultBase: DefaultBase = configResult.success ? configResult.data.config.defaultBase : "ask";
+
 			let branch = args.branch as string | undefined;
+			let baseBranch = args.base as string | undefined;
 
 			// === Interactive mode: select or create branch ===
 			let isRemoteBranch = false;
+			let isNewBranch = !!branch; // positional arg means new branch
 
 			if (!branch) {
 				const branchesResult = await git.listBranches();
@@ -99,6 +107,7 @@ export function createCommand(container: Container) {
 					}
 
 					branch = newBranch;
+					isNewBranch = true;
 				} else if (selected === REMOTE_BRANCHES) {
 					const remoteBranch = await ui.select<string>({
 						message: "Select remote branch",
@@ -117,12 +126,55 @@ export function createCommand(container: Container) {
 				}
 			}
 
+			// === Resolve base branch for new branches ===
+			if (isNewBranch && !isRemoteBranch && !baseBranch) {
+				if (defaultBase === "ask") {
+					const branchesResult = await git.listBranches();
+					if (Result.isOk(branchesResult) && branchesResult.data.length > 0) {
+						const defaultBranchResult = await git.getDefaultBranch();
+						const defaultBranchName = Result.isOk(defaultBranchResult) ? defaultBranchResult.data : undefined;
+
+						const options = branchesResult.data.map((b) => ({
+							value: b,
+							label: b,
+							hint: b === defaultBranchName ? "default" : undefined,
+						}));
+
+						// Move default branch to top if found
+						if (defaultBranchName) {
+							const idx = options.findIndex((o) => o.value === defaultBranchName);
+							if (idx > 0) {
+								options.unshift(...options.splice(idx, 1));
+							}
+						}
+
+						const selectedBase = await ui.select<string>({
+							message: "Select source branch",
+							options,
+						});
+
+						if (ui.isCancel(selectedBase)) {
+							ui.cancel();
+							process.exit(0);
+						}
+
+						baseBranch = selectedBase;
+					}
+				} else if (defaultBase === "default") {
+					const defaultBranchResult = await git.getDefaultBranch();
+					if (Result.isOk(defaultBranchResult)) {
+						baseBranch = defaultBranchResult.data;
+					}
+				}
+				// defaultBase === "current" → baseBranch stays undefined (uses HEAD)
+			}
+
 			// === Stage 1: Create worktree and copy files ===
 			const spinner = ui.createSpinner();
 			spinner.start("Creating worktree...");
 
 			const createResult = await createWorktree(
-				{ branch, baseBranch: args.base, fromRemote: isRemoteBranch ? "origin" : undefined },
+				{ branch, baseBranch, fromRemote: isRemoteBranch ? "origin" : undefined },
 				{ git, fs },
 			);
 
