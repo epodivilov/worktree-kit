@@ -53,7 +53,7 @@ export async function createWorktree(
 	if (configResult.success) {
 		config = configResult.data.config;
 	} else {
-		config = { rootDir: INIT_ROOT_DIR, copy: [], hooks: { "post-create": [] } };
+		config = { rootDir: INIT_ROOT_DIR, copy: [], hooks: { "post-create": [] }, defaultBase: "ask" };
 		notifications.push(N.warn("Config not found, using defaults. Run 'wt init' to create one."));
 	}
 
@@ -61,7 +61,7 @@ export async function createWorktree(
 
 	const createResult = input.fromRemote
 		? await git.createWorktreeFromRemote(input.branch, worktreePath, input.fromRemote)
-		: await git.createWorktree(input.branch, worktreePath);
+		: await git.createWorktree(input.branch, worktreePath, input.baseBranch);
 	if (!createResult.success) {
 		return R.err(new Error(createResult.error.message));
 	}

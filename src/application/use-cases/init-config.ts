@@ -35,7 +35,7 @@ export async function initConfig(
 		return R.err(new Error(`Config already exists at ${configPath}`));
 	}
 
-	const content = JSON.stringify({ rootDir: INIT_ROOT_DIR, copy: [] }, null, 2);
+	const content = JSON.stringify({ rootDir: INIT_ROOT_DIR, copy: [], defaultBase: "ask" }, null, 2);
 	const writeResult = await fs.writeFile(configPath, content);
 	if (!writeResult.success) {
 		return R.err(new Error(`Failed to write config: ${writeResult.error.message}`));
