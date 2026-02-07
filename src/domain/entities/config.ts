@@ -1,5 +1,6 @@
 export interface HooksConfig {
 	readonly "post-create": readonly string[];
+	readonly "pre-remove": readonly string[];
 }
 
 export type DefaultBase = "current" | "default" | "ask";

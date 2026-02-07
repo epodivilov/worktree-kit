@@ -22,7 +22,7 @@ export function removeCommand(container: Container) {
 			},
 		},
 		async run({ args }) {
-			const { ui, git, fs } = container;
+			const { ui, git, fs, shell } = container;
 
 			ui.intro("worktree-kit remove");
 
@@ -125,7 +125,61 @@ export function removeCommand(container: Container) {
 
 			const spinner = ui.createSpinner();
 
+			// Load config for pre-remove hooks
+			const configResult = await loadConfig({ fs, git });
+			const preRemoveHooks = Result.isOk(configResult) ? configResult.data.config.hooks["pre-remove"] : [];
+
+			const worktreesByBranch = new Map<string, { path: string; branch: string }>();
+			let repoRoot = "";
+
+			if (preRemoveHooks.length > 0) {
+				const worktreeListResult = await git.listWorktrees();
+				if (Result.isOk(worktreeListResult)) {
+					for (const w of worktreeListResult.data) {
+						worktreesByBranch.set(w.branch, { path: w.path, branch: w.branch });
+					}
+				}
+
+				const rootResult = await git.getRepositoryRoot();
+				if (Result.isOk(rootResult)) {
+					repoRoot = rootResult.data;
+				}
+			}
+
 			for (const branchToRemove of branchesToRemove) {
+				// Run pre-remove hooks
+				const worktreeInfo = worktreesByBranch.get(branchToRemove);
+				if (preRemoveHooks.length > 0 && worktreeInfo) {
+					const hooksSpinner = ui.createSpinner();
+					const total = preRemoveHooks.length;
+					const env: Record<string, string> = {
+						WORKTREE_PATH: worktreeInfo.path,
+						WORKTREE_BRANCH: worktreeInfo.branch,
+						REPO_ROOT: repoRoot,
+					};
+
+					for (const [i, command] of preRemoveHooks.entries()) {
+						const message = `Running pre-remove hook ${i + 1}/${total}: ${command}...`;
+
+						if (i === 0) {
+							hooksSpinner.start(message);
+						} else {
+							hooksSpinner.message(message);
+						}
+
+						const hookResult = await shell.execute(command, {
+							cwd: worktreeInfo.path,
+							env,
+						});
+
+						if (!hookResult.success) {
+							ui.warn(`Pre-remove hook failed: "${command}" - ${hookResult.error.message}`);
+						}
+					}
+
+					hooksSpinner.stop(pc.green("Pre-remove hooks completed"));
+				}
+
 				spinner.start(`Removing worktree "${branchToRemove}"...`);
 
 				const result = await removeWorktree({ branch: branchToRemove }, { git });
@@ -180,8 +234,8 @@ export function removeCommand(container: Container) {
 
 				if (nonMainWorktrees.length === 0) {
 					// All worktrees removed, check if we should clean up root directory
-					const configResult = await loadConfig({ fs, git });
-					const rootDir = Result.isOk(configResult) ? configResult.data.config.rootDir : INIT_ROOT_DIR;
+					const cleanupConfigResult = await loadConfig({ fs, git });
+					const rootDir = Result.isOk(cleanupConfigResult) ? cleanupConfigResult.data.config.rootDir : INIT_ROOT_DIR;
 
 					const mainRoot = await git.getMainWorktreeRoot();
 					if (Result.isOk(mainRoot)) {

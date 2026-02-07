@@ -2,6 +2,7 @@ import * as v from "valibot";
 
 const HooksInputSchema = v.object({
 	"post-create": v.optional(v.array(v.string())),
+	"pre-remove": v.optional(v.array(v.string())),
 });
 
 export const WorktreeConfigSchema = v.pipe(
@@ -16,6 +17,7 @@ export const WorktreeConfigSchema = v.pipe(
 		copy: input.copy ?? [],
 		hooks: {
 			"post-create": input.hooks?.["post-create"] ?? [],
+			"pre-remove": input.hooks?.["pre-remove"] ?? [],
 		},
 		defaultBase: input.defaultBase ?? "ask",
 	})),
