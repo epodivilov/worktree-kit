@@ -3,6 +3,10 @@
 
 ## Features
 
+- add pre-remove hooks support
+
+## Features
+
 - add isDirectory and copyDirectory to FilesystemPort
 - support directory copying in copy config
 - add glob method to FilesystemPort
@@ -14,10 +18,6 @@
 - implement getDefaultBranch and baseBranch in worktree creation
 - pass baseBranch through to git and update init defaults
 - prompt for source branch when creating new branch
-
-## Miscellaneous
-
-- release v0.1.4
 
 ## Testing
 
@@ -38,7 +38,6 @@
 ## Miscellaneous
 
 - add *.local pattern to gitignore
-- release v0.1.3
 
 ## Bug Fixes
 
@@ -50,10 +49,6 @@
 - add progress spinner to remove command
 - prompt to delete branch when removing worktree
 
-## Miscellaneous
-
-- bump version to 0.1.2
-
 ## Documentation
 
 - add GitHub Sponsors funding configuration
@@ -61,10 +56,6 @@
 ## Features
 
 - add interactive mode to create command
-
-## Miscellaneous
-
-- bump version to 0.1.1
 
 ## Documentation
 

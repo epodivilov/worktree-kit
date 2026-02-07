@@ -22,6 +22,8 @@ commit_parsers = [
   { message = "^style", group = "Style" },
   { message = "^test", group = "Testing" },
   { message = "^chore\\(release\\)", skip = true },
+  { message = "^chore: release", skip = true },
+  { message = "^chore: bump", skip = true },
   { message = "^chore", group = "Miscellaneous" },
 ]
 filter_commits = false
