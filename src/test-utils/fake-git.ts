@@ -11,6 +11,10 @@ export interface FakeGitOptions {
 	remoteBranches?: string[];
 	mergedBranches?: string[];
 	defaultBranch?: string;
+	dirtyWorktrees?: Set<string>;
+	rebaseConflicts?: Set<string>;
+	fetchFails?: boolean;
+	mergeFFOnlyFails?: boolean;
 }
 
 export function createFakeGit(options: FakeGitOptions = {}): GitPort {
@@ -23,6 +27,10 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 		remoteBranches = [],
 		mergedBranches = [],
 		defaultBranch = "main",
+		dirtyWorktrees,
+		rebaseConflicts,
+		fetchFails = false,
+		mergeFFOnlyFails = false,
 	} = options;
 	const store = [...worktrees];
 	const branchStore = [...branches];
@@ -117,6 +125,42 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 			}
 			deletedBranches.add(branch);
 			return Result.ok(undefined);
+		},
+
+		async fetchAll(): Promise<Result<void, GitError>> {
+			if (fetchFails) {
+				return Result.err({ code: "UNKNOWN", message: "Fetch failed" });
+			}
+			return Result.ok(undefined);
+		},
+
+		async mergeFFOnly(_worktreePath: string, _branch: string): Promise<Result<void, GitError>> {
+			if (mergeFFOnlyFails) {
+				return Result.err({ code: "MERGE_FAILED", message: "Cannot fast-forward" });
+			}
+			return Result.ok(undefined);
+		},
+
+		async updateBranchRef(_branch: string): Promise<Result<void, GitError>> {
+			if (mergeFFOnlyFails) {
+				return Result.err({ code: "MERGE_FAILED", message: "Cannot update ref" });
+			}
+			return Result.ok(undefined);
+		},
+
+		async rebase(worktreePath: string, _onto: string): Promise<Result<void, GitError>> {
+			if (rebaseConflicts?.has(worktreePath)) {
+				return Result.err({ code: "REBASE_CONFLICT", message: "Rebase conflict" });
+			}
+			return Result.ok(undefined);
+		},
+
+		async rebaseAbort(_worktreePath: string): Promise<Result<void, GitError>> {
+			return Result.ok(undefined);
+		},
+
+		async isDirty(worktreePath: string): Promise<Result<boolean, GitError>> {
+			return Result.ok(dirtyWorktrees?.has(worktreePath) ?? false);
 		},
 
 		async deleteBranchForce(branch: string): Promise<Result<void, GitError>> {

@@ -8,6 +8,8 @@ export interface GitError {
 		| "BRANCH_EXISTS"
 		| "BRANCH_NOT_MERGED"
 		| "BRANCH_NOT_FOUND"
+		| "MERGE_FAILED"
+		| "REBASE_CONFLICT"
 		| "UNKNOWN";
 	readonly message: string;
 }
@@ -26,4 +28,10 @@ export interface GitPort {
 	removeWorktree(path: string): Promise<Result<void, GitError>>;
 	deleteBranch(branch: string): Promise<Result<void, GitError>>;
 	deleteBranchForce(branch: string): Promise<Result<void, GitError>>;
+	fetchAll(): Promise<Result<void, GitError>>;
+	mergeFFOnly(worktreePath: string, branch: string): Promise<Result<void, GitError>>;
+	updateBranchRef(branch: string): Promise<Result<void, GitError>>;
+	rebase(worktreePath: string, onto: string): Promise<Result<void, GitError>>;
+	rebaseAbort(worktreePath: string): Promise<Result<void, GitError>>;
+	isDirty(worktreePath: string): Promise<Result<boolean, GitError>>;
 }

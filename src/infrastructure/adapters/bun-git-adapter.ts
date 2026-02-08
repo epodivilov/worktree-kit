@@ -290,6 +290,78 @@ export function createBunGitAdapter(logger: LoggerPort): GitPort {
 			}
 		},
 
+		async fetchAll(): Promise<Result<void, GitError>> {
+			try {
+				const { exitCode, stderr } = await runGit(["fetch", "--all"]);
+				if (exitCode !== 0) {
+					return Result.err({ code: "UNKNOWN", message: stderr || "Failed to fetch" });
+				}
+				return Result.ok(undefined);
+			} catch {
+				return Result.err({ code: "UNKNOWN", message: "Failed to fetch" });
+			}
+		},
+
+		async mergeFFOnly(worktreePath: string, branch: string): Promise<Result<void, GitError>> {
+			try {
+				const { exitCode, stderr } = await runGit(["-C", worktreePath, "merge", "--ff-only", `origin/${branch}`]);
+				if (exitCode !== 0) {
+					return Result.err({ code: "MERGE_FAILED", message: stderr || `Failed to fast-forward ${branch}` });
+				}
+				return Result.ok(undefined);
+			} catch {
+				return Result.err({ code: "UNKNOWN", message: `Failed to merge ${branch}` });
+			}
+		},
+
+		async updateBranchRef(branch: string): Promise<Result<void, GitError>> {
+			try {
+				const { exitCode, stderr } = await runGit(["fetch", "origin", `${branch}:${branch}`]);
+				if (exitCode !== 0) {
+					return Result.err({ code: "MERGE_FAILED", message: stderr || `Failed to update ref for ${branch}` });
+				}
+				return Result.ok(undefined);
+			} catch {
+				return Result.err({ code: "UNKNOWN", message: `Failed to update ref for ${branch}` });
+			}
+		},
+
+		async rebase(worktreePath: string, onto: string): Promise<Result<void, GitError>> {
+			try {
+				const { exitCode, stderr } = await runGit(["-C", worktreePath, "rebase", onto]);
+				if (exitCode !== 0) {
+					return Result.err({ code: "REBASE_CONFLICT", message: stderr || `Rebase onto ${onto} failed` });
+				}
+				return Result.ok(undefined);
+			} catch {
+				return Result.err({ code: "UNKNOWN", message: `Failed to rebase onto ${onto}` });
+			}
+		},
+
+		async rebaseAbort(worktreePath: string): Promise<Result<void, GitError>> {
+			try {
+				const { exitCode, stderr } = await runGit(["-C", worktreePath, "rebase", "--abort"]);
+				if (exitCode !== 0) {
+					return Result.err({ code: "UNKNOWN", message: stderr || "Failed to abort rebase" });
+				}
+				return Result.ok(undefined);
+			} catch {
+				return Result.err({ code: "UNKNOWN", message: "Failed to abort rebase" });
+			}
+		},
+
+		async isDirty(worktreePath: string): Promise<Result<boolean, GitError>> {
+			try {
+				const { exitCode, stdout } = await runGit(["-C", worktreePath, "status", "--porcelain"]);
+				if (exitCode !== 0) {
+					return Result.err({ code: "UNKNOWN", message: "Failed to check worktree status" });
+				}
+				return Result.ok(stdout.length > 0);
+			} catch {
+				return Result.err({ code: "UNKNOWN", message: "Failed to check worktree status" });
+			}
+		},
+
 		async deleteBranchForce(branch: string): Promise<Result<void, GitError>> {
 			try {
 				const { exitCode, stderr } = await runGit(["branch", "-D", branch]);
