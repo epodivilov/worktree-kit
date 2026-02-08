@@ -46,7 +46,7 @@ export async function createWorktree(
 	const { git, fs } = deps;
 	const notifications: Notification[] = [];
 
-	const rootResult = await git.getRepositoryRoot();
+	const rootResult = await git.getMainWorktreeRoot();
 	if (!rootResult.success) {
 		return R.err(new Error(rootResult.error.message));
 	}
