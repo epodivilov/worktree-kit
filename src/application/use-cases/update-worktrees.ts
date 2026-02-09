@@ -4,6 +4,7 @@ import { Result as R, type Result } from "../../shared/result.ts";
 
 export interface UpdateWorktreesInput {
 	dryRun: boolean;
+	branch?: string;
 }
 
 export type WorktreeUpdateStatus =
@@ -92,6 +93,23 @@ function buildRebaseOrder(worktrees: Worktree[], parentMap: Record<string, strin
 	return ordered.filter((b) => wtMap.has(b)).map((b) => wtMap.get(b) as Worktree);
 }
 
+function filterDescendants(
+	targetBranch: string,
+	orderedWorktrees: Worktree[],
+	parentMap: Record<string, string>,
+): Worktree[] {
+	return orderedWorktrees.filter((wt) => {
+		let current = wt.branch;
+		while (current) {
+			if (current === targetBranch) return true;
+			const parent = parentMap[current];
+			if (!parent || parent === current) return false;
+			current = parent;
+		}
+		return false;
+	});
+}
+
 export async function updateWorktrees(
 	input: UpdateWorktreesInput,
 	deps: UpdateWorktreesDeps,
@@ -140,6 +158,15 @@ export async function updateWorktrees(
 
 	const orderedWorktrees = buildRebaseOrder(worktrees, parentMap, defaultBranch);
 
+	if (input.branch && input.branch !== defaultBranch && !worktrees.some((w) => w.branch === input.branch)) {
+		return R.err(new Error(`Branch "${input.branch}" not found in worktrees`));
+	}
+
+	const targetWorktrees =
+		input.branch && input.branch !== defaultBranch
+			? filterDescendants(input.branch, orderedWorktrees, parentMap)
+			: orderedWorktrees;
+
 	const reports: WorktreeReport[] = [];
 	const failedBranches = new Set<string>();
 
@@ -147,7 +174,7 @@ export async function updateWorktrees(
 		reports.push({ branch: defaultBranch, path: mainWorktree.path, result: { status: "is-default-branch" } });
 	}
 
-	for (const wt of orderedWorktrees) {
+	for (const wt of targetWorktrees) {
 		const parent = parentMap[wt.branch] ?? defaultBranch;
 
 		if (failedBranches.has(parent)) {

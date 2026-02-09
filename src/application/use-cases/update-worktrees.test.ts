@@ -253,3 +253,73 @@ describe("updateWorktrees — parent detection", () => {
 		});
 	});
 });
+
+describe("updateWorktrees — branch filter", () => {
+	function chainWithSiblingConfig() {
+		const main: Worktree = { path: "/repo", branch: "main", head: "aaa", isMain: true };
+		const featA: Worktree = { path: "/repo-a", branch: "feat-a", head: "eee", isMain: false };
+		const featSub: Worktree = { path: "/repo-sub", branch: "feat-sub", head: "ggg", isMain: false };
+		const featB: Worktree = { path: "/repo-b", branch: "feat-b", head: "hhh", isMain: false };
+
+		const mergeBaseMap = new Map([
+			["feat-a:main", "aaa"],
+			["feat-a:feat-sub", "eee"],
+			["feat-a:feat-b", "aaa"],
+			["feat-sub:main", "aaa"],
+			["feat-sub:feat-a", "eee"],
+			["feat-sub:feat-b", "aaa"],
+			["feat-b:main", "aaa"],
+			["feat-b:feat-a", "aaa"],
+			["feat-b:feat-sub", "aaa"],
+			["main:feat-a", "aaa"],
+			["main:feat-sub", "aaa"],
+			["main:feat-b", "aaa"],
+		]);
+
+		const commitCountMap = new Map([
+			["aaa..feat-a", 2],
+			["aaa..feat-sub", 4],
+			["aaa..feat-b", 3],
+			["eee..feat-sub", 2],
+			["eee..feat-a", 0],
+		]);
+
+		return { worktrees: [main, featA, featSub, featB], mergeBaseMap, commitCountMap };
+	}
+
+	test("branch filter: update feat-a updates feat-a + feat-sub, skips feat-b", async () => {
+		const { worktrees, mergeBaseMap, commitCountMap } = chainWithSiblingConfig();
+		const git = createFakeGit({ worktrees, mergeBaseMap, commitCountMap });
+		const result = await updateWorktrees({ dryRun: false, branch: "feat-a" }, { git });
+
+		const output = expectOk(result);
+		const branches = output.reports.map((r) => r.branch);
+		expect(branches).toContain("main");
+		expect(branches).toContain("feat-a");
+		expect(branches).toContain("feat-sub");
+		expect(branches).not.toContain("feat-b");
+	});
+
+	test("branch filter: update leaf branch updates only that branch", async () => {
+		const { worktrees, mergeBaseMap, commitCountMap } = chainWithSiblingConfig();
+		const git = createFakeGit({ worktrees, mergeBaseMap, commitCountMap });
+		const result = await updateWorktrees({ dryRun: false, branch: "feat-sub" }, { git });
+
+		const output = expectOk(result);
+		const branches = output.reports.map((r) => r.branch);
+		expect(branches).toContain("main");
+		expect(branches).toContain("feat-sub");
+		expect(branches).not.toContain("feat-a");
+		expect(branches).not.toContain("feat-b");
+	});
+
+	test("branch filter: nonexistent branch returns error", async () => {
+		const { worktrees, mergeBaseMap, commitCountMap } = chainWithSiblingConfig();
+		const git = createFakeGit({ worktrees, mergeBaseMap, commitCountMap });
+		const result = await updateWorktrees({ dryRun: false, branch: "nonexistent" }, { git });
+
+		const error = expectErr(result);
+		expect(error.message).toContain("nonexistent");
+		expect(error.message).toContain("not found");
+	});
+});

@@ -11,6 +11,11 @@ export function updateCommand(container: Container) {
 			description: "Fetch, fast-forward default branch, and rebase feature branches",
 		},
 		args: {
+			branch: {
+				type: "positional",
+				description: "Branch to update (with its sub-branches). Updates all if omitted",
+				required: false,
+			},
 			"dry-run": {
 				type: "boolean",
 				description: "Show what would be done without making changes",
@@ -20,6 +25,7 @@ export function updateCommand(container: Container) {
 		async run({ args }) {
 			const { ui, git } = container;
 
+			const branch = args.branch as string | undefined;
 			const dryRun = (args["dry-run"] as boolean | undefined) ?? false;
 
 			ui.intro("worktree-kit update");
@@ -27,7 +33,7 @@ export function updateCommand(container: Container) {
 			const spinner = ui.createSpinner();
 			spinner.start("Fetching and updating worktrees...");
 
-			const result = await updateWorktrees({ dryRun }, { git });
+			const result = await updateWorktrees({ dryRun, branch }, { git });
 
 			if (Result.isErr(result)) {
 				spinner.stop(pc.red("Failed"));
