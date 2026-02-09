@@ -74,7 +74,11 @@ describe("cleanupWorktrees", () => {
 		});
 		const output = expectOk(await cleanupWorktrees({ force: false, dryRun: true }, { git }));
 
-		expect(output.reports[0]).toMatchObject({ branch: "feature-a", worktreePath: "/wt/feature-a", result: { status: "dry-run" } });
+		expect(output.reports[0]).toMatchObject({
+			branch: "feature-a",
+			worktreePath: "/wt/feature-a",
+			result: { status: "dry-run" },
+		});
 
 		// worktree still exists
 		const remaining = await git.listWorktrees();
