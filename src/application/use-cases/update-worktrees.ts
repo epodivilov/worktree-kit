@@ -1,3 +1,4 @@
+import type { Worktree } from "../../domain/entities/worktree.ts";
 import type { GitPort } from "../../domain/ports/git-port.ts";
 import { Result as R, type Result } from "../../shared/result.ts";
 
@@ -10,11 +11,13 @@ export type WorktreeUpdateStatus =
 	| { status: "rebased-dirty" }
 	| { status: "rebase-conflict"; message: string }
 	| { status: "is-default-branch" }
-	| { status: "dry-run"; dirty: boolean };
+	| { status: "dry-run"; dirty: boolean }
+	| { status: "skipped"; reason: string };
 
 export interface WorktreeReport {
 	branch: string;
 	path: string;
+	parent?: string;
 	result: WorktreeUpdateStatus;
 }
 
@@ -26,6 +29,67 @@ export interface UpdateWorktreesOutput {
 
 export interface UpdateWorktreesDeps {
 	git: GitPort;
+}
+
+async function findParentBranch(
+	branch: string,
+	worktrees: Worktree[],
+	defaultBranch: string,
+	git: GitPort,
+): Promise<string> {
+	const candidates: { branch: string; distance: number }[] = [];
+
+	for (const wt of worktrees) {
+		if (!wt.branch || wt.branch === branch) continue;
+
+		const mergeBaseResult = await git.getMergeBase(branch, wt.branch);
+		if (!mergeBaseResult.success) continue;
+
+		const countResult = await git.getCommitCount(mergeBaseResult.data, branch);
+		if (!countResult.success) continue;
+
+		if (countResult.data === 0) continue;
+
+		candidates.push({ branch: wt.branch, distance: countResult.data });
+	}
+
+	if (candidates.length === 0) return defaultBranch;
+
+	candidates.sort((a, b) => a.distance - b.distance);
+	const closest = candidates[0];
+	return closest ? closest.branch : defaultBranch;
+}
+
+function buildRebaseOrder(worktrees: Worktree[], parentMap: Record<string, string>, defaultBranch: string): Worktree[] {
+	const children = new Map<string, string[]>();
+	for (const wt of worktrees) {
+		if (!wt.branch || wt.branch === defaultBranch) continue;
+		const parent = parentMap[wt.branch] ?? defaultBranch;
+		const siblings = children.get(parent);
+		if (siblings) {
+			siblings.push(wt.branch);
+		} else {
+			children.set(parent, [wt.branch]);
+		}
+	}
+
+	const ordered: string[] = [];
+	const queue: string[] = [defaultBranch];
+
+	while (queue.length > 0) {
+		const current = queue.shift();
+		if (!current) break;
+		if (current !== defaultBranch) {
+			ordered.push(current);
+		}
+		const kids = children.get(current) ?? [];
+		for (const kid of kids) {
+			queue.push(kid);
+		}
+	}
+
+	const wtMap = new Map(worktrees.filter((w) => w.branch).map((w) => [w.branch, w]));
+	return ordered.filter((b) => wtMap.has(b)).map((b) => wtMap.get(b) as Worktree);
 }
 
 export async function updateWorktrees(
@@ -68,13 +132,32 @@ export async function updateWorktrees(
 		defaultBranchUpdate = "ref-updated";
 	}
 
-	const reports: WorktreeReport[] = [];
-
+	const parentMap: Record<string, string> = {};
 	for (const wt of worktrees) {
-		if (!wt.branch) continue;
+		if (!wt.branch || wt.branch === defaultBranch) continue;
+		parentMap[wt.branch] = await findParentBranch(wt.branch, worktrees, defaultBranch, git);
+	}
 
-		if (wt.branch === defaultBranch) {
-			reports.push({ branch: wt.branch, path: wt.path, result: { status: "is-default-branch" } });
+	const orderedWorktrees = buildRebaseOrder(worktrees, parentMap, defaultBranch);
+
+	const reports: WorktreeReport[] = [];
+	const failedBranches = new Set<string>();
+
+	if (mainWorktree) {
+		reports.push({ branch: defaultBranch, path: mainWorktree.path, result: { status: "is-default-branch" } });
+	}
+
+	for (const wt of orderedWorktrees) {
+		const parent = parentMap[wt.branch] ?? defaultBranch;
+
+		if (failedBranches.has(parent)) {
+			reports.push({
+				branch: wt.branch,
+				path: wt.path,
+				parent,
+				result: { status: "skipped", reason: `parent ${parent} failed` },
+			});
+			failedBranches.add(wt.branch);
 			continue;
 		}
 
@@ -83,8 +166,10 @@ export async function updateWorktrees(
 			reports.push({
 				branch: wt.branch,
 				path: wt.path,
+				parent,
 				result: { status: "rebase-conflict", message: "Could not check worktree status" },
 			});
+			failedBranches.add(wt.branch);
 			continue;
 		}
 
@@ -94,6 +179,7 @@ export async function updateWorktrees(
 			reports.push({
 				branch: wt.branch,
 				path: wt.path,
+				parent,
 				result: { status: "dry-run", dirty: isDirty },
 			});
 			continue;
@@ -105,8 +191,10 @@ export async function updateWorktrees(
 				reports.push({
 					branch: wt.branch,
 					path: wt.path,
+					parent,
 					result: { status: "rebase-conflict", message: "Failed to stage changes for WIP commit" },
 				});
+				failedBranches.add(wt.branch);
 				continue;
 			}
 			const wipResult = await git.commitWip(wt.path);
@@ -114,13 +202,15 @@ export async function updateWorktrees(
 				reports.push({
 					branch: wt.branch,
 					path: wt.path,
+					parent,
 					result: { status: "rebase-conflict", message: "Failed to create WIP commit" },
 				});
+				failedBranches.add(wt.branch);
 				continue;
 			}
 		}
 
-		const rebaseResult = await git.rebase(wt.path, defaultBranch);
+		const rebaseResult = await git.rebase(wt.path, parent);
 		if (rebaseResult.success) {
 			if (isDirty) {
 				await git.resetLastCommit(wt.path);
@@ -128,6 +218,7 @@ export async function updateWorktrees(
 			reports.push({
 				branch: wt.branch,
 				path: wt.path,
+				parent,
 				result: { status: isDirty ? "rebased-dirty" : "rebased" },
 			});
 		} else {
@@ -138,8 +229,10 @@ export async function updateWorktrees(
 			reports.push({
 				branch: wt.branch,
 				path: wt.path,
+				parent,
 				result: { status: "rebase-conflict", message: rebaseResult.error.message },
 			});
+			failedBranches.add(wt.branch);
 		}
 	}
 

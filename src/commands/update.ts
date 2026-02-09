@@ -46,23 +46,27 @@ export function updateCommand(container: Container) {
 			}
 
 			for (const report of reports) {
+				const onto = report.parent ?? defaultBranch;
 				switch (report.result.status) {
 					case "is-default-branch":
 						break;
 					case "rebased":
-						ui.success(`${report.branch} rebased onto ${defaultBranch}`);
+						ui.success(`${report.branch} rebased onto ${onto}`);
 						break;
 					case "rebased-dirty":
-						ui.success(`${report.branch} rebased onto ${defaultBranch} (via WIP commit)`);
+						ui.success(`${report.branch} rebased onto ${onto} (via WIP commit)`);
 						break;
 					case "rebase-conflict":
 						ui.warn(`${report.branch} has conflicts, rebase aborted`);
 						break;
 					case "dry-run": {
 						const suffix = report.result.dirty ? " (dirty, via WIP commit)" : "";
-						ui.info(`${report.branch} would be rebased onto ${defaultBranch}${suffix}`);
+						ui.info(`${report.branch} would be rebased onto ${onto}${suffix}`);
 						break;
 					}
+					case "skipped":
+						ui.warn(`${report.branch} skipped: ${report.result.reason}`);
+						break;
 				}
 			}
 
