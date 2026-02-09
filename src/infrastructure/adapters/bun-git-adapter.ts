@@ -445,6 +445,49 @@ export function createBunGitAdapter(logger: LoggerPort): GitPort {
 			}
 		},
 
+		async getMergeBase(branchA: string, branchB: string): Promise<Result<string, GitError>> {
+			try {
+				const { exitCode, stdout, stderr } = await runGit(["merge-base", branchA, branchB]);
+				if (exitCode !== 0) {
+					return Result.err({
+						code: "UNKNOWN",
+						message: stderr || `Failed to find merge-base for ${branchA} and ${branchB}`,
+					});
+				}
+				return Result.ok(stdout);
+			} catch {
+				return Result.err({
+					code: "UNKNOWN",
+					message: `Failed to get merge-base for ${branchA} and ${branchB}`,
+				});
+			}
+		},
+
+		async getCommitCount(from: string, to: string): Promise<Result<number, GitError>> {
+			try {
+				const { exitCode, stdout, stderr } = await runGit(["rev-list", "--count", `${from}..${to}`]);
+				if (exitCode !== 0) {
+					return Result.err({
+						code: "UNKNOWN",
+						message: stderr || `Failed to count commits from ${from} to ${to}`,
+					});
+				}
+				const count = Number.parseInt(stdout, 10);
+				if (Number.isNaN(count)) {
+					return Result.err({
+						code: "UNKNOWN",
+						message: `Invalid commit count output: ${stdout}`,
+					});
+				}
+				return Result.ok(count);
+			} catch {
+				return Result.err({
+					code: "UNKNOWN",
+					message: `Failed to count commits from ${from} to ${to}`,
+				});
+			}
+		},
+
 		async deleteBranchForce(branch: string): Promise<Result<void, GitError>> {
 			try {
 				const { exitCode, stderr } = await runGit(["branch", "-D", branch]);

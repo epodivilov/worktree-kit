@@ -16,6 +16,8 @@ export interface FakeGitOptions {
 	rebaseConflicts?: Set<string>;
 	fetchFails?: boolean;
 	mergeFFOnlyFails?: boolean;
+	mergeBaseMap?: Map<string, string>;
+	commitCountMap?: Map<string, number>;
 }
 
 export function createFakeGit(options: FakeGitOptions = {}): GitPort {
@@ -193,6 +195,30 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 
 		async deleteRemoteBranch(_branch: string, _remote?: string): Promise<Result<void, GitError>> {
 			return Result.ok(undefined);
+		},
+
+		async getMergeBase(branchA: string, branchB: string): Promise<Result<string, GitError>> {
+			const key = `${branchA}:${branchB}`;
+			const sha = options.mergeBaseMap?.get(key);
+			if (!sha) {
+				return Result.err({
+					code: "UNKNOWN",
+					message: `No merge-base configured for ${branchA} and ${branchB}`,
+				});
+			}
+			return Result.ok(sha);
+		},
+
+		async getCommitCount(from: string, to: string): Promise<Result<number, GitError>> {
+			const key = `${from}..${to}`;
+			const count = options.commitCountMap?.get(key);
+			if (count === undefined) {
+				return Result.err({
+					code: "UNKNOWN",
+					message: `No commit count configured for ${from}..${to}`,
+				});
+			}
+			return Result.ok(count);
 		},
 
 		async deleteBranchForce(branch: string): Promise<Result<void, GitError>> {

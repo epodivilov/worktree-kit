@@ -40,4 +40,6 @@ export interface GitPort {
 	stageAll(worktreePath: string): Promise<Result<void, GitError>>;
 	commitWip(worktreePath: string): Promise<Result<void, GitError>>;
 	resetLastCommit(worktreePath: string): Promise<Result<void, GitError>>;
+	getMergeBase(branchA: string, branchB: string): Promise<Result<string, GitError>>;
+	getCommitCount(from: string, to: string): Promise<Result<number, GitError>>;
 }
