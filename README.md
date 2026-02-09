@@ -2,9 +2,27 @@
 
 CLI tool to simplify git-worktree workflow with automatic config file copying.
 
-## Problem
+## Why worktree-kit?
 
-When creating a new git worktree, you often need to manually copy configuration files that are not tracked by git (`.env`, local configs, etc.). This tool automates that process.
+Git worktrees let you work on multiple branches simultaneously, but the built-in tooling leaves gaps:
+
+- **Config copying** — `.env`, local configs, and other untracked files must be copied manually to each new worktree
+- **Worktree management** — no convenient way to list, remove, or bulk-manage worktrees
+- **Staying in sync** — keeping feature branches rebased on the default branch requires repetitive manual work
+- **Stale cleanup** — worktrees and branches for deleted remote branches pile up over time
+
+worktree-kit fills these gaps with a single CLI.
+
+## Features
+
+- Interactive branch selection with local and remote branch support
+- Automatic file and directory copying with glob patterns
+- Post-create and pre-remove hooks with environment variables
+- Smart update: fetch, fast-forward default branch, rebase feature branches in correct order
+- Parent branch detection via merge-base for proper rebase ordering
+- Automatic cleanup of worktrees with deleted remote branches
+- Dry-run mode for safe operation preview
+- Verbose logging (`--verbose` or `WT_VERBOSE=1`)
 
 ## Installation
 
@@ -28,34 +46,188 @@ pnpm build
 cp ./dist/wt ~/.local/bin/
 ```
 
-## Usage
+## Quick Start
 
 ```bash
-# Initialize .worktreekitrc in current project
+# 1. Initialize config in your project
 wt init
 
-# Create a new worktree with automatic config copying
+# 2. Create a worktree
 wt create feature/my-feature
 
-# Create worktree from specific base branch
-wt create feature/my-feature --base develop
-
-# List all worktrees
+# 3. See all worktrees
 wt list
+```
 
-# Remove a worktree (interactive selection)
+## Commands
+
+### `wt init`
+
+Create `.worktreekitrc` configuration file in the repository root.
+
+```bash
+wt init [options]
+```
+
+| Flag | Alias | Description |
+|------|-------|-------------|
+| `--force` | `-f` | Overwrite existing config |
+
+### `wt create`
+
+Create a new worktree with automatic config file copying and hook execution.
+
+```bash
+wt create [branch] [options]
+```
+
+| Flag | Alias | Description |
+|------|-------|-------------|
+| `--base` | `-b` | Base branch to create from |
+
+**Examples:**
+
+```bash
+# Interactive mode — select from local/remote branches or create new
+wt create
+
+# Create worktree for an existing branch
+wt create feature/my-feature
+
+# Create worktree from a specific base branch
+wt create feature/my-feature --base develop
+```
+
+**Interactive mode** (no branch argument):
+
+- Shows a menu of available local branches (excluding those already with worktrees)
+- "Create new branch" option — prompts for a branch name, then asks for a source branch
+- "Remote branches..." submenu — lists available remote branches
+
+**Base branch selection** for new branches (priority order):
+
+1. `--base` flag
+2. `create.base` config option
+3. `defaultBase` config behavior: `"current"` uses current branch, `"default"` uses main/master, `"ask"` shows interactive prompt
+
+After creation, files from the `copy` config are copied and `post-create` hooks are executed.
+
+### `wt list`
+
+List all worktrees in the repository.
+
+```bash
+wt list
+```
+
+Output shows each worktree with its path. Badges: `(main)` for the main worktree, `(current)` for the active one.
+
+### `wt remove`
+
+Remove worktree(s) and optionally delete their branches.
+
+```bash
+wt remove [branch] [options]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--delete-branch` | Delete local branch after removal |
+| `--delete-remote-branch` | Delete remote branch |
+| `--force` | Force delete unmerged branches |
+| `--dry-run` | Show what would be done without making changes |
+
+**Examples:**
+
+```bash
+# Interactive selection
 wt remove
 
-# Remove a specific worktree
+# Remove specific worktree
 wt remove feature/old-feature
 
-# Enable verbose logging
-wt --verbose create feature/my-feature
+# Remove and delete branch
+wt remove feature/old-feature --delete-branch
+
+# Preview what would happen
+wt remove --dry-run
 ```
+
+**Interactive mode** (no branch argument):
+
+- Shows a menu of removable worktrees (main worktree excluded)
+- "Remove all" option is available when 2+ worktrees exist
+- Asks for confirmation before removal
+
+**Branch deletion** — when not specified via flags, behavior is controlled by `remove.deleteBranch` / `remove.deleteRemoteBranch` config options. If those are also not set, prompts interactively. Unmerged branches require `--force` or interactive confirmation.
+
+Runs `pre-remove` hooks before removal. Automatically removes empty `rootDir` after the last worktree is deleted.
+
+### `wt update`
+
+Fetch from remotes, fast-forward the default branch, and rebase feature branches.
+
+```bash
+wt update [branch] [options]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--dry-run` | Show what would be done without making changes |
+
+**Examples:**
+
+```bash
+# Update all worktrees
+wt update
+
+# Update a specific branch and its sub-branches
+wt update feature/parent
+
+# Preview what would happen
+wt update --dry-run
+```
+
+**How it works:**
+
+1. Fetches all remotes
+2. Fast-forwards the default branch (or updates its ref if no worktree exists for it)
+3. Detects parent branches via merge-base
+4. Rebases feature branches in correct order — parents before children
+
+If a worktree has uncommitted changes, a temporary WIP commit is created before rebase and reset afterwards. On rebase conflict, the rebase is aborted and the issue is reported.
+
+### `wt cleanup`
+
+Remove worktrees and branches whose remote tracking branch has been deleted.
+
+```bash
+wt cleanup [options]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--force` | Delete branches even if they have unmerged changes |
+| `--dry-run` | Show what would be done without making changes |
+
+**Examples:**
+
+```bash
+# Interactive cleanup
+wt cleanup
+
+# Force delete unmerged branches
+wt cleanup --force
+
+# Preview what would happen
+wt cleanup --dry-run
+```
+
+Runs `git fetch --prune`, finds branches with gone remotes, shows candidates, and asks for confirmation. Skips dirty worktrees and unmerged branches unless `--force` is used.
 
 ## Configuration
 
-Create a `.worktreekitrc` file in your project root (or use `wt init`):
+Create a `.worktreekitrc` file in the project root (or use `wt init`):
 
 ```json
 {
@@ -63,30 +235,48 @@ Create a `.worktreekitrc` file in your project root (or use `wt init`):
   "copy": [
     ".env",
     ".env.local",
-    "config/local.json"
+    "config/*.json"
   ],
+  "defaultBase": "ask",
+  "create": {
+    "base": "main"
+  },
+  "remove": {
+    "deleteBranch": false,
+    "deleteRemoteBranch": false
+  },
   "hooks": {
     "post-create": [
-      "bun install --frozen-lockfile"
-    ]
+      "pnpm install --frozen-lockfile"
+    ],
+    "pre-remove": []
   }
 }
 ```
 
 ### Options
 
-- `rootDir` — Directory where new worktrees will be created (relative to main worktree)
-- `copy` — Files to copy from the main worktree to new worktrees
-- `hooks.post-create` — Commands to run after creating a worktree
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `rootDir` | `string` | `"../worktrees"` | Directory for new worktrees (relative to main worktree) |
+| `copy` | `string[]` | `[]` | Files to copy. Supports exact paths, directories, and glob patterns |
+| `defaultBase` | `"current"` \| `"default"` \| `"ask"` | `"ask"` | Base branch selection strategy when creating new branches |
+| `create.base` | `string` | — | Fixed base branch for all new worktrees (overrides `defaultBase`) |
+| `remove.deleteBranch` | `boolean` | — | Auto-delete local branch on removal. Prompts if not set |
+| `remove.deleteRemoteBranch` | `boolean` | — | Auto-delete remote branch on removal. Prompts if not set |
+| `hooks.post-create` | `string[]` | `[]` | Commands to run after creating a worktree |
+| `hooks.pre-remove` | `string[]` | `[]` | Commands to run before removing a worktree |
 
 ### Hook Environment Variables
 
-Post-create hooks receive the following environment variables:
+Both `post-create` and `pre-remove` hooks receive the following environment variables:
 
-- `WORKTREE_PATH` — Path to the new worktree
-- `WORKTREE_BRANCH` — Branch name
-- `REPO_ROOT` — Repository root path
-- `BASE_BRANCH` — Base branch (if specified with `--base`)
+| Variable | Description | Hooks |
+|----------|-------------|-------|
+| `WORKTREE_PATH` | Absolute path to the worktree | both |
+| `WORKTREE_BRANCH` | Branch name | both |
+| `REPO_ROOT` | Repository root path | both |
+| `BASE_BRANCH` | Base branch (if specified with `--base`) | `post-create` |
 
 ## Development
 
