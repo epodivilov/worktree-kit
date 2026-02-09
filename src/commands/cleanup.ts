@@ -22,7 +22,7 @@ export function cleanupCommand(container: Container) {
 			},
 			"dry-run": {
 				type: "boolean",
-				description: "Show what would be deleted without actually deleting",
+				description: "Show what would be done without making changes",
 				required: false,
 			},
 		},

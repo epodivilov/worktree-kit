@@ -36,6 +36,11 @@ export function removeCommand(container: Container) {
 				description: "Force delete unmerged branches",
 				required: false,
 			},
+			"dry-run": {
+				type: "boolean",
+				description: "Show what would be done without making changes",
+				required: false,
+			},
 		},
 		async run({ args }) {
 			const { ui, git, fs, shell } = container;
@@ -63,6 +68,21 @@ export function removeCommand(container: Container) {
 			);
 
 			const force = (args.force as boolean | undefined) ?? false;
+			const dryRun = (args["dry-run"] as boolean | undefined) ?? false;
+
+			if (dryRun) {
+				for (const branch of branchesToRemove) {
+					ui.info(`Would remove worktree "${branch}"`);
+					if (shouldDeleteBranches) {
+						ui.info(`Would delete branch "${branch}"`);
+					}
+					if (shouldDeleteRemoteBranches) {
+						ui.info(`Would delete remote branch "${branch}"`);
+					}
+				}
+				ui.outro("Dry run — no changes made");
+				return;
+			}
 
 			// === Remove worktrees ===
 			const spinner = ui.createSpinner();
