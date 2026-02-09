@@ -115,6 +115,7 @@ describe("WorktreeConfigSchema", () => {
 			expect(result.output.create).toEqual({ base: undefined });
 			expect(result.output.remove).toEqual({
 				deleteBranch: undefined,
+				deleteRemoteBranch: undefined,
 			});
 		}
 	});

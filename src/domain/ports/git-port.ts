@@ -28,6 +28,7 @@ export interface GitPort {
 	removeWorktree(path: string): Promise<Result<void, GitError>>;
 	deleteBranch(branch: string): Promise<Result<void, GitError>>;
 	deleteBranchForce(branch: string): Promise<Result<void, GitError>>;
+	deleteRemoteBranch(branch: string, remote?: string): Promise<Result<void, GitError>>;
 	fetchAll(): Promise<Result<void, GitError>>;
 	mergeFFOnly(worktreePath: string, branch: string): Promise<Result<void, GitError>>;
 	updateBranchRef(branch: string): Promise<Result<void, GitError>>;

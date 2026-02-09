@@ -11,6 +11,7 @@ export interface CreateCommandConfig {
 
 export interface RemoveCommandConfig {
 	readonly deleteBranch?: boolean;
+	readonly deleteRemoteBranch?: boolean;
 }
 
 export interface WorktreeConfig {

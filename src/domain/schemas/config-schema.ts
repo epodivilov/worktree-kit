@@ -14,6 +14,7 @@ const CreateCommandConfigSchema = v.optional(
 const RemoveCommandConfigSchema = v.optional(
 	v.object({
 		deleteBranch: v.optional(v.boolean()),
+		deleteRemoteBranch: v.optional(v.boolean()),
 	}),
 );
 
@@ -39,6 +40,7 @@ export const WorktreeConfigSchema = v.pipe(
 		},
 		remove: {
 			deleteBranch: input.remove?.deleteBranch,
+			deleteRemoteBranch: input.remove?.deleteRemoteBranch,
 		},
 	})),
 );

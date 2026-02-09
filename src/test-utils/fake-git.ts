@@ -163,6 +163,10 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 			return Result.ok(dirtyWorktrees?.has(worktreePath) ?? false);
 		},
 
+		async deleteRemoteBranch(_branch: string, _remote?: string): Promise<Result<void, GitError>> {
+			return Result.ok(undefined);
+		},
+
 		async deleteBranchForce(branch: string): Promise<Result<void, GitError>> {
 			const branchExists = branchStore.includes(branch) || store.some((w) => w.branch === branch);
 			if (!branchExists || deletedBranches.has(branch)) {

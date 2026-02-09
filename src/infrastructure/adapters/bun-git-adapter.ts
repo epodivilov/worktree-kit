@@ -362,6 +362,24 @@ export function createBunGitAdapter(logger: LoggerPort): GitPort {
 			}
 		},
 
+		async deleteRemoteBranch(branch: string, remote = "origin"): Promise<Result<void, GitError>> {
+			try {
+				const { exitCode, stderr } = await runGit(["push", "--delete", remote, branch]);
+				if (exitCode !== 0) {
+					return Result.err({
+						code: "UNKNOWN",
+						message: stderr || `Failed to delete remote branch "${branch}"`,
+					});
+				}
+				return Result.ok(undefined);
+			} catch {
+				return Result.err({
+					code: "UNKNOWN",
+					message: `Failed to delete remote branch "${branch}"`,
+				});
+			}
+		},
+
 		async deleteBranchForce(branch: string): Promise<Result<void, GitError>> {
 			try {
 				const { exitCode, stderr } = await runGit(["branch", "-D", branch]);

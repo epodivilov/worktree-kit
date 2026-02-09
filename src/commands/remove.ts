@@ -4,7 +4,12 @@ import pc from "picocolors";
 import { listWorktrees } from "../application/use-cases/list-worktrees.ts";
 import { loadConfig } from "../application/use-cases/load-config.ts";
 import { removeWorktree } from "../application/use-cases/remove-worktree.ts";
-import { parseBooleanFlag, resolveBranchesToRemove, resolveDeleteBranch } from "../cli/resolve-params.ts";
+import {
+	parseBooleanFlag,
+	resolveBranchesToRemove,
+	resolveDeleteBranch,
+	resolveDeleteRemoteBranch,
+} from "../cli/resolve-params.ts";
 import { INIT_ROOT_DIR } from "../domain/constants.ts";
 import type { Container } from "../infrastructure/container.ts";
 import { Result } from "../shared/result.ts";
@@ -31,6 +36,11 @@ export function removeCommand(container: Container) {
 				description: "Do not delete the branch",
 				required: false,
 			},
+			"delete-remote-branch": {
+				type: "boolean",
+				description: "Delete the remote branch",
+				required: false,
+			},
 			force: {
 				type: "boolean",
 				description: "Force delete unmerged branches",
@@ -55,6 +65,13 @@ export function removeCommand(container: Container) {
 			const shouldDeleteBranches = await resolveDeleteBranch(
 				deleteBranchFlag,
 				config?.remove.deleteBranch,
+				{ ui },
+				{ branches: branchesToRemove },
+			);
+
+			const shouldDeleteRemoteBranches = await resolveDeleteRemoteBranch(
+				args["delete-remote-branch"] as boolean | undefined,
+				config?.remove.deleteRemoteBranch,
 				{ ui },
 				{ branches: branchesToRemove },
 			);
@@ -164,6 +181,19 @@ export function removeCommand(container: Container) {
 						}
 					} else {
 						spinner.stop(pc.green(`Branch "${branchToRemove}" deleted`));
+					}
+				}
+
+				if (shouldDeleteRemoteBranches) {
+					spinner.start(`Deleting remote branch "${branchToRemove}"...`);
+
+					const deleteRemoteResult = await git.deleteRemoteBranch(branchToRemove);
+
+					if (Result.isErr(deleteRemoteResult)) {
+						spinner.stop(pc.red(`Failed to delete remote branch "${branchToRemove}"`));
+						ui.warn(deleteRemoteResult.error.message);
+					} else {
+						spinner.stop(pc.green(`Remote branch "${branchToRemove}" deleted`));
 					}
 				}
 			}

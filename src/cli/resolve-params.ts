@@ -241,6 +241,26 @@ export async function resolveBranchesToRemove(
 	return [selected];
 }
 
+export async function resolveDeleteRemoteBranch(
+	flag: boolean | undefined,
+	configValue: boolean | undefined,
+	deps: { ui: UiPort },
+	context: { branches: string[] },
+): Promise<boolean> {
+	if (flag !== undefined) return flag;
+
+	if (configValue !== undefined) return configValue;
+
+	const { ui } = deps;
+
+	const message =
+		context.branches.length > 1
+			? `Also delete ${context.branches.length} remote branches?`
+			: `Also delete remote branch "${context.branches[0]}"?`;
+
+	return unwrapOrCancel(ui, await ui.confirm({ message, initialValue: false }));
+}
+
 export async function resolveDeleteBranch(
 	flag: boolean | undefined,
 	configValue: boolean | undefined,
