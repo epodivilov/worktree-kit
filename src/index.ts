@@ -1,5 +1,6 @@
 import { defineCommand, runMain } from "citty";
 import pkg from "../package.json";
+import { cleanupCommand } from "./commands/cleanup.ts";
 import { createCommand } from "./commands/create.ts";
 import { initCommand } from "./commands/init.ts";
 import { listCommand } from "./commands/list.ts";
@@ -23,6 +24,7 @@ const main = defineCommand({
 		remove: removeCommand(container),
 		update: updateCommand(container),
 		init: initCommand(container),
+		cleanup: cleanupCommand(container),
 	},
 });
 
