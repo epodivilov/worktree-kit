@@ -1,11 +1,16 @@
 import type { GitPort } from "../../domain/ports/git-port.ts";
 import { Result as R, type Result } from "../../shared/result.ts";
 
+export interface UpdateWorktreesInput {
+	dryRun: boolean;
+}
+
 export type WorktreeUpdateStatus =
 	| { status: "rebased" }
 	| { status: "rebased-dirty" }
 	| { status: "rebase-conflict"; message: string }
-	| { status: "is-default-branch" };
+	| { status: "is-default-branch" }
+	| { status: "dry-run"; dirty: boolean };
 
 export interface WorktreeReport {
 	branch: string;
@@ -24,6 +29,7 @@ export interface UpdateWorktreesDeps {
 }
 
 export async function updateWorktrees(
+	input: UpdateWorktreesInput,
 	deps: UpdateWorktreesDeps,
 ): Promise<Result<UpdateWorktreesOutput, Error>> {
 	const { git } = deps;
@@ -83,6 +89,15 @@ export async function updateWorktrees(
 		}
 
 		const isDirty = dirtyResult.data;
+
+		if (input.dryRun) {
+			reports.push({
+				branch: wt.branch,
+				path: wt.path,
+				result: { status: "dry-run", dirty: isDirty },
+			});
+			continue;
+		}
 
 		if (isDirty) {
 			const stageResult = await git.stageAll(wt.path);

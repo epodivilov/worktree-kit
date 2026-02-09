@@ -10,15 +10,24 @@ export function updateCommand(container: Container) {
 			name: "update",
 			description: "Fetch, fast-forward default branch, and rebase feature branches",
 		},
-		async run() {
+		args: {
+			"dry-run": {
+				type: "boolean",
+				description: "Show what would be done without making changes",
+				required: false,
+			},
+		},
+		async run({ args }) {
 			const { ui, git } = container;
+
+			const dryRun = (args["dry-run"] as boolean | undefined) ?? false;
 
 			ui.intro("worktree-kit update");
 
 			const spinner = ui.createSpinner();
 			spinner.start("Fetching and updating worktrees...");
 
-			const result = await updateWorktrees({ git });
+			const result = await updateWorktrees({ dryRun }, { git });
 
 			if (Result.isErr(result)) {
 				spinner.stop(pc.red("Failed"));
@@ -49,10 +58,15 @@ export function updateCommand(container: Container) {
 					case "rebase-conflict":
 						ui.warn(`${report.branch} has conflicts, rebase aborted`);
 						break;
+					case "dry-run": {
+						const suffix = report.result.dirty ? " (dirty, via WIP commit)" : "";
+						ui.info(`${report.branch} would be rebased onto ${defaultBranch}${suffix}`);
+						break;
+					}
 				}
 			}
 
-			ui.outro("Done!");
+			ui.outro(dryRun ? "Dry run — no changes made" : "Done!");
 		},
 	});
 }

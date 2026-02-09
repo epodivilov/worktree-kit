@@ -11,7 +11,7 @@ const featureB: Worktree = { path: "/repo-b", branch: "feature-b", head: "ccc", 
 describe("updateWorktrees", () => {
 	test("happy path: fetch + ff + rebase all feature branches", async () => {
 		const git = createFakeGit({ worktrees: [mainWt, featureA, featureB] });
-		const result = await updateWorktrees({ git });
+		const result = await updateWorktrees({ dryRun: false }, { git });
 
 		const output = expectOk(result);
 		expect(output.defaultBranch).toBe("main");
@@ -24,7 +24,7 @@ describe("updateWorktrees", () => {
 
 	test("default branch not checked out — uses ref update", async () => {
 		const git = createFakeGit({ worktrees: [featureA] });
-		const result = await updateWorktrees({ git });
+		const result = await updateWorktrees({ dryRun: false }, { git });
 
 		const output = expectOk(result);
 		expect(output.defaultBranchUpdate).toBe("ref-updated");
@@ -32,7 +32,7 @@ describe("updateWorktrees", () => {
 
 	test("fetch failure — returns error", async () => {
 		const git = createFakeGit({ worktrees: [mainWt], fetchFails: true });
-		const result = await updateWorktrees({ git });
+		const result = await updateWorktrees({ dryRun: false }, { git });
 
 		const error = expectErr(result);
 		expect(error.message).toContain("Fetch failed");
@@ -40,7 +40,7 @@ describe("updateWorktrees", () => {
 
 	test("ff-only failure — returns error, no rebase", async () => {
 		const git = createFakeGit({ worktrees: [mainWt, featureA], mergeFFOnlyFails: true });
-		const result = await updateWorktrees({ git });
+		const result = await updateWorktrees({ dryRun: false }, { git });
 
 		const error = expectErr(result);
 		expect(error.message).toContain("Failed to fast-forward");
@@ -51,7 +51,7 @@ describe("updateWorktrees", () => {
 			worktrees: [mainWt, featureA, featureB],
 			dirtyWorktrees: new Set(["/repo-a"]),
 		});
-		const result = await updateWorktrees({ git });
+		const result = await updateWorktrees({ dryRun: false }, { git });
 
 		const output = expectOk(result);
 		expect(output.reports[1]).toMatchObject({ branch: "feature-a", result: { status: "rebased-dirty" } });
@@ -64,7 +64,7 @@ describe("updateWorktrees", () => {
 			dirtyWorktrees: new Set(["/repo-a"]),
 			rebaseConflicts: new Set(["/repo-a"]),
 		});
-		const result = await updateWorktrees({ git });
+		const result = await updateWorktrees({ dryRun: false }, { git });
 
 		const output = expectOk(result);
 		expect(output.reports[1]).toMatchObject({ branch: "feature-a", result: { status: "rebase-conflict" } });
@@ -76,17 +76,39 @@ describe("updateWorktrees", () => {
 			worktrees: [mainWt, featureA, featureB],
 			rebaseConflicts: new Set(["/repo-a"]),
 		});
-		const result = await updateWorktrees({ git });
+		const result = await updateWorktrees({ dryRun: false }, { git });
 
 		const output = expectOk(result);
 		expect(output.reports[1]).toMatchObject({ branch: "feature-a", result: { status: "rebase-conflict" } });
 		expect(output.reports[2]).toMatchObject({ branch: "feature-b", result: { status: "rebased" } });
 	});
 
+	test("dry-run — reports what would be done", async () => {
+		const git = createFakeGit({ worktrees: [mainWt, featureA, featureB] });
+		const result = await updateWorktrees({ dryRun: true }, { git });
+
+		const output = expectOk(result);
+		expect(output.reports[0]).toMatchObject({ branch: "main", result: { status: "is-default-branch" } });
+		expect(output.reports[1]).toMatchObject({ branch: "feature-a", result: { status: "dry-run", dirty: false } });
+		expect(output.reports[2]).toMatchObject({ branch: "feature-b", result: { status: "dry-run", dirty: false } });
+	});
+
+	test("dry-run — marks dirty worktrees", async () => {
+		const git = createFakeGit({
+			worktrees: [mainWt, featureA, featureB],
+			dirtyWorktrees: new Set(["/repo-a"]),
+		});
+		const result = await updateWorktrees({ dryRun: true }, { git });
+
+		const output = expectOk(result);
+		expect(output.reports[1]).toMatchObject({ branch: "feature-a", result: { status: "dry-run", dirty: true } });
+		expect(output.reports[2]).toMatchObject({ branch: "feature-b", result: { status: "dry-run", dirty: false } });
+	});
+
 	test("detached HEAD worktree — silently skipped", async () => {
 		const detached: Worktree = { path: "/repo-detached", branch: "", head: "ddd", isMain: false };
 		const git = createFakeGit({ worktrees: [mainWt, detached, featureA] });
-		const result = await updateWorktrees({ git });
+		const result = await updateWorktrees({ dryRun: false }, { git });
 
 		const output = expectOk(result);
 		expect(output.reports).toHaveLength(2);
