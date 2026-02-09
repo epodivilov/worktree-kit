@@ -3,7 +3,8 @@ import pc from "picocolors";
 import { createWorktree } from "../application/use-cases/create-worktree.ts";
 import { loadConfig } from "../application/use-cases/load-config.ts";
 import { renderNotifications } from "../cli/render-notifications.ts";
-import type { DefaultBase } from "../domain/entities/config.ts";
+import { resolveBaseBranch, resolveBranch } from "../cli/resolve-params.ts";
+import type { CreateCommandConfig, DefaultBase } from "../domain/entities/config.ts";
 import type { Container } from "../infrastructure/container.ts";
 import { Result } from "../shared/result.ts";
 
@@ -31,142 +32,26 @@ export function createCommand(container: Container) {
 
 			ui.intro("worktree-kit create");
 
-			// Load config early to access defaultBase setting
 			const configResult = await loadConfig({ git, fs });
-			const defaultBase: DefaultBase = configResult.success ? configResult.data.config.defaultBase : "ask";
+			const fallbackConfig: { defaultBase: DefaultBase; create: CreateCommandConfig } = {
+				defaultBase: "ask",
+				create: {},
+			};
+			const config = configResult.success ? configResult.data.config : fallbackConfig;
 
-			let branch = args.branch as string | undefined;
-			let baseBranch = args.base as string | undefined;
+			// === Resolve params ===
+			const { branch, isNewBranch, isRemoteBranch } = await resolveBranch(args.branch as string | undefined, {
+				ui,
+				git,
+			});
 
-			// === Interactive mode: select or create branch ===
-			let isRemoteBranch = false;
-			let isNewBranch = !!branch; // positional arg means new branch
-
-			if (!branch) {
-				const branchesResult = await git.listBranches();
-				if (Result.isErr(branchesResult)) {
-					ui.error(branchesResult.error.message);
-					process.exit(1);
-				}
-
-				const remoteBranchesResult = await git.listRemoteBranches();
-				if (Result.isErr(remoteBranchesResult)) {
-					ui.error(remoteBranchesResult.error.message);
-					process.exit(1);
-				}
-
-				const worktreesResult = await git.listWorktrees();
-				if (Result.isErr(worktreesResult)) {
-					ui.error(worktreesResult.error.message);
-					process.exit(1);
-				}
-
-				const usedBranches = new Set(worktreesResult.data.map((w) => w.branch));
-				const localBranches = new Set(branchesResult.data);
-				const availableLocalBranches = branchesResult.data.filter((b) => !usedBranches.has(b));
-				const availableRemoteBranches = remoteBranchesResult.data.filter(
-					(b) => !localBranches.has(b) && !usedBranches.has(b),
+			let baseBranch: string | undefined;
+			if (isNewBranch && !isRemoteBranch) {
+				baseBranch = await resolveBaseBranch(
+					args.base as string | undefined,
+					{ base: config.create.base, defaultBase: config.defaultBase },
+					{ ui, git },
 				);
-
-				const CREATE_NEW = "__create_new__";
-				const REMOTE_BRANCHES = "__remote_branches__";
-
-				// Build first-level options: Create new, local branches, and Remote branches submenu
-				const firstLevelOptions: Array<{ value: string; label: string; hint?: string }> = [
-					{ value: CREATE_NEW, label: "Create new branch", hint: "Enter a new branch name" },
-					...availableLocalBranches.map((b) => ({ value: b, label: b })),
-				];
-
-				if (availableRemoteBranches.length > 0) {
-					firstLevelOptions.push({
-						value: REMOTE_BRANCHES,
-						label: "Remote branches...",
-						hint: `${availableRemoteBranches.length} available`,
-					});
-				}
-
-				const selected = await ui.select<string>({
-					message: "Select branch for worktree",
-					options: firstLevelOptions,
-				});
-
-				if (ui.isCancel(selected)) {
-					ui.cancel();
-					process.exit(0);
-				}
-
-				if (selected === CREATE_NEW) {
-					const newBranch = await ui.text({
-						message: "Enter new branch name",
-						placeholder: "feature/my-feature",
-					});
-
-					if (ui.isCancel(newBranch)) {
-						ui.cancel();
-						process.exit(0);
-					}
-
-					branch = newBranch;
-					isNewBranch = true;
-				} else if (selected === REMOTE_BRANCHES) {
-					const remoteBranch = await ui.select<string>({
-						message: "Select remote branch",
-						options: availableRemoteBranches.map((b) => ({ value: b, label: b })),
-					});
-
-					if (ui.isCancel(remoteBranch)) {
-						ui.cancel();
-						process.exit(0);
-					}
-
-					branch = remoteBranch;
-					isRemoteBranch = true;
-				} else {
-					branch = selected;
-				}
-			}
-
-			// === Resolve base branch for new branches ===
-			if (isNewBranch && !isRemoteBranch && !baseBranch) {
-				if (defaultBase === "ask") {
-					const branchesResult = await git.listBranches();
-					if (Result.isOk(branchesResult) && branchesResult.data.length > 0) {
-						const defaultBranchResult = await git.getDefaultBranch();
-						const defaultBranchName = Result.isOk(defaultBranchResult) ? defaultBranchResult.data : undefined;
-
-						const options = branchesResult.data.map((b) => ({
-							value: b,
-							label: b,
-							hint: b === defaultBranchName ? "default" : undefined,
-						}));
-
-						// Move default branch to top if found
-						if (defaultBranchName) {
-							const idx = options.findIndex((o) => o.value === defaultBranchName);
-							if (idx > 0) {
-								options.unshift(...options.splice(idx, 1));
-							}
-						}
-
-						const selectedBase = await ui.select<string>({
-							message: "Select source branch",
-							options,
-						});
-
-						if (ui.isCancel(selectedBase)) {
-							ui.cancel();
-							process.exit(0);
-						}
-
-						baseBranch = selectedBase;
-					}
-				} else if (defaultBase === "default") {
-					const defaultBranchResult = await git.getDefaultBranch();
-					if (Result.isOk(defaultBranchResult)) {
-						baseBranch = defaultBranchResult.data;
-					}
-				}
-				// defaultBase === "current" → baseBranch stays undefined (uses HEAD)
 			}
 
 			// === Stage 1: Create worktree and copy files ===

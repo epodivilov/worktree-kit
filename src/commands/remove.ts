@@ -4,6 +4,7 @@ import pc from "picocolors";
 import { listWorktrees } from "../application/use-cases/list-worktrees.ts";
 import { loadConfig } from "../application/use-cases/load-config.ts";
 import { removeWorktree } from "../application/use-cases/remove-worktree.ts";
+import { parseBooleanFlag, resolveBranchesToRemove, resolveDeleteBranch } from "../cli/resolve-params.ts";
 import { INIT_ROOT_DIR } from "../domain/constants.ts";
 import type { Container } from "../infrastructure/container.ts";
 import { Result } from "../shared/result.ts";
@@ -20,114 +21,50 @@ export function removeCommand(container: Container) {
 				description: "Branch name of the worktree to remove",
 				required: false,
 			},
+			"delete-branch": {
+				type: "boolean",
+				description: "Delete the branch after removing worktree",
+				required: false,
+			},
+			"no-delete-branch": {
+				type: "boolean",
+				description: "Do not delete the branch",
+				required: false,
+			},
+			force: {
+				type: "boolean",
+				description: "Force delete unmerged branches",
+				required: false,
+			},
 		},
 		async run({ args }) {
 			const { ui, git, fs, shell } = container;
 
 			ui.intro("worktree-kit remove");
 
-			const branch = args.branch as string | undefined;
+			const configResult = await loadConfig({ fs, git });
+			const config = configResult.success ? configResult.data.config : null;
 
-			const REMOVE_ALL = "__remove_all__";
-			let branchesToRemove: string[] = [];
-			let shouldDeleteBranches = false;
+			// === Resolve params ===
+			const branchesToRemove = await resolveBranchesToRemove(args.branch as string | undefined, { ui, git });
 
-			if (!branch) {
-				const listResult = await listWorktrees({ git });
+			const deleteBranchFlag = parseBooleanFlag(
+				args["delete-branch"] as boolean | undefined,
+				args["no-delete-branch"] as boolean | undefined,
+			);
+			const shouldDeleteBranches = await resolveDeleteBranch(
+				deleteBranchFlag,
+				config?.remove.deleteBranch,
+				{ ui },
+				{ branches: branchesToRemove },
+			);
 
-				if (Result.isErr(listResult)) {
-					ui.error(listResult.error.message);
-					process.exit(1);
-				}
+			const force = (args.force as boolean | undefined) ?? false;
 
-				const removable = listResult.data.worktrees.filter((w) => !w.isMain);
-
-				if (removable.length === 0) {
-					ui.info("No worktrees to remove");
-					ui.outro("Done!");
-					return;
-				}
-
-				const options = [
-					...removable.map((w) => ({
-						value: w.branch,
-						label: w.branch,
-						hint: w.path,
-					})),
-				];
-
-				if (removable.length > 1) {
-					options.push({
-						value: REMOVE_ALL,
-						label: "Remove all worktrees",
-						hint: `${removable.length} worktrees`,
-					});
-				}
-
-				const selected = await ui.select<string>({
-					message: "Select worktree to remove",
-					options,
-				});
-
-				if (ui.isCancel(selected)) {
-					ui.cancel();
-					process.exit(0);
-				}
-
-				if (selected === REMOVE_ALL) {
-					ui.info("The following worktrees will be removed:");
-					for (const w of removable) {
-						ui.info(`  - ${w.branch} (${w.path})`);
-					}
-
-					const confirmed = await ui.confirm({
-						message: `Remove all ${removable.length} worktrees?`,
-						initialValue: false,
-					});
-
-					if (ui.isCancel(confirmed) || !confirmed) {
-						ui.cancel();
-						process.exit(0);
-					}
-
-					branchesToRemove = removable.map((w) => w.branch);
-				} else {
-					const confirmed = await ui.confirm({
-						message: `Remove worktree "${selected}"?`,
-						initialValue: false,
-					});
-
-					if (ui.isCancel(confirmed) || !confirmed) {
-						ui.cancel();
-						process.exit(0);
-					}
-
-					branchesToRemove = [selected];
-				}
-			} else {
-				branchesToRemove = [branch];
-			}
-
-			const deleteBranchConfirm = await ui.confirm({
-				message:
-					branchesToRemove.length > 1
-						? `Also delete ${branchesToRemove.length} branches?`
-						: `Also delete branch "${branchesToRemove[0]}"?`,
-				initialValue: false,
-			});
-
-			if (ui.isCancel(deleteBranchConfirm)) {
-				ui.cancel();
-				process.exit(0);
-			}
-
-			shouldDeleteBranches = deleteBranchConfirm === true;
-
+			// === Remove worktrees ===
 			const spinner = ui.createSpinner();
 
-			// Load config for pre-remove hooks
-			const configResult = await loadConfig({ fs, git });
-			const preRemoveHooks = Result.isOk(configResult) ? configResult.data.config.hooks["pre-remove"] : [];
+			const preRemoveHooks = config?.hooks["pre-remove"] ?? [];
 
 			const worktreesByBranch = new Map<string, { path: string; branch: string }>();
 			let repoRoot = "";
@@ -201,12 +138,16 @@ export function removeCommand(container: Container) {
 						if (deleteResult.error.code === "BRANCH_NOT_MERGED") {
 							spinner.stop(pc.yellow(`Branch "${branchToRemove}" not merged`));
 
-							const forceConfirm = await ui.confirm({
-								message: `Branch "${branchToRemove}" is not merged. Force delete?`,
-								initialValue: false,
-							});
+							let shouldForce = force;
+							if (!shouldForce) {
+								const forceConfirm = await ui.confirm({
+									message: `Branch "${branchToRemove}" is not merged. Force delete?`,
+									initialValue: false,
+								});
+								shouldForce = !ui.isCancel(forceConfirm) && forceConfirm;
+							}
 
-							if (!ui.isCancel(forceConfirm) && forceConfirm) {
+							if (shouldForce) {
 								spinner.start(`Force deleting branch "${branchToRemove}"...`);
 								const forceResult = await git.deleteBranchForce(branchToRemove);
 
@@ -233,7 +174,6 @@ export function removeCommand(container: Container) {
 				const nonMainWorktrees = remainingResult.data.worktrees.filter((w) => !w.isMain);
 
 				if (nonMainWorktrees.length === 0) {
-					// All worktrees removed, check if we should clean up root directory
 					const cleanupConfigResult = await loadConfig({ fs, git });
 					const rootDir = Result.isOk(cleanupConfigResult) ? cleanupConfigResult.data.config.rootDir : INIT_ROOT_DIR;
 
@@ -245,16 +185,9 @@ export function removeCommand(container: Container) {
 							const isEmptyResult = await fs.isDirectoryEmpty(worktreesRootPath);
 
 							if (Result.isOk(isEmptyResult) && isEmptyResult.data) {
-								const cleanupConfirm = await ui.confirm({
-									message: `Remove empty worktrees directory "${worktreesRootPath}"?`,
-									initialValue: true,
-								});
-
-								if (!ui.isCancel(cleanupConfirm) && cleanupConfirm) {
-									const removeResult = await fs.removeDirectory(worktreesRootPath);
-									if (Result.isOk(removeResult)) {
-										ui.info("Worktrees directory removed");
-									}
+								const removeResult = await fs.removeDirectory(worktreesRootPath);
+								if (Result.isOk(removeResult)) {
+									ui.info("Worktrees directory removed");
 								}
 							}
 						}
