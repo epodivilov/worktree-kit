@@ -1,9 +1,42 @@
 # Changelog
 
 
+## Bug Fixes
+
+- filter out release and bump commits from notes
+- resolve rootDir relative to main worktree root
+
+## Documentation
+
+- comprehensively update README with all current features
+
 ## Features
 
 - add pre-remove hooks support
+- add fetch, merge, rebase, and dirty-check methods to GitPort
+- add updateWorktrees use case
+- add wt update CLI command
+- add per-command config sections for create and remove
+- add resolve-params module for flag > config > interactive pattern
+- add --delete-remote-branch flag to wt remove
+- add fetchPrune and listGoneBranches methods to GitPort
+- add cleanupWorktrees use case
+- add wt cleanup command
+- use WIP commit for dirty worktrees and drop --no-rebase flag
+- add --dry-run flag to wt update
+- add --dry-run flag to wt remove, unify flag description
+- add getMergeBase and getCommitCount to GitPort
+- detect parent branch via merge-base for correct rebase order
+- support `wt update [branch]` to update a specific subtree
+
+## Refactoring
+
+- use resolve-params for create and remove
+- drop --no-delete-branch flag and parseBooleanFlag
+
+## Style
+
+- fix biome formatting in test
 
 ## Features
 
