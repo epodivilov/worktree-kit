@@ -1,14 +1,9 @@
 import type { GitPort } from "../../domain/ports/git-port.ts";
 import { Result as R, type Result } from "../../shared/result.ts";
 
-export interface UpdateWorktreesInput {
-	skipRebase: boolean;
-}
-
 export type WorktreeUpdateStatus =
 	| { status: "rebased" }
-	| { status: "skipped-dirty" }
-	| { status: "skipped-rebase" }
+	| { status: "rebased-dirty" }
 	| { status: "rebase-conflict"; message: string }
 	| { status: "is-default-branch" };
 
@@ -29,7 +24,6 @@ export interface UpdateWorktreesDeps {
 }
 
 export async function updateWorktrees(
-	input: UpdateWorktreesInput,
 	deps: UpdateWorktreesDeps,
 ): Promise<Result<UpdateWorktreesOutput, Error>> {
 	const { git } = deps;
@@ -78,11 +72,6 @@ export async function updateWorktrees(
 			continue;
 		}
 
-		if (input.skipRebase) {
-			reports.push({ branch: wt.branch, path: wt.path, result: { status: "skipped-rebase" } });
-			continue;
-		}
-
 		const dirtyResult = await git.isDirty(wt.path);
 		if (!dirtyResult.success) {
 			reports.push({
@@ -92,16 +81,45 @@ export async function updateWorktrees(
 			});
 			continue;
 		}
-		if (dirtyResult.data) {
-			reports.push({ branch: wt.branch, path: wt.path, result: { status: "skipped-dirty" } });
-			continue;
+
+		const isDirty = dirtyResult.data;
+
+		if (isDirty) {
+			const stageResult = await git.stageAll(wt.path);
+			if (!stageResult.success) {
+				reports.push({
+					branch: wt.branch,
+					path: wt.path,
+					result: { status: "rebase-conflict", message: "Failed to stage changes for WIP commit" },
+				});
+				continue;
+			}
+			const wipResult = await git.commitWip(wt.path);
+			if (!wipResult.success) {
+				reports.push({
+					branch: wt.branch,
+					path: wt.path,
+					result: { status: "rebase-conflict", message: "Failed to create WIP commit" },
+				});
+				continue;
+			}
 		}
 
 		const rebaseResult = await git.rebase(wt.path, defaultBranch);
 		if (rebaseResult.success) {
-			reports.push({ branch: wt.branch, path: wt.path, result: { status: "rebased" } });
+			if (isDirty) {
+				await git.resetLastCommit(wt.path);
+			}
+			reports.push({
+				branch: wt.branch,
+				path: wt.path,
+				result: { status: isDirty ? "rebased-dirty" : "rebased" },
+			});
 		} else {
 			await git.rebaseAbort(wt.path);
+			if (isDirty) {
+				await git.resetLastCommit(wt.path);
+			}
 			reports.push({
 				branch: wt.branch,
 				path: wt.path,

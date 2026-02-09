@@ -179,6 +179,18 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 			return Result.ok(dirtyWorktrees?.has(worktreePath) ?? false);
 		},
 
+		async stageAll(_worktreePath: string): Promise<Result<void, GitError>> {
+			return Result.ok(undefined);
+		},
+
+		async commitWip(_worktreePath: string): Promise<Result<void, GitError>> {
+			return Result.ok(undefined);
+		},
+
+		async resetLastCommit(_worktreePath: string): Promise<Result<void, GitError>> {
+			return Result.ok(undefined);
+		},
+
 		async deleteRemoteBranch(_branch: string, _remote?: string): Promise<Result<void, GitError>> {
 			return Result.ok(undefined);
 		},

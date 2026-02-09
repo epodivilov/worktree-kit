@@ -391,6 +391,42 @@ export function createBunGitAdapter(logger: LoggerPort): GitPort {
 			}
 		},
 
+		async stageAll(worktreePath: string): Promise<Result<void, GitError>> {
+			try {
+				const { exitCode, stderr } = await runGit(["-C", worktreePath, "add", "-A"]);
+				if (exitCode !== 0) {
+					return Result.err({ code: "UNKNOWN", message: stderr || "Failed to stage all changes" });
+				}
+				return Result.ok(undefined);
+			} catch {
+				return Result.err({ code: "UNKNOWN", message: "Failed to stage all changes" });
+			}
+		},
+
+		async commitWip(worktreePath: string): Promise<Result<void, GitError>> {
+			try {
+				const { exitCode, stderr } = await runGit(["-C", worktreePath, "commit", "-m", "WIP"]);
+				if (exitCode !== 0) {
+					return Result.err({ code: "UNKNOWN", message: stderr || "Failed to create WIP commit" });
+				}
+				return Result.ok(undefined);
+			} catch {
+				return Result.err({ code: "UNKNOWN", message: "Failed to create WIP commit" });
+			}
+		},
+
+		async resetLastCommit(worktreePath: string): Promise<Result<void, GitError>> {
+			try {
+				const { exitCode, stderr } = await runGit(["-C", worktreePath, "reset", "HEAD~1"]);
+				if (exitCode !== 0) {
+					return Result.err({ code: "UNKNOWN", message: stderr || "Failed to reset last commit" });
+				}
+				return Result.ok(undefined);
+			} catch {
+				return Result.err({ code: "UNKNOWN", message: "Failed to reset last commit" });
+			}
+		},
+
 		async deleteRemoteBranch(branch: string, remote = "origin"): Promise<Result<void, GitError>> {
 			try {
 				const { exitCode, stderr } = await runGit(["push", "--delete", remote, branch]);

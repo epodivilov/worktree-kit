@@ -10,14 +10,7 @@ export function updateCommand(container: Container) {
 			name: "update",
 			description: "Fetch, fast-forward default branch, and rebase feature branches",
 		},
-		args: {
-			"no-rebase": {
-				type: "boolean",
-				description: "Skip rebasing feature branches",
-				default: false,
-			},
-		},
-		async run({ args }) {
+		async run() {
 			const { ui, git } = container;
 
 			ui.intro("worktree-kit update");
@@ -25,7 +18,7 @@ export function updateCommand(container: Container) {
 			const spinner = ui.createSpinner();
 			spinner.start("Fetching and updating worktrees...");
 
-			const result = await updateWorktrees({ skipRebase: args["no-rebase"] as boolean }, { git });
+			const result = await updateWorktrees({ git });
 
 			if (Result.isErr(result)) {
 				spinner.stop(pc.red("Failed"));
@@ -50,11 +43,8 @@ export function updateCommand(container: Container) {
 					case "rebased":
 						ui.success(`${report.branch} rebased onto ${defaultBranch}`);
 						break;
-					case "skipped-dirty":
-						ui.warn(`${report.branch} skipped (uncommitted changes)`);
-						break;
-					case "skipped-rebase":
-						ui.info(`${report.branch} skipped (--no-rebase)`);
+					case "rebased-dirty":
+						ui.success(`${report.branch} rebased onto ${defaultBranch} (via WIP commit)`);
 						break;
 					case "rebase-conflict":
 						ui.warn(`${report.branch} has conflicts, rebase aborted`);

@@ -37,4 +37,7 @@ export interface GitPort {
 	rebase(worktreePath: string, onto: string): Promise<Result<void, GitError>>;
 	rebaseAbort(worktreePath: string): Promise<Result<void, GitError>>;
 	isDirty(worktreePath: string): Promise<Result<boolean, GitError>>;
+	stageAll(worktreePath: string): Promise<Result<void, GitError>>;
+	commitWip(worktreePath: string): Promise<Result<void, GitError>>;
+	resetLastCommit(worktreePath: string): Promise<Result<void, GitError>>;
 }
