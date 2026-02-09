@@ -107,4 +107,45 @@ describe("WorktreeConfigSchema", () => {
 		const result = v.safeParse(WorktreeConfigSchema, { rootDir: "../wt", defaultBase: "invalid" });
 		expect(result.success).toBe(false);
 	});
+
+	test("config without create/remove sections defaults to empty objects", () => {
+		const result = v.safeParse(WorktreeConfigSchema, { rootDir: "../wt" });
+		expect(result.success).toBe(true);
+		if (result.success) {
+			expect(result.output.create).toEqual({ base: undefined });
+			expect(result.output.remove).toEqual({
+				deleteBranch: undefined,
+			});
+		}
+	});
+
+	test("config with create.base parses correctly", () => {
+		const result = v.safeParse(WorktreeConfigSchema, {
+			rootDir: "../wt",
+			create: { base: "main" },
+		});
+		expect(result.success).toBe(true);
+		if (result.success) {
+			expect(result.output.create.base).toBe("main");
+		}
+	});
+
+	test("config with remove options parses correctly", () => {
+		const result = v.safeParse(WorktreeConfigSchema, {
+			rootDir: "../wt",
+			remove: { deleteBranch: true },
+		});
+		expect(result.success).toBe(true);
+		if (result.success) {
+			expect(result.output.remove.deleteBranch).toBe(true);
+		}
+	});
+
+	test("rejects non-boolean remove.deleteBranch", () => {
+		const result = v.safeParse(WorktreeConfigSchema, {
+			rootDir: "../wt",
+			remove: { deleteBranch: "yes" },
+		});
+		expect(result.success).toBe(false);
+	});
 });

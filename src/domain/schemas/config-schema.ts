@@ -5,12 +5,26 @@ const HooksInputSchema = v.object({
 	"pre-remove": v.optional(v.array(v.string())),
 });
 
+const CreateCommandConfigSchema = v.optional(
+	v.object({
+		base: v.optional(v.string()),
+	}),
+);
+
+const RemoveCommandConfigSchema = v.optional(
+	v.object({
+		deleteBranch: v.optional(v.boolean()),
+	}),
+);
+
 export const WorktreeConfigSchema = v.pipe(
 	v.object({
 		rootDir: v.string(),
 		copy: v.optional(v.array(v.string())),
 		hooks: v.optional(HooksInputSchema),
 		defaultBase: v.optional(v.picklist(["current", "default", "ask"])),
+		create: CreateCommandConfigSchema,
+		remove: RemoveCommandConfigSchema,
 	}),
 	v.transform((input) => ({
 		rootDir: input.rootDir,
@@ -20,6 +34,12 @@ export const WorktreeConfigSchema = v.pipe(
 			"pre-remove": input.hooks?.["pre-remove"] ?? [],
 		},
 		defaultBase: input.defaultBase ?? "ask",
+		create: {
+			base: input.create?.base,
+		},
+		remove: {
+			deleteBranch: input.remove?.deleteBranch,
+		},
 	})),
 );
 

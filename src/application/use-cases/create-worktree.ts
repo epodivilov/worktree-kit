@@ -58,7 +58,14 @@ export async function createWorktree(
 	if (configResult.success) {
 		config = configResult.data.config;
 	} else {
-		config = { rootDir: INIT_ROOT_DIR, copy: [], hooks: { "post-create": [], "pre-remove": [] }, defaultBase: "ask" };
+		config = {
+			rootDir: INIT_ROOT_DIR,
+			copy: [],
+			hooks: { "post-create": [], "pre-remove": [] },
+			defaultBase: "ask",
+			create: {},
+			remove: {},
+		};
 		notifications.push(N.warn("Config not found, using defaults. Run 'wt init' to create one."));
 	}
 

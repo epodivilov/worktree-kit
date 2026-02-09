@@ -5,9 +5,19 @@ export interface HooksConfig {
 
 export type DefaultBase = "current" | "default" | "ask";
 
+export interface CreateCommandConfig {
+	readonly base?: string;
+}
+
+export interface RemoveCommandConfig {
+	readonly deleteBranch?: boolean;
+}
+
 export interface WorktreeConfig {
 	readonly rootDir: string;
 	readonly copy: readonly string[];
 	readonly hooks: HooksConfig;
 	readonly defaultBase: DefaultBase;
+	readonly create: CreateCommandConfig;
+	readonly remove: RemoveCommandConfig;
 }
