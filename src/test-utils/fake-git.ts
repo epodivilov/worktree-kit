@@ -10,6 +10,7 @@ export interface FakeGitOptions {
 	branches?: string[];
 	remoteBranches?: string[];
 	mergedBranches?: string[];
+	goneBranches?: string[];
 	defaultBranch?: string;
 	dirtyWorktrees?: Set<string>;
 	rebaseConflicts?: Set<string>;
@@ -26,6 +27,7 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 		branches = [],
 		remoteBranches = [],
 		mergedBranches = [],
+		goneBranches = [],
 		defaultBranch = "main",
 		dirtyWorktrees,
 		rebaseConflicts,
@@ -132,6 +134,20 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 				return Result.err({ code: "UNKNOWN", message: "Fetch failed" });
 			}
 			return Result.ok(undefined);
+		},
+
+		async fetchPrune(): Promise<Result<void, GitError>> {
+			if (fetchFails) {
+				return Result.err({ code: "UNKNOWN", message: "Fetch failed" });
+			}
+			return Result.ok(undefined);
+		},
+
+		async listGoneBranches(): Promise<Result<string[], GitError>> {
+			if (!isRepo) {
+				return Result.err({ code: "NOT_A_REPO", message: "Not inside a git repository" });
+			}
+			return Result.ok([...goneBranches]);
 		},
 
 		async mergeFFOnly(_worktreePath: string, _branch: string): Promise<Result<void, GitError>> {

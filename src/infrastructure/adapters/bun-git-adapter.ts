@@ -302,6 +302,35 @@ export function createBunGitAdapter(logger: LoggerPort): GitPort {
 			}
 		},
 
+		async fetchPrune(): Promise<Result<void, GitError>> {
+			try {
+				const { exitCode, stderr } = await runGit(["fetch", "--all", "--prune"]);
+				if (exitCode !== 0) {
+					return Result.err({ code: "UNKNOWN", message: stderr || "Failed to fetch" });
+				}
+				return Result.ok(undefined);
+			} catch {
+				return Result.err({ code: "UNKNOWN", message: "Failed to fetch" });
+			}
+		},
+
+		async listGoneBranches(): Promise<Result<string[], GitError>> {
+			try {
+				const { exitCode, stdout } = await runGit(["branch", "--list", "--format=%(refname:short)|%(upstream:track)"]);
+				if (exitCode !== 0) {
+					return Result.err({ code: "NOT_A_REPO", message: "Not inside a git repository" });
+				}
+				const gone = stdout
+					.split("\n")
+					.filter(Boolean)
+					.filter((line) => line.includes("[gone]"))
+					.map((line) => line.split("|")[0] as string);
+				return Result.ok(gone);
+			} catch {
+				return Result.err({ code: "UNKNOWN", message: "Failed to list gone branches" });
+			}
+		},
+
 		async mergeFFOnly(worktreePath: string, branch: string): Promise<Result<void, GitError>> {
 			try {
 				const { exitCode, stderr } = await runGit(["-C", worktreePath, "merge", "--ff-only", `origin/${branch}`]);
