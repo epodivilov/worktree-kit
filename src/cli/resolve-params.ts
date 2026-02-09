@@ -11,12 +11,6 @@ function unwrapOrCancel<T>(ui: UiPort, value: T | symbol): T {
 	return value;
 }
 
-export function parseBooleanFlag(positive: boolean | undefined, negative: boolean | undefined): boolean | undefined {
-	if (positive) return true;
-	if (negative) return false;
-	return undefined;
-}
-
 // --- create command ---
 
 export interface ResolveBranchResult {

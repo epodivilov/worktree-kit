@@ -4,12 +4,7 @@ import pc from "picocolors";
 import { listWorktrees } from "../application/use-cases/list-worktrees.ts";
 import { loadConfig } from "../application/use-cases/load-config.ts";
 import { removeWorktree } from "../application/use-cases/remove-worktree.ts";
-import {
-	parseBooleanFlag,
-	resolveBranchesToRemove,
-	resolveDeleteBranch,
-	resolveDeleteRemoteBranch,
-} from "../cli/resolve-params.ts";
+import { resolveBranchesToRemove, resolveDeleteBranch, resolveDeleteRemoteBranch } from "../cli/resolve-params.ts";
 import { INIT_ROOT_DIR } from "../domain/constants.ts";
 import type { Container } from "../infrastructure/container.ts";
 import { Result } from "../shared/result.ts";
@@ -29,11 +24,6 @@ export function removeCommand(container: Container) {
 			"delete-branch": {
 				type: "boolean",
 				description: "Delete the branch after removing worktree",
-				required: false,
-			},
-			"no-delete-branch": {
-				type: "boolean",
-				description: "Do not delete the branch",
 				required: false,
 			},
 			"delete-remote-branch": {
@@ -58,12 +48,8 @@ export function removeCommand(container: Container) {
 			// === Resolve params ===
 			const branchesToRemove = await resolveBranchesToRemove(args.branch as string | undefined, { ui, git });
 
-			const deleteBranchFlag = parseBooleanFlag(
-				args["delete-branch"] as boolean | undefined,
-				args["no-delete-branch"] as boolean | undefined,
-			);
 			const shouldDeleteBranches = await resolveDeleteBranch(
-				deleteBranchFlag,
+				args["delete-branch"] as boolean | undefined,
 				config?.remove.deleteBranch,
 				{ ui },
 				{ branches: branchesToRemove },
