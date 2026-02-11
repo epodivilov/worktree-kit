@@ -84,8 +84,6 @@ export function removeCommand(container: Container) {
 			}
 
 			// === Remove worktrees ===
-			const spinner = ui.createSpinner();
-
 			const preRemoveHooks = config?.hooks["pre-remove"] ?? [];
 
 			const worktreesByBranch = new Map<string, { path: string; branch: string }>();
@@ -105,8 +103,11 @@ export function removeCommand(container: Container) {
 				}
 			}
 
-			for (const branchToRemove of branchesToRemove) {
-				// Run pre-remove hooks
+			if (branchesToRemove.length === 1) {
+				// === Single worktree — sequential with spinners ===
+				const branchToRemove = branchesToRemove[0] as string;
+
+				// Pre-remove hooks
 				const worktreeInfo = worktreesByBranch.get(branchToRemove);
 				if (preRemoveHooks.length > 0 && worktreeInfo) {
 					const hooksSpinner = ui.createSpinner();
@@ -119,7 +120,6 @@ export function removeCommand(container: Container) {
 
 					for (const [i, command] of preRemoveHooks.entries()) {
 						const message = `Running pre-remove hook ${i + 1}/${total}: ${command}...`;
-
 						if (i === 0) {
 							hooksSpinner.start(message);
 						} else {
@@ -135,75 +135,151 @@ export function removeCommand(container: Container) {
 							ui.warn(`Pre-remove hook failed: "${command}" - ${hookResult.error.message}`);
 						}
 					}
-
 					hooksSpinner.stop(pc.green("Pre-remove hooks completed"));
 				}
 
+				// Remove worktree
+				const spinner = ui.createSpinner();
 				spinner.start(`Removing worktree "${branchToRemove}"...`);
-
 				const result = await removeWorktree({ branch: branchToRemove }, { git });
 
 				if (Result.isErr(result)) {
 					spinner.stop(pc.red(`Failed to remove "${branchToRemove}"`));
 					ui.error(result.error.message);
-					continue;
-				}
+				} else {
+					spinner.stop(pc.green(`Worktree "${branchToRemove}" removed`));
 
-				spinner.stop(pc.green(`Worktree "${branchToRemove}" removed`));
+					// Delete branch
+					if (shouldDeleteBranches) {
+						spinner.start(`Deleting branch "${branchToRemove}"...`);
 
-				if (shouldDeleteBranches) {
-					spinner.start(`Deleting branch "${branchToRemove}"...`);
+						let localDeleted = false;
+						const deleteResult = await git.deleteBranch(branchToRemove);
 
-					let localDeleted = false;
-					const deleteResult = await git.deleteBranch(branchToRemove);
+						if (Result.isErr(deleteResult)) {
+							if (deleteResult.error.code === "BRANCH_NOT_MERGED") {
+								spinner.stop(pc.yellow(`Branch "${branchToRemove}" not merged`));
 
-					if (Result.isErr(deleteResult)) {
-						if (deleteResult.error.code === "BRANCH_NOT_MERGED") {
-							spinner.stop(pc.yellow(`Branch "${branchToRemove}" not merged`));
+								let shouldForce = force;
+								if (!shouldForce && !ui.nonInteractive) {
+									const forceConfirm = await ui.confirm({
+										message: `Branch "${branchToRemove}" is not merged. Force delete?`,
+										initialValue: false,
+									});
+									shouldForce = !ui.isCancel(forceConfirm) && forceConfirm;
+								}
 
-							let shouldForce = force;
-							if (!shouldForce && !ui.nonInteractive) {
-								const forceConfirm = await ui.confirm({
-									message: `Branch "${branchToRemove}" is not merged. Force delete?`,
-									initialValue: false,
-								});
-								shouldForce = !ui.isCancel(forceConfirm) && forceConfirm;
-							}
-
-							if (shouldForce) {
-								spinner.start(`Force deleting branch "${branchToRemove}"...`);
-								const forceResult = await git.deleteBranchForce(branchToRemove);
-
-								if (Result.isErr(forceResult)) {
-									spinner.stop(pc.red(`Failed to delete branch "${branchToRemove}"`));
+								if (shouldForce) {
+									spinner.start(`Force deleting branch "${branchToRemove}"...`);
+									const forceResult = await git.deleteBranchForce(branchToRemove);
+									if (Result.isErr(forceResult)) {
+										spinner.stop(pc.red(`Failed to delete branch "${branchToRemove}"`));
+									} else {
+										localDeleted = true;
+									}
 								} else {
-									localDeleted = true;
+									ui.info(`Branch "${branchToRemove}" was not deleted`);
 								}
 							} else {
-								ui.info(`Branch "${branchToRemove}" was not deleted`);
+								spinner.stop(pc.red(`Failed to delete branch "${branchToRemove}"`));
 							}
 						} else {
-							spinner.stop(pc.red(`Failed to delete branch "${branchToRemove}"`));
+							localDeleted = true;
 						}
-					} else {
-						localDeleted = true;
-					}
 
-					if (localDeleted && shouldDeleteRemoteBranches) {
-						spinner.message(`Deleting remote branch "${branchToRemove}"...`);
-						const deleteRemoteResult = await git.deleteRemoteBranch(branchToRemove);
-
-						if (Result.isErr(deleteRemoteResult)) {
+						if (localDeleted && shouldDeleteRemoteBranches) {
+							spinner.message(`Deleting remote branch "${branchToRemove}"...`);
+							const deleteRemoteResult = await git.deleteRemoteBranch(branchToRemove);
+							if (Result.isErr(deleteRemoteResult)) {
+								spinner.stop(pc.green(`Branch "${branchToRemove}" deleted (local)`));
+								if (deleteRemoteResult.error.code !== "REMOTE_REF_NOT_FOUND") {
+									ui.warn(`Failed to delete remote branch: ${deleteRemoteResult.error.message}`);
+								}
+							} else {
+								spinner.stop(pc.green(`Branch "${branchToRemove}" deleted (local & remote)`));
+							}
+						} else if (localDeleted) {
 							spinner.stop(pc.green(`Branch "${branchToRemove}" deleted (local)`));
-							if (deleteRemoteResult.error.code !== "REMOTE_REF_NOT_FOUND") {
-								ui.warn(`Failed to delete remote branch: ${deleteRemoteResult.error.message}`);
-							}
-						} else {
-							spinner.stop(pc.green(`Branch "${branchToRemove}" deleted (local & remote)`));
 						}
-					} else if (localDeleted) {
-						spinner.stop(pc.green(`Branch "${branchToRemove}" deleted (local)`));
 					}
+				}
+			} else {
+				// === Multiple worktrees — parallel with multi-spinner ===
+				ui.info(`Removing ${branchesToRemove.length} worktrees...`);
+				const ms = ui.createMultiSpinner(branchesToRemove);
+				const warnings: string[] = [];
+
+				await Promise.all(
+					branchesToRemove.map(async (branchToRemove) => {
+						// Pre-remove hooks
+						const worktreeInfo = worktreesByBranch.get(branchToRemove);
+						if (preRemoveHooks.length > 0 && worktreeInfo) {
+							const env: Record<string, string> = {
+								WORKTREE_PATH: worktreeInfo.path,
+								WORKTREE_BRANCH: worktreeInfo.branch,
+								REPO_ROOT: repoRoot,
+							};
+							const hookTotal = preRemoveHooks.length;
+							for (const [i, command] of preRemoveHooks.entries()) {
+								ms.update(branchToRemove, `executing "${command}" [${i + 1}/${hookTotal}]`);
+								const hookResult = await shell.execute(command, {
+									cwd: worktreeInfo.path,
+									env,
+								});
+								if (!hookResult.success) {
+									warnings.push(`Hook failed for "${branchToRemove}": ${command}`);
+								}
+							}
+						}
+
+						// Remove worktree
+						ms.update(branchToRemove, "removing worktree");
+						const result = await removeWorktree({ branch: branchToRemove }, { git });
+						if (Result.isErr(result)) {
+							ms.fail(branchToRemove, result.error.message);
+							return;
+						}
+
+						// Delete branch
+						let branchStatus = "";
+						if (shouldDeleteBranches) {
+							ms.update(branchToRemove, "deleting branch");
+							let localDeleted = false;
+							const deleteResult = await git.deleteBranch(branchToRemove);
+
+							if (Result.isErr(deleteResult)) {
+								if (deleteResult.error.code === "BRANCH_NOT_MERGED") {
+									if (force) {
+										const forceResult = await git.deleteBranchForce(branchToRemove);
+										localDeleted = Result.isOk(forceResult);
+									}
+									if (!localDeleted) {
+										branchStatus = " (branch not merged, use --force)";
+									}
+								}
+							} else {
+								localDeleted = true;
+							}
+
+							if (localDeleted && shouldDeleteRemoteBranches) {
+								ms.update(branchToRemove, "deleting remote branch");
+								const deleteRemoteResult = await git.deleteRemoteBranch(branchToRemove);
+								branchStatus = Result.isOk(deleteRemoteResult)
+									? " + branch deleted (local & remote)"
+									: " + branch deleted (local)";
+							} else if (localDeleted) {
+								branchStatus = " + branch deleted (local)";
+							}
+						}
+
+						ms.complete(branchToRemove, `removed${branchStatus}`);
+					}),
+				);
+
+				ms.stop();
+
+				for (const warning of warnings) {
+					ui.warn(warning);
 				}
 			}
 
@@ -224,12 +300,13 @@ export function removeCommand(container: Container) {
 							const isEmptyResult = await fs.isDirectoryEmpty(worktreesRootPath);
 
 							if (Result.isOk(isEmptyResult) && isEmptyResult.data) {
-								spinner.start("Cleaning up empty worktrees directory...");
+								const cleanupSpinner = ui.createSpinner();
+								cleanupSpinner.start("Cleaning up empty worktrees directory...");
 								const removeResult = await fs.removeDirectory(worktreesRootPath);
 								if (Result.isOk(removeResult)) {
-									spinner.stop(pc.green("Worktrees directory removed"));
+									cleanupSpinner.stop(pc.green("Worktrees directory removed"));
 								} else {
-									spinner.stop(pc.red("Failed to remove worktrees directory"));
+									cleanupSpinner.stop(pc.red("Failed to remove worktrees directory"));
 								}
 							}
 						}

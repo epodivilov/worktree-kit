@@ -1,6 +1,6 @@
 import * as clack from "@clack/prompts";
 import pc from "picocolors";
-import type { SpinnerHandle, UiPort } from "../../domain/ports/ui-port.ts";
+import type { MultiSpinnerHandle, SpinnerHandle, UiPort } from "../../domain/ports/ui-port.ts";
 
 export function createClackUiAdapter(options?: { nonInteractive?: boolean }): UiPort {
 	return {
@@ -49,6 +49,79 @@ export function createClackUiAdapter(options?: { nonInteractive?: boolean }): Ui
 				start: (message: string) => s.start(message),
 				message: (message: string) => s.message(message),
 				stop: (message?: string) => s.stop(message ?? pc.green("Done")),
+			};
+		},
+
+		createMultiSpinner(keys: string[]): MultiSpinnerHandle {
+			const frames = ["◒", "◐", "◓", "◑"];
+			let frameIndex = 0;
+			let rendered = false;
+
+			const lines = new Map<string, { status: "active" | "done" | "error"; message: string }>();
+			for (const key of keys) {
+				lines.set(key, { status: "active", message: "waiting" });
+			}
+
+			function render() {
+				if (rendered) {
+					process.stdout.write(`\x1b[${lines.size}A`);
+				} else {
+					process.stdout.write("\x1b[?25l");
+				}
+				rendered = true;
+
+				const frame = frames[frameIndex % frames.length];
+				for (const [key, line] of lines) {
+					let prefix: string;
+					let msg: string;
+					if (line.status === "done") {
+						prefix = pc.green("✓");
+						msg = pc.green(line.message);
+					} else if (line.status === "error") {
+						prefix = pc.red("✗");
+						msg = pc.red(line.message);
+					} else {
+						prefix = pc.magenta(frame);
+						msg = line.message;
+					}
+					process.stdout.write(`\x1b[2K  ${prefix}  ${key}: ${msg}\n`);
+				}
+			}
+
+			const interval = setInterval(() => {
+				frameIndex++;
+				const hasActive = [...lines.values()].some((l) => l.status === "active");
+				if (hasActive) render();
+			}, 80);
+
+			render();
+
+			return {
+				update(key: string, message: string) {
+					const line = lines.get(key);
+					if (line && line.status === "active") {
+						line.message = message;
+					}
+				},
+				complete(key: string, message: string) {
+					const line = lines.get(key);
+					if (line) {
+						line.status = "done";
+						line.message = message;
+					}
+				},
+				fail(key: string, message: string) {
+					const line = lines.get(key);
+					if (line) {
+						line.status = "error";
+						line.message = message;
+					}
+				},
+				stop() {
+					clearInterval(interval);
+					render();
+					process.stdout.write("\x1b[?25h");
+				},
 			};
 		},
 

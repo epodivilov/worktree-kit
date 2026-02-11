@@ -4,6 +4,13 @@ export interface SpinnerHandle {
 	stop(message?: string): void;
 }
 
+export interface MultiSpinnerHandle {
+	update(key: string, message: string): void;
+	complete(key: string, message: string): void;
+	fail(key: string, message: string): void;
+	stop(): void;
+}
+
 export interface UiPort {
 	readonly nonInteractive: boolean;
 	intro(message: string): void;
@@ -14,6 +21,7 @@ export interface UiPort {
 	error(message: string): void;
 	spinner<T>(message: string, fn: () => Promise<T>): Promise<T>;
 	createSpinner(): SpinnerHandle;
+	createMultiSpinner(keys: string[]): MultiSpinnerHandle;
 	text(options: { message: string; placeholder?: string; defaultValue?: string }): Promise<string | symbol>;
 	confirm(options: { message: string; initialValue?: boolean }): Promise<boolean | symbol>;
 	select<T>(options: {
