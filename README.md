@@ -17,6 +17,7 @@ worktree-kit fills these gaps with a single CLI.
 
 - Interactive branch selection with local and remote branch support
 - Automatic file and directory copying with glob patterns
+- Symlinks from root repo for sharing gitignored content across worktrees
 - Post-create and pre-remove hooks with environment variables
 - Smart update: fetch, fast-forward default branch, rebase feature branches in correct order
 - Parent branch detection via merge-base for proper rebase ordering
@@ -129,7 +130,7 @@ wt create feature/my-feature --base develop
 2. `create.base` config option
 3. `defaultBase` config behavior: `"current"` uses current branch, `"default"` uses main/master, `"ask"` shows interactive prompt
 
-After creation, files from the `copy` config are copied and `post-create` hooks are executed.
+After creation, files from the `copy` config are copied, `symlinks` are created, and `post-create` hooks are executed.
 
 ### `wt list`
 
@@ -255,6 +256,10 @@ Create a `.worktreekitrc` file in the project root (or use `wt init`):
     ".env.local",
     "config/*.json"
   ],
+  "symlinks": [
+    ".claude",
+    ".idea"
+  ],
   "defaultBase": "ask",
   "create": {
     "base": "main"
@@ -278,12 +283,26 @@ Create a `.worktreekitrc` file in the project root (or use `wt init`):
 |--------|------|---------|-------------|
 | `rootDir` | `string` | `"../worktrees"` | Directory for new worktrees (relative to main worktree) |
 | `copy` | `string[]` | `[]` | Files to copy. Supports exact paths, directories, and glob patterns |
+| `symlinks` | `string[]` | `[]` | Paths to symlink from root repo. Supports exact paths and glob patterns |
 | `defaultBase` | `"current"` \| `"default"` \| `"ask"` | `"ask"` | Base branch selection strategy when creating new branches |
 | `create.base` | `string` | — | Fixed base branch for all new worktrees (overrides `defaultBase`) |
 | `remove.deleteBranch` | `boolean` | — | Auto-delete local branch on removal. Prompts if not set |
 | `remove.deleteRemoteBranch` | `boolean` | — | Auto-delete remote branch on removal. Prompts if not set |
 | `hooks.post-create` | `string[]` | `[]` | Commands to run after creating a worktree |
 | `hooks.pre-remove` | `string[]` | `[]` | Commands to run before removing a worktree |
+
+### Copy vs Symlinks
+
+Both `copy` and `symlinks` support exact paths and glob patterns. The difference is how files end up in the worktree:
+
+| | `copy` | `symlinks` |
+|---|--------|------------|
+| **Mechanism** | Physical copy | Symbolic link to root repo |
+| **Independence** | Each worktree has its own copy | All worktrees share the same file |
+| **Edits** | Local to the worktree | Reflected in root repo (commit from there) |
+| **Use case** | `.env`, local overrides | IDE configs, shared tooling configs |
+
+**Important:** symlinks only work for gitignored content. Tracked files already exist in the worktree after checkout, so symlink creation will fail with "already exists". When symlinking directories, make sure your `.gitignore` uses patterns **without** a trailing slash (`.claude` not `.claude/`) — git treats symlinks as files, so directory-only patterns won't match them.
 
 ### Hook Environment Variables
 
