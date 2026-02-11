@@ -22,6 +22,7 @@ worktree-kit fills these gaps with a single CLI.
 - Parent branch detection via merge-base for proper rebase ordering
 - Automatic cleanup of worktrees with deleted remote branches
 - Dry-run mode for safe operation preview
+- Non-interactive mode for CI/scripts/AI agents (`--non-interactive` or `WT_NON_INTERACTIVE=1`)
 - Verbose logging (`--verbose` or `WT_VERBOSE=1`)
 
 ## Installation
@@ -59,6 +60,23 @@ wt create feature/my-feature
 wt list
 ```
 
+## Global Options
+
+These flags apply to all commands:
+
+| Flag | Env Variable | Description |
+|------|-------------|-------------|
+| `--verbose` | `WT_VERBOSE=1` | Enable detailed debug logging |
+| `--non-interactive` | `WT_NON_INTERACTIVE=1` | Disable all interactive prompts |
+
+**Non-interactive mode** — when active, all prompts are resolved automatically:
+
+- Required selection prompts (branch name) exit with an error if the value is not provided via CLI arguments
+- Optional confirmation prompts use safe defaults (typically "no" for destructive actions)
+- `wt cleanup` proceeds automatically without confirmation
+
+This is useful for CI pipelines, shell scripts, and AI agents.
+
 ## Commands
 
 ### `wt init`
@@ -84,6 +102,7 @@ wt create [branch] [options]
 | Flag | Alias | Description |
 |------|-------|-------------|
 | `--base` | `-b` | Base branch to create from |
+| `--dry-run` | | Show what would be done without making changes |
 
 **Examples:**
 
@@ -155,9 +174,8 @@ wt remove --dry-run
 
 **Interactive mode** (no branch argument):
 
-- Shows a menu of removable worktrees (main worktree excluded)
-- "Remove all" option is available when 2+ worktrees exist
-- Asks for confirmation before removal
+- Shows a multi-select menu of removable worktrees (main worktree excluded)
+- Select one or more worktrees to remove in a single operation
 
 **Branch deletion** — when not specified via flags, behavior is controlled by `remove.deleteBranch` / `remove.deleteRemoteBranch` config options. If those are also not set, prompts interactively. Unmerged branches require `--force` or interactive confirmation.
 
