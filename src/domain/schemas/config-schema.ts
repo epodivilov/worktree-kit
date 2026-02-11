@@ -22,6 +22,7 @@ export const WorktreeConfigSchema = v.pipe(
 	v.object({
 		rootDir: v.string(),
 		copy: v.optional(v.array(v.string())),
+		symlinks: v.optional(v.array(v.string())),
 		hooks: v.optional(HooksInputSchema),
 		defaultBase: v.optional(v.picklist(["current", "default", "ask"])),
 		create: CreateCommandConfigSchema,
@@ -30,6 +31,7 @@ export const WorktreeConfigSchema = v.pipe(
 	v.transform((input) => ({
 		rootDir: input.rootDir,
 		copy: input.copy ?? [],
+		symlinks: input.symlinks ?? [],
 		hooks: {
 			"post-create": input.hooks?.["post-create"] ?? [],
 			"pre-remove": input.hooks?.["pre-remove"] ?? [],

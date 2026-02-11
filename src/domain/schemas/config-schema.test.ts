@@ -80,6 +80,30 @@ describe("WorktreeConfigSchema", () => {
 		expect(result.success).toBe(false);
 	});
 
+	test("config without symlinks defaults to empty array", () => {
+		const result = v.safeParse(WorktreeConfigSchema, { rootDir: "../wt" });
+		expect(result.success).toBe(true);
+		if (result.success) {
+			expect(result.output.symlinks).toEqual([]);
+		}
+	});
+
+	test("config with symlinks parses correctly", () => {
+		const result = v.safeParse(WorktreeConfigSchema, {
+			rootDir: "../wt",
+			symlinks: [".env", "config/*.json"],
+		});
+		expect(result.success).toBe(true);
+		if (result.success) {
+			expect(result.output.symlinks).toEqual([".env", "config/*.json"]);
+		}
+	});
+
+	test("rejects non-string items in symlinks", () => {
+		const result = v.safeParse(WorktreeConfigSchema, { rootDir: "../wt", symlinks: [123] });
+		expect(result.success).toBe(false);
+	});
+
 	test("rejects non-object input", () => {
 		const result = v.safeParse(WorktreeConfigSchema, "not an object");
 		expect(result.success).toBe(false);

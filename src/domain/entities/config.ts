@@ -17,6 +17,7 @@ export interface RemoveCommandConfig {
 export interface WorktreeConfig {
 	readonly rootDir: string;
 	readonly copy: readonly string[];
+	readonly symlinks: readonly string[];
 	readonly hooks: HooksConfig;
 	readonly defaultBase: DefaultBase;
 	readonly create: CreateCommandConfig;

@@ -66,6 +66,14 @@ export function createFakeFilesystem(options: FakeFilesystemOptions = {}): Files
 			return Result.ok(undefined);
 		},
 
+		async createSymlink(target: string, linkPath: string): Promise<Result<void, FilesystemError>> {
+			if (!store.has(target) && !dirs.has(target)) {
+				return Result.err({ code: "NOT_FOUND", message: "Target not found", path: target });
+			}
+			store.set(linkPath, `symlink:${target}`);
+			return Result.ok(undefined);
+		},
+
 		async glob(pattern: string, options?: { cwd?: string }): Promise<string[]> {
 			const base = options?.cwd ?? cwd;
 			// Convert glob pattern to regex using placeholders to avoid conflicts

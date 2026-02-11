@@ -1,4 +1,5 @@
-import { cp, readdir, rmdir, stat } from "node:fs/promises";
+import { cp, mkdir, readdir, rmdir, stat, symlink } from "node:fs/promises";
+import { dirname, relative } from "node:path";
 import type { FilesystemError, FilesystemPort } from "../../domain/ports/filesystem-port.ts";
 import type { LoggerPort } from "../../domain/ports/logger-port.ts";
 import { Result } from "../../shared/result.ts";
@@ -119,6 +120,32 @@ export function createBunFilesystemAdapter(logger: LoggerPort): FilesystemPort {
 					code: "UNKNOWN",
 					message: "Failed to copy directory",
 					path: source,
+				});
+			}
+		},
+
+		async createSymlink(target: string, linkPath: string): Promise<Result<void, FilesystemError>> {
+			const relativeTarget = relative(dirname(linkPath), target);
+			logger.debug("fs", `symlink ${relativeTarget} -> ${linkPath}`);
+			try {
+				await mkdir(dirname(linkPath), { recursive: true });
+				await symlink(relativeTarget, linkPath);
+				logger.debug("fs", "-> OK");
+				return Result.ok(undefined);
+			} catch (error) {
+				logger.debug("fs", "-> ERROR");
+				const code = (error as NodeJS.ErrnoException).code;
+				if (code === "EEXIST") {
+					return Result.err({
+						code: "ALREADY_EXISTS",
+						message: "Symlink already exists",
+						path: linkPath,
+					});
+				}
+				return Result.err({
+					code: "UNKNOWN",
+					message: "Failed to create symlink",
+					path: linkPath,
 				});
 			}
 		},

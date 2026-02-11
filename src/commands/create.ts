@@ -78,7 +78,7 @@ export function createCommand(container: Container) {
 
 			if (dryRun) {
 				spinner.stop("Preview");
-				const { worktree, filesToCopy, hookCommands } = createResult.data;
+				const { worktree, filesToCopy, symlinksToCreate, hookCommands } = createResult.data;
 				ui.info(`Would create worktree at ${worktree.path}`);
 				const branchStatus = isNewBranch ? "new" : "existing";
 				ui.info(`Branch: ${branch} (${branchStatus}${baseBranch ? `, from ${baseBranch}` : ""})`);
@@ -87,6 +87,13 @@ export function createCommand(container: Container) {
 					for (const { dest, isDirectory } of filesToCopy) {
 						const relativePath = dest.slice(worktree.path.length + 1);
 						ui.info(`  ${isDirectory ? "dir" : "file"}: ${relativePath}`);
+					}
+				}
+				if (symlinksToCreate.length > 0) {
+					ui.info(`Would create ${symlinksToCreate.length} symlink(s):`);
+					for (const { linkPath } of symlinksToCreate) {
+						const relativePath = linkPath.slice(worktree.path.length + 1);
+						ui.info(`  link: ${relativePath}`);
 					}
 				}
 				if (hookCommands.length > 0) {
@@ -101,7 +108,7 @@ export function createCommand(container: Container) {
 			}
 
 			// Copy files and directories with spinner updates
-			const { filesToCopy } = createResult.data;
+			const { filesToCopy, symlinksToCreate } = createResult.data;
 			for (const { src, dest, isDirectory } of filesToCopy) {
 				const name = src.split("/").pop();
 				spinner.message(`Copying ${name}...`);
@@ -109,6 +116,16 @@ export function createCommand(container: Container) {
 					await fs.copyDirectory(src, dest);
 				} else {
 					await fs.copyFile(src, dest);
+				}
+			}
+
+			// Create symlinks pointing to root repo
+			for (const { target, linkPath } of symlinksToCreate) {
+				const name = target.split("/").pop();
+				spinner.message(`Linking ${name}...`);
+				const symlinkResult = await fs.createSymlink(target, linkPath);
+				if (!symlinkResult.success) {
+					ui.warn(`Failed to create symlink: ${linkPath} -> ${target} (${symlinkResult.error.message})`);
 				}
 			}
 

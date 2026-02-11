@@ -316,6 +316,85 @@ describe("createWorktree", () => {
 		expect(listResult.success && listResult.data).toEqual([]);
 	});
 
+	test("returns symlinks to create from config", async () => {
+		const config = JSON.stringify({ rootDir: "../worktrees", symlinks: [".env"] });
+		const git = createFakeGit({ root: ROOT, worktrees: [] });
+		const fs = createFakeFilesystem({
+			files: { [`${ROOT}/.worktreekitrc`]: config, [`${ROOT}/.env`]: "SECRET=123" },
+			cwd: ROOT,
+		});
+		const result = await createWorktree({ branch: "feat-sym" }, { git, fs });
+
+		const { symlinksToCreate, worktree } = expectOk(result);
+		expect(symlinksToCreate).toHaveLength(1);
+		expect(symlinksToCreate[0]?.target).toBe(`${ROOT}/.env`);
+		expect(symlinksToCreate[0]?.linkPath).toBe(`${worktree.path}/.env`);
+	});
+
+	test("expands glob pattern in symlinks config", async () => {
+		const config = JSON.stringify({ rootDir: "../worktrees", symlinks: ["config/*.json"] });
+		const git = createFakeGit({ root: ROOT, worktrees: [] });
+		const fs = createFakeFilesystem({
+			files: {
+				[`${ROOT}/.worktreekitrc`]: config,
+				[`${ROOT}/config/db.json`]: "{}",
+				[`${ROOT}/config/api.json`]: "{}",
+			},
+			directories: [`${ROOT}/config`],
+			cwd: ROOT,
+		});
+		const result = await createWorktree({ branch: "feat-sym-glob" }, { git, fs });
+
+		const { symlinksToCreate } = expectOk(result);
+		expect(symlinksToCreate).toHaveLength(2);
+		const targets = symlinksToCreate.map((s) => s.target).sort();
+		expect(targets).toEqual([`${ROOT}/config/api.json`, `${ROOT}/config/db.json`]);
+	});
+
+	test("warns when symlink glob matches no files", async () => {
+		const config = JSON.stringify({ rootDir: "../worktrees", symlinks: ["nonexistent/*.json"] });
+		const git = createFakeGit({ root: ROOT, worktrees: [] });
+		const fs = createFakeFilesystem({
+			files: { [`${ROOT}/.worktreekitrc`]: config },
+			cwd: ROOT,
+		});
+		const result = await createWorktree({ branch: "feat-sym-none" }, { git, fs });
+
+		const { symlinksToCreate, notifications } = expectOk(result);
+		expect(symlinksToCreate).toHaveLength(0);
+		expect(notifications.some((n) => n.message.includes("No files matched symlink pattern"))).toBe(true);
+	});
+
+	test("deduplicates overlapping symlink paths", async () => {
+		const config = JSON.stringify({ rootDir: "../worktrees", symlinks: [".env", ".*"] });
+		const git = createFakeGit({ root: ROOT, worktrees: [] });
+		const fs = createFakeFilesystem({
+			files: {
+				[`${ROOT}/.worktreekitrc`]: config,
+				[`${ROOT}/.env`]: "SECRET=123",
+				[`${ROOT}/.gitignore`]: "node_modules",
+			},
+			cwd: ROOT,
+		});
+		const result = await createWorktree({ branch: "feat-sym-dedup" }, { git, fs });
+
+		const { symlinksToCreate } = expectOk(result);
+		const envEntries = symlinksToCreate.filter((s) => s.target === `${ROOT}/.env`);
+		expect(envEntries).toHaveLength(1);
+	});
+
+	test("returns empty symlinks when not configured", async () => {
+		const git = createFakeGit({ root: ROOT, worktrees: [] });
+		const fs = createFakeFilesystem({
+			files: { [`${ROOT}/.worktreekitrc`]: CONFIG },
+			cwd: ROOT,
+		});
+		const result = await createWorktree({ branch: "feat-no-sym" }, { git, fs });
+
+		const { symlinksToCreate } = expectOk(result);
+		expect(symlinksToCreate).toEqual([]);
+	});
+
 	test("deduplicates overlapping glob and literal paths", async () => {
 		const config = JSON.stringify({ rootDir: "../worktrees", copy: [".env", ".*"] });
 		const git = createFakeGit({ root: ROOT, worktrees: [] });

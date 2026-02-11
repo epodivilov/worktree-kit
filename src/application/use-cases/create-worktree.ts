@@ -27,10 +27,16 @@ export interface FileToCopy {
 	isDirectory: boolean;
 }
 
+export interface SymlinkToCreate {
+	target: string;
+	linkPath: string;
+}
+
 export interface CreateWorktreeOutput {
 	worktree: Worktree;
 	notifications: Notification[];
 	filesToCopy: FileToCopy[];
+	symlinksToCreate: SymlinkToCreate[];
 	hookContext: HookContext | null;
 	hookCommands: readonly string[];
 }
@@ -62,6 +68,7 @@ export async function createWorktree(
 		config = {
 			rootDir: INIT_ROOT_DIR,
 			copy: [],
+			symlinks: [],
 			hooks: { "post-create": [], "pre-remove": [] },
 			defaultBase: "ask",
 			create: {},
@@ -119,6 +126,38 @@ export async function createWorktree(
 		return true;
 	});
 
+	const rawSymlinks: SymlinkToCreate[] = [];
+
+	for (const entry of config.symlinks) {
+		if (isGlobPattern(entry)) {
+			const matches = await fs.glob(entry, { cwd: repoRoot });
+			if (matches.length === 0) {
+				notifications.push(N.warn(`No files matched symlink pattern: ${entry}`));
+				continue;
+			}
+			for (const matchedPath of matches) {
+				const relativePath = matchedPath.slice(repoRoot.length + 1);
+				rawSymlinks.push({
+					target: matchedPath,
+					linkPath: join(worktreePath, relativePath),
+				});
+			}
+		} else {
+			const target = join(repoRoot, entry);
+			rawSymlinks.push({
+				target,
+				linkPath: join(worktreePath, entry),
+			});
+		}
+	}
+
+	const seenSymlinks = new Set<string>();
+	const symlinksToCreate = rawSymlinks.filter((s) => {
+		if (seenSymlinks.has(s.target)) return false;
+		seenSymlinks.add(s.target);
+		return true;
+	});
+
 	const hookCommands = config.hooks["post-create"];
 	const hookContext: HookContext | null =
 		hookCommands.length > 0
@@ -134,6 +173,7 @@ export async function createWorktree(
 		worktree,
 		notifications,
 		filesToCopy,
+		symlinksToCreate,
 		hookContext,
 		hookCommands,
 	});
