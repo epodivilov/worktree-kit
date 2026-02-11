@@ -98,18 +98,21 @@ export async function cleanupWorktrees(
 
 		if (!deleteResult.success) {
 			if (deleteResult.error.code === "BRANCH_NOT_MERGED") {
-				if (input.force) {
-					const forceResult = await git.deleteBranchForce(branch);
-					if (!forceResult.success) {
-						reports.push({
-							branch,
-							worktreePath,
-							result: { status: "error", message: forceResult.error.message },
-						});
-						continue;
-					}
-				} else {
+				const commitsAhead = await git.getCommitCount(defaultBranch, branch);
+				const hasUniqueCommits = !commitsAhead.success || commitsAhead.data > 0;
+
+				if (hasUniqueCommits && !input.force) {
 					reports.push({ branch, worktreePath, result: { status: "skipped-unmerged" } });
+					continue;
+				}
+
+				const forceResult = await git.deleteBranchForce(branch);
+				if (!forceResult.success) {
+					reports.push({
+						branch,
+						worktreePath,
+						result: { status: "error", message: forceResult.error.message },
+					});
 					continue;
 				}
 			} else {
