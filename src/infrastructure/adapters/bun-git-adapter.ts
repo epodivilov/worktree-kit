@@ -241,9 +241,12 @@ export function createBunGitAdapter(logger: LoggerPort): GitPort {
 			}
 		},
 
-		async removeWorktree(path: string): Promise<Result<void, GitError>> {
+		async removeWorktree(path: string, options?: { force?: boolean }): Promise<Result<void, GitError>> {
 			try {
-				const { exitCode, stderr } = await runGit(["worktree", "remove", path]);
+				const args = ["worktree", "remove"];
+				if (options?.force) args.push("--force");
+				args.push(path);
+				const { exitCode, stderr } = await runGit(args);
 				if (exitCode !== 0) {
 					return Result.err({
 						code: stderr.toLowerCase().includes("not a git repository") ? "NOT_A_REPO" : "UNKNOWN",

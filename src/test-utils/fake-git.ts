@@ -110,7 +110,7 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 			return Result.ok(wt);
 		},
 
-		async removeWorktree(path: string): Promise<Result<void, GitError>> {
+		async removeWorktree(path: string, _options?: { force?: boolean }): Promise<Result<void, GitError>> {
 			const idx = store.findIndex((w) => w.path === path);
 			if (idx === -1) {
 				return Result.err({ code: "UNKNOWN", message: `Worktree not found at ${path}` });

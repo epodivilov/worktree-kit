@@ -141,7 +141,7 @@ export function removeCommand(container: Container) {
 				// Remove worktree
 				const spinner = ui.createSpinner();
 				spinner.start(`Removing worktree "${branchToRemove}"...`);
-				const result = await removeWorktree({ branch: branchToRemove }, { git });
+				const result = await removeWorktree({ branch: branchToRemove, force }, { git });
 
 				if (Result.isErr(result)) {
 					spinner.stop(pc.red(`Failed to remove "${branchToRemove}"`));
@@ -234,7 +234,7 @@ export function removeCommand(container: Container) {
 
 						// Remove worktree
 						ms.update(branchToRemove, "removing worktree");
-						const result = await removeWorktree({ branch: branchToRemove }, { git });
+						const result = await removeWorktree({ branch: branchToRemove, force }, { git });
 						if (Result.isErr(result)) {
 							ms.fail(branchToRemove, result.error.message);
 							return;

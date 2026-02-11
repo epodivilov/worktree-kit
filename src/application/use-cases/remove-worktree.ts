@@ -4,6 +4,7 @@ import { Result as R } from "../../shared/result.ts";
 
 export interface RemoveWorktreeInput {
 	branch: string;
+	force?: boolean;
 }
 
 export interface RemoveWorktreeOutput {
@@ -34,7 +35,7 @@ export async function removeWorktree(
 		return R.err(new Error("Cannot remove the main worktree"));
 	}
 
-	const removeResult = await git.removeWorktree(worktree.path);
+	const removeResult = await git.removeWorktree(worktree.path, { force: input.force });
 	if (!removeResult.success) {
 		return R.err(new Error(`Failed to remove worktree: ${removeResult.error.message}`));
 	}
