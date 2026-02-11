@@ -40,8 +40,16 @@ async function findParentBranch(
 ): Promise<string> {
 	const candidates: { branch: string; distance: number }[] = [];
 
+	const defaultMergeBase = await git.getMergeBase(branch, defaultBranch);
+	if (defaultMergeBase.success) {
+		const defaultCount = await git.getCommitCount(defaultMergeBase.data, branch);
+		if (defaultCount.success && defaultCount.data > 0) {
+			candidates.push({ branch: defaultBranch, distance: defaultCount.data });
+		}
+	}
+
 	for (const wt of worktrees) {
-		if (!wt.branch || wt.branch === branch) continue;
+		if (!wt.branch || wt.branch === branch || wt.branch === defaultBranch) continue;
 
 		const mergeBaseResult = await git.getMergeBase(branch, wt.branch);
 		if (!mergeBaseResult.success) continue;

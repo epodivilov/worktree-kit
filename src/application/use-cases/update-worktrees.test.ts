@@ -254,6 +254,50 @@ describe("updateWorktrees — parent detection", () => {
 	});
 });
 
+describe("updateWorktrees — no main worktree", () => {
+	test("multiple flat features without main worktree — all rebased onto default branch", async () => {
+		const worktrees = [featureA, featureB];
+		const git = createFakeGit({ worktrees, ...flatBranchesConfig(worktrees) });
+		const result = await updateWorktrees({ dryRun: false }, { git });
+
+		const output = expectOk(result);
+		expect(output.defaultBranchUpdate).toBe("ref-updated");
+		expect(output.reports).toHaveLength(2);
+		expect(output.reports[0]).toMatchObject({ branch: "feature-a", parent: "main", result: { status: "rebased" } });
+		expect(output.reports[1]).toMatchObject({ branch: "feature-b", parent: "main", result: { status: "rebased" } });
+	});
+
+	test("chain without main worktree — correct parent detection", async () => {
+		const featA: Worktree = { path: "/repo-a", branch: "feat-a", head: "eee", isMain: false };
+		const featSub: Worktree = { path: "/repo-sub", branch: "feat-sub", head: "ggg", isMain: false };
+
+		const mergeBaseMap = new Map([
+			["feat-a:main", "aaa"],
+			["feat-a:feat-sub", "eee"],
+			["feat-sub:main", "aaa"],
+			["feat-sub:feat-a", "eee"],
+			["main:feat-a", "aaa"],
+			["main:feat-sub", "aaa"],
+		]);
+
+		const commitCountMap = new Map([
+			["aaa..feat-a", 2],
+			["aaa..feat-sub", 4],
+			["eee..feat-sub", 2],
+			["eee..feat-a", 0],
+		]);
+
+		const git = createFakeGit({ worktrees: [featA, featSub], mergeBaseMap, commitCountMap });
+		const result = await updateWorktrees({ dryRun: false }, { git });
+
+		const output = expectOk(result);
+		expect(output.defaultBranchUpdate).toBe("ref-updated");
+		expect(output.reports).toHaveLength(2);
+		expect(output.reports[0]).toMatchObject({ branch: "feat-a", parent: "main", result: { status: "rebased" } });
+		expect(output.reports[1]).toMatchObject({ branch: "feat-sub", parent: "feat-a", result: { status: "rebased" } });
+	});
+});
+
 describe("updateWorktrees — branch filter", () => {
 	function chainWithSiblingConfig() {
 		const main: Worktree = { path: "/repo", branch: "main", head: "aaa", isMain: true };
