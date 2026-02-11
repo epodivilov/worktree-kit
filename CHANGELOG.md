@@ -3,6 +3,32 @@
 
 ## Bug Fixes
 
+- enable glob matching for dotfiles in copy config
+- ignore remote branch deletion when ref does not exist
+- include default branch as parent candidate in findParentBranch
+- pass --force flag to git worktree remove
+
+## Documentation
+
+- add global options section and update command docs
+- add symlinks configuration to README
+
+## Features
+
+- add --dry-run flag to wt create
+- show spinner during worktrees directory cleanup
+- multi-select worktrees for batch deletion
+- enhance cleanup logic to handle unique commits before force deletion
+- add --non-interactive flag and WT_NON_INTERACTIVE env variable
+- add parallel multi-spinner for bulk worktree removal
+- add symlinks config for sharing files from root repo
+
+## Refactoring
+
+- consolidate branch deletion into single status message
+
+## Bug Fixes
+
 - filter out release and bump commits from notes
 - resolve rootDir relative to main worktree root
 
