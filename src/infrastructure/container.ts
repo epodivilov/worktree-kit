@@ -19,14 +19,16 @@ export interface Container {
 
 export interface ContainerOptions {
 	verbose?: boolean;
+	nonInteractive?: boolean;
 }
 
 export function createContainer(options: ContainerOptions = {}): Container {
 	const verbose = options.verbose ?? false;
+	const nonInteractive = options.nonInteractive ?? false;
 	const logger = createConsoleLoggerAdapter(verbose);
 
 	return {
-		ui: createClackUiAdapter(),
+		ui: createClackUiAdapter({ nonInteractive }),
 		git: createBunGitAdapter(logger),
 		fs: createBunFilesystemAdapter(logger),
 		shell: createBunShellAdapter(logger),

@@ -68,14 +68,16 @@ export function cleanupCommand(container: Container) {
 			}
 
 			// Confirm
-			const confirmed = await ui.confirm({
-				message: "Proceed with cleanup?",
-				initialValue: false,
-			});
+			if (!ui.nonInteractive) {
+				const confirmed = await ui.confirm({
+					message: "Proceed with cleanup?",
+					initialValue: false,
+				});
 
-			if (ui.isCancel(confirmed) || !confirmed) {
-				ui.cancel("Cleanup cancelled");
-				process.exit(0);
+				if (ui.isCancel(confirmed) || !confirmed) {
+					ui.cancel("Cleanup cancelled");
+					process.exit(0);
+				}
 			}
 
 			// Execute

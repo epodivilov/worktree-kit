@@ -9,8 +9,9 @@ import { updateCommand } from "./commands/update.ts";
 import { createContainer } from "./infrastructure/container.ts";
 
 const verbose = process.argv.includes("--verbose") || process.env.WT_VERBOSE === "1";
+const nonInteractive = process.argv.includes("--non-interactive") || process.env.WT_NON_INTERACTIVE === "1";
 
-const container = createContainer({ verbose });
+const container = createContainer({ verbose, nonInteractive });
 
 const main = defineCommand({
 	meta: {

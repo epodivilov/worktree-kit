@@ -162,7 +162,7 @@ export function removeCommand(container: Container) {
 							spinner.stop(pc.yellow(`Branch "${branchToRemove}" not merged`));
 
 							let shouldForce = force;
-							if (!shouldForce) {
+							if (!shouldForce && !ui.nonInteractive) {
 								const forceConfirm = await ui.confirm({
 									message: `Branch "${branchToRemove}" is not merged. Force delete?`,
 									initialValue: false,

@@ -2,8 +2,10 @@ import * as clack from "@clack/prompts";
 import pc from "picocolors";
 import type { SpinnerHandle, UiPort } from "../../domain/ports/ui-port.ts";
 
-export function createClackUiAdapter(): UiPort {
+export function createClackUiAdapter(options?: { nonInteractive?: boolean }): UiPort {
 	return {
+		nonInteractive: options?.nonInteractive ?? false,
+
 		intro(message: string): void {
 			clack.intro(pc.bgCyan(pc.black(` ${message} `)));
 		},

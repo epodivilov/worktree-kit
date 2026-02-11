@@ -29,6 +29,11 @@ export async function resolveBranch(
 
 	const { ui, git } = deps;
 
+	if (ui.nonInteractive) {
+		ui.error("Branch name is required in non-interactive mode");
+		process.exit(1);
+	}
+
 	const branchesResult = await git.listBranches();
 	if (Result.isErr(branchesResult)) {
 		ui.error(branchesResult.error.message);
@@ -125,6 +130,11 @@ export async function resolveBaseBranch(
 	}
 
 	// defaultBase === "ask"
+	if (ui.nonInteractive) {
+		const defaultBranch = await git.getDefaultBranch();
+		return Result.isOk(defaultBranch) ? defaultBranch.data : undefined;
+	}
+
 	const branchesResult = await git.listBranches();
 	if (Result.isErr(branchesResult) || branchesResult.data.length === 0) {
 		return undefined;
@@ -164,6 +174,11 @@ export async function resolveBranchesToRemove(
 	if (flag) return [flag];
 
 	const { ui, git } = deps;
+
+	if (ui.nonInteractive) {
+		ui.error("Branch name is required in non-interactive mode");
+		process.exit(1);
+	}
 
 	const worktreesResult = await git.listWorktrees();
 	if (Result.isErr(worktreesResult)) {
@@ -209,6 +224,8 @@ export async function resolveDeleteRemoteBranch(
 
 	const { ui } = deps;
 
+	if (ui.nonInteractive) return false;
+
 	const message =
 		context.branches.length > 1
 			? `Also delete ${context.branches.length} remote branches?`
@@ -228,6 +245,8 @@ export async function resolveDeleteBranch(
 	if (configValue !== undefined) return configValue;
 
 	const { ui } = deps;
+
+	if (ui.nonInteractive) return false;
 
 	const message =
 		context.branches.length > 1

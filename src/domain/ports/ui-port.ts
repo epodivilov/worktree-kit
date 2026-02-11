@@ -5,6 +5,7 @@ export interface SpinnerHandle {
 }
 
 export interface UiPort {
+	readonly nonInteractive: boolean;
 	intro(message: string): void;
 	outro(message: string): void;
 	info(message: string): void;
