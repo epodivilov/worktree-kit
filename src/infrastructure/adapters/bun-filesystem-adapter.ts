@@ -129,7 +129,7 @@ export function createBunFilesystemAdapter(logger: LoggerPort): FilesystemPort {
 			try {
 				const g = new Bun.Glob(pattern);
 				const matches: string[] = [];
-				for await (const file of g.scan({ cwd, absolute: true })) {
+				for await (const file of g.scan({ cwd, absolute: true, dot: true })) {
 					matches.push(file);
 				}
 				matches.sort();

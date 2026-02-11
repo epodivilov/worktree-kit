@@ -232,6 +232,90 @@ describe("createWorktree", () => {
 		expect(dirEntry?.src).toBe(`${ROOT}/config/nested`);
 	});
 
+	test("expands recursive glob pattern matching dotfiles", async () => {
+		const config = JSON.stringify({ rootDir: "../worktrees", copy: ["**/.env*"] });
+		const git = createFakeGit({ root: ROOT, worktrees: [] });
+		const fs = createFakeFilesystem({
+			files: {
+				[`${ROOT}/.worktreekitrc`]: config,
+				[`${ROOT}/.env`]: "ROOT_SECRET=1",
+				[`${ROOT}/.env.local`]: "LOCAL_SECRET=2",
+				[`${ROOT}/packages/api/.env`]: "API_SECRET=3",
+				[`${ROOT}/packages/api/.env.production`]: "API_PROD=4",
+				[`${ROOT}/packages/web/.env`]: "WEB_SECRET=5",
+			},
+			directories: [`${ROOT}/packages`, `${ROOT}/packages/api`, `${ROOT}/packages/web`],
+			cwd: ROOT,
+		});
+		const result = await createWorktree({ branch: "feat-dotglob" }, { git, fs });
+
+		const { filesToCopy } = expectOk(result);
+		expect(filesToCopy).toHaveLength(5);
+		const srcs = filesToCopy.map((f) => f.src).sort();
+		expect(srcs).toEqual([
+			`${ROOT}/.env`,
+			`${ROOT}/.env.local`,
+			`${ROOT}/packages/api/.env`,
+			`${ROOT}/packages/api/.env.production`,
+			`${ROOT}/packages/web/.env`,
+		]);
+	});
+
+	test("expands recursive glob pattern matching exact dotfiles", async () => {
+		const config = JSON.stringify({ rootDir: "../worktrees", copy: ["**/.env"] });
+		const git = createFakeGit({ root: ROOT, worktrees: [] });
+		const fs = createFakeFilesystem({
+			files: {
+				[`${ROOT}/.worktreekitrc`]: config,
+				[`${ROOT}/.env`]: "ROOT=1",
+				[`${ROOT}/.env.local`]: "should not match",
+				[`${ROOT}/packages/api/.env`]: "API=2",
+				[`${ROOT}/packages/api/.env.local`]: "should not match",
+			},
+			directories: [`${ROOT}/packages`, `${ROOT}/packages/api`],
+			cwd: ROOT,
+		});
+		const result = await createWorktree({ branch: "feat-dotexact" }, { git, fs });
+
+		const { filesToCopy } = expectOk(result);
+		expect(filesToCopy).toHaveLength(2);
+		const srcs = filesToCopy.map((f) => f.src).sort();
+		expect(srcs).toEqual([`${ROOT}/.env`, `${ROOT}/packages/api/.env`]);
+	});
+
+	test("dry-run does not create worktree but returns preview data", async () => {
+		const configWithHooks = JSON.stringify({
+			rootDir: "../worktrees",
+			copy: [".env"],
+			hooks: { "post-create": ["pnpm install"] },
+		});
+		const git = createFakeGit({ root: ROOT, worktrees: [] });
+		const fs = createFakeFilesystem({
+			files: { [`${ROOT}/.worktreekitrc`]: configWithHooks, [`${ROOT}/.env`]: "SECRET=123" },
+			cwd: ROOT,
+		});
+		const result = await createWorktree({ branch: "feat-dry", baseBranch: "main", dryRun: true }, { git, fs });
+
+		const data = expectOk(result);
+		expect(data.worktree.branch).toBe("feat-dry");
+		expect(data.worktree.path).toContain("feat-dry");
+		expect(data.filesToCopy).toHaveLength(1);
+		expect(data.filesToCopy[0]?.src).toBe(`${ROOT}/.env`);
+		expect(data.hookCommands).toEqual(["pnpm install"]);
+	});
+
+	test("dry-run does not add worktree to git store", async () => {
+		const git = createFakeGit({ root: ROOT, worktrees: [] });
+		const fs = createFakeFilesystem({
+			files: { [`${ROOT}/.worktreekitrc`]: CONFIG },
+			cwd: ROOT,
+		});
+		await createWorktree({ branch: "feat-dry-no-wt", dryRun: true }, { git, fs });
+
+		const listResult = await git.listWorktrees();
+		expect(listResult.success && listResult.data).toEqual([]);
+	});
+
 	test("deduplicates overlapping glob and literal paths", async () => {
 		const config = JSON.stringify({ rootDir: "../worktrees", copy: [".env", ".*"] });
 		const git = createFakeGit({ root: ROOT, worktrees: [] });

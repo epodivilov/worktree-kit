@@ -68,13 +68,19 @@ export function createFakeFilesystem(options: FakeFilesystemOptions = {}): Files
 
 		async glob(pattern: string, options?: { cwd?: string }): Promise<string[]> {
 			const base = options?.cwd ?? cwd;
-			// Convert glob pattern to regex
+			// Convert glob pattern to regex using placeholders to avoid conflicts
+			const QUESTION = "<<Q>>";
+			const GLOBSTAR_SLASH = "<<GS>>";
+			const GLOBSTAR = "<<G>>";
 			const escaped = pattern
 				.replace(/\./g, "\\.")
-				.replace(/\*\*/g, "\0")
+				.replace(/\?/g, QUESTION)
+				.replace(/\*\*\//g, GLOBSTAR_SLASH)
+				.replace(/\*\*/g, GLOBSTAR)
 				.replace(/\*/g, "[^/]*")
-				.replace(/\0/g, ".*")
-				.replace(/\?/g, ".");
+				.replaceAll(QUESTION, ".")
+				.replaceAll(GLOBSTAR_SLASH, "(.*/)?")
+				.replaceAll(GLOBSTAR, ".*");
 			const regex = new RegExp(`^${base}/${escaped}$`);
 
 			const matches: string[] = [];
