@@ -221,9 +221,12 @@ export function removeCommand(container: Container) {
 							const isEmptyResult = await fs.isDirectoryEmpty(worktreesRootPath);
 
 							if (Result.isOk(isEmptyResult) && isEmptyResult.data) {
+								spinner.start("Cleaning up empty worktrees directory...");
 								const removeResult = await fs.removeDirectory(worktreesRootPath);
 								if (Result.isOk(removeResult)) {
-									ui.info("Worktrees directory removed");
+									spinner.stop(pc.green("Worktrees directory removed"));
+								} else {
+									spinner.stop(pc.red("Failed to remove worktrees directory"));
 								}
 							}
 						}
