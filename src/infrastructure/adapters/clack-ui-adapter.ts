@@ -75,6 +75,18 @@ export function createClackUiAdapter(): UiPort {
 			});
 		},
 
+		async multiselect<T>(options: {
+			message: string;
+			options: Array<{ value: T; label: string; hint?: string }>;
+			required?: boolean;
+		}): Promise<T[] | symbol> {
+			return clack.multiselect({
+				message: options.message,
+				options: options.options as Parameters<typeof clack.multiselect<T>>[0]["options"],
+				required: options.required,
+			});
+		},
+
 		isCancel(value: unknown): value is symbol {
 			return clack.isCancel(value);
 		},

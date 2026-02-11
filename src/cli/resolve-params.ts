@@ -179,60 +179,22 @@ export async function resolveBranchesToRemove(
 		process.exit(0);
 	}
 
-	const REMOVE_ALL = "__remove_all__";
-
 	const options = removable.map((w) => ({
 		value: w.branch,
 		label: w.branch,
 		hint: w.path,
 	}));
 
-	if (removable.length > 1) {
-		options.push({
-			value: REMOVE_ALL,
-			label: "Remove all worktrees",
-			hint: `${removable.length} worktrees`,
-		});
-	}
-
 	const selected = unwrapOrCancel(
 		ui,
-		await ui.select<string>({
-			message: "Select worktree to remove",
+		await ui.multiselect<string>({
+			message: "Select worktrees to remove",
 			options,
+			required: true,
 		}),
 	);
 
-	if (selected === REMOVE_ALL) {
-		ui.info("The following worktrees will be removed:");
-		for (const w of removable) {
-			ui.info(`  - ${w.branch} (${w.path})`);
-		}
-
-		const confirmed = await ui.confirm({
-			message: `Remove all ${removable.length} worktrees?`,
-			initialValue: false,
-		});
-
-		if (ui.isCancel(confirmed) || !confirmed) {
-			ui.cancel();
-			process.exit(0);
-		}
-
-		return removable.map((w) => w.branch);
-	}
-
-	const confirmed = await ui.confirm({
-		message: `Remove worktree "${selected}"?`,
-		initialValue: false,
-	});
-
-	if (ui.isCancel(confirmed) || !confirmed) {
-		ui.cancel();
-		process.exit(0);
-	}
-
-	return [selected];
+	return selected;
 }
 
 export async function resolveDeleteRemoteBranch(

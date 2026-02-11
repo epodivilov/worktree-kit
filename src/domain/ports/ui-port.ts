@@ -19,6 +19,11 @@ export interface UiPort {
 		message: string;
 		options: Array<{ value: T; label: string; hint?: string }>;
 	}): Promise<T | symbol>;
+	multiselect<T>(options: {
+		message: string;
+		options: Array<{ value: T; label: string; hint?: string }>;
+		required?: boolean;
+	}): Promise<T[] | symbol>;
 	isCancel(value: unknown): value is symbol;
 	cancel(message?: string): void;
 }
