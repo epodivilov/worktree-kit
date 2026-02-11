@@ -18,6 +18,7 @@ export interface CreateWorktreeInput {
 	branch: string;
 	baseBranch?: string;
 	fromRemote?: string;
+	dryRun?: boolean;
 }
 
 export interface FileToCopy {
@@ -71,11 +72,17 @@ export async function createWorktree(
 
 	const worktreePath = resolve(repoRoot, config.rootDir, input.branch);
 
-	const createResult = input.fromRemote
-		? await git.createWorktreeFromRemote(input.branch, worktreePath, input.fromRemote)
-		: await git.createWorktree(input.branch, worktreePath, input.baseBranch);
-	if (!createResult.success) {
-		return R.err(new Error(createResult.error.message));
+	let worktree: Worktree;
+	if (input.dryRun) {
+		worktree = { path: worktreePath, branch: input.branch, head: "", isMain: false };
+	} else {
+		const createResult = input.fromRemote
+			? await git.createWorktreeFromRemote(input.branch, worktreePath, input.fromRemote)
+			: await git.createWorktree(input.branch, worktreePath, input.baseBranch);
+		if (!createResult.success) {
+			return R.err(new Error(createResult.error.message));
+		}
+		worktree = createResult.data;
 	}
 
 	const rawFiles: FileToCopy[] = [];
@@ -124,7 +131,7 @@ export async function createWorktree(
 			: null;
 
 	return R.ok({
-		worktree: createResult.data,
+		worktree,
 		notifications,
 		filesToCopy,
 		hookContext,

@@ -26,11 +26,18 @@ export function createCommand(container: Container) {
 				description: "Base branch to create from",
 				required: false,
 			},
+			"dry-run": {
+				type: "boolean",
+				description: "Show what would be done without making changes",
+				required: false,
+			},
 		},
 		async run({ args }) {
 			const { ui, git, fs, shell } = container;
 
 			ui.intro("worktree-kit create");
+
+			const dryRun = (args["dry-run"] as boolean | undefined) ?? false;
 
 			const configResult = await loadConfig({ git, fs });
 			const fallbackConfig: { defaultBase: DefaultBase; create: CreateCommandConfig } = {
@@ -59,7 +66,7 @@ export function createCommand(container: Container) {
 			spinner.start("Creating worktree...");
 
 			const createResult = await createWorktree(
-				{ branch, baseBranch, fromRemote: isRemoteBranch ? "origin" : undefined },
+				{ branch, baseBranch, fromRemote: isRemoteBranch ? "origin" : undefined, dryRun },
 				{ git, fs },
 			);
 
@@ -67,6 +74,30 @@ export function createCommand(container: Container) {
 				spinner.stop(pc.red("Failed"));
 				ui.error(createResult.error.message);
 				process.exit(1);
+			}
+
+			if (dryRun) {
+				spinner.stop("Preview");
+				const { worktree, filesToCopy, hookCommands } = createResult.data;
+				ui.info(`Would create worktree at ${worktree.path}`);
+				const branchStatus = isNewBranch ? "new" : "existing";
+				ui.info(`Branch: ${branch} (${branchStatus}${baseBranch ? `, from ${baseBranch}` : ""})`);
+				if (filesToCopy.length > 0) {
+					ui.info(`Would copy ${filesToCopy.length} file(s):`);
+					for (const { dest, isDirectory } of filesToCopy) {
+						const relativePath = dest.slice(worktree.path.length + 1);
+						ui.info(`  ${isDirectory ? "dir" : "file"}: ${relativePath}`);
+					}
+				}
+				if (hookCommands.length > 0) {
+					ui.info(`Would run ${hookCommands.length} hook(s):`);
+					for (const command of hookCommands) {
+						ui.info(`  ${command}`);
+					}
+				}
+				renderNotifications(ui, createResult.data.notifications);
+				ui.outro("Dry run — no changes made");
+				return;
 			}
 
 			// Copy files and directories with spinner updates
@@ -82,7 +113,6 @@ export function createCommand(container: Container) {
 			}
 
 			spinner.stop(pc.green("Worktree created"));
-
 			renderNotifications(ui, createResult.data.notifications);
 
 			// === Stage 2: Run hooks ===
