@@ -432,7 +432,10 @@ export function createBunGitAdapter(logger: LoggerPort): GitPort {
 				const { exitCode, stderr } = await runGit(["push", "--delete", remote, branch]);
 				if (exitCode !== 0) {
 					if (stderr?.includes("remote ref does not exist")) {
-						return Result.ok(undefined);
+						return Result.err({
+							code: "REMOTE_REF_NOT_FOUND",
+							message: `Remote ref "${branch}" does not exist`,
+						});
 					}
 					return Result.err({
 						code: "UNKNOWN",

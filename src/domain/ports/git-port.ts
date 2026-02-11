@@ -8,6 +8,7 @@ export interface GitError {
 		| "BRANCH_EXISTS"
 		| "BRANCH_NOT_MERGED"
 		| "BRANCH_NOT_FOUND"
+		| "REMOTE_REF_NOT_FOUND"
 		| "MERGE_FAILED"
 		| "REBASE_CONFLICT"
 		| "UNKNOWN";
