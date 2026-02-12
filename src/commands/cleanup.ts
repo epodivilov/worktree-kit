@@ -121,6 +121,9 @@ export function cleanupCommand(container: Container) {
 
 				if (nonMainWorktrees.length === 0) {
 					const configResult = await loadConfig({ fs, git });
+					if (Result.isOk(configResult) && configResult.data.isLegacyConfig) {
+						ui.warn("Using legacy .worktreekitrc config. Run 'wt init --migrate' to upgrade to .worktreekit.jsonc");
+					}
 					const rootDir = Result.isOk(configResult) ? configResult.data.config.rootDir : INIT_ROOT_DIR;
 
 					const mainRoot = await git.getMainWorktreeRoot();

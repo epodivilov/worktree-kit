@@ -7,7 +7,7 @@ export function initCommand(container: Container) {
 	return defineCommand({
 		meta: {
 			name: "init",
-			description: "Create .worktreekitrc config",
+			description: "Create .worktreekit.jsonc config",
 		},
 		args: {
 			force: {
@@ -16,20 +16,27 @@ export function initCommand(container: Container) {
 				description: "Overwrite existing config",
 				default: false,
 			},
+			migrate: {
+				type: "boolean",
+				alias: "m",
+				description: "Rename legacy .worktreekitrc to .worktreekit.jsonc",
+				default: false,
+			},
 		},
 		async run({ args }) {
 			const { ui, fs, git } = container;
 
 			ui.intro("worktree-kit init");
 
-			const result = await initConfig({ force: args.force }, { fs, git });
+			const result = await initConfig({ force: args.force, migrate: args.migrate }, { fs, git });
 
 			if (Result.isErr(result)) {
 				ui.error(result.error.message);
 				process.exit(1);
 			}
 
-			ui.success(`Created config at: ${result.data.configPath}`);
+			const action = args.migrate ? "Migrated config to" : "Created config at";
+			ui.success(`${action}: ${result.data.configPath}`);
 			ui.outro("Done!");
 		},
 	});

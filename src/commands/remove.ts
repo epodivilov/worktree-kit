@@ -49,6 +49,9 @@ export function removeCommand(container: Container) {
 
 			const configResult = await loadConfig({ fs, git });
 			const config = configResult.success ? configResult.data.config : null;
+			if (configResult.success && configResult.data.isLegacyConfig) {
+				ui.warn("Using legacy .worktreekitrc config. Run 'wt init --migrate' to upgrade to .worktreekit.jsonc");
+			}
 
 			// === Resolve params ===
 			const branchesToRemove = await resolveBranchesToRemove(args.branch as string | undefined, { ui, git });
