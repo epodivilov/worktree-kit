@@ -128,6 +128,16 @@ export function createFakeFilesystem(options: FakeFilesystemOptions = {}): Files
 			}
 			return Result.ok(undefined);
 		},
+
+		async rename(from: string, to: string): Promise<Result<void, FilesystemError>> {
+			const content = store.get(from);
+			if (content === undefined) {
+				return Result.err({ code: "NOT_FOUND", message: "File not found", path: from });
+			}
+			store.set(to, content);
+			store.delete(from);
+			return Result.ok(undefined);
+		},
 	};
 
 	return { ...base, ...overrides };

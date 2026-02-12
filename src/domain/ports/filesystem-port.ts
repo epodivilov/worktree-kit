@@ -18,4 +18,5 @@ export interface FilesystemPort {
 	getCwd(): string;
 	isDirectoryEmpty(path: string): Promise<Result<boolean, FilesystemError>>;
 	removeDirectory(path: string): Promise<Result<void, FilesystemError>>;
+	rename(from: string, to: string): Promise<Result<void, FilesystemError>>;
 }

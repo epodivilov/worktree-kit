@@ -1,4 +1,4 @@
-import { cp, mkdir, readdir, rmdir, stat, symlink } from "node:fs/promises";
+import { cp, mkdir, readdir, rename, rmdir, stat, symlink } from "node:fs/promises";
 import { dirname, relative } from "node:path";
 import type { FilesystemError, FilesystemPort } from "../../domain/ports/filesystem-port.ts";
 import type { LoggerPort } from "../../domain/ports/logger-port.ts";
@@ -226,6 +226,30 @@ export function createBunFilesystemAdapter(logger: LoggerPort): FilesystemPort {
 					code: "UNKNOWN",
 					message: "Failed to remove directory",
 					path,
+				});
+			}
+		},
+
+		async rename(from: string, to: string): Promise<Result<void, FilesystemError>> {
+			logger.debug("fs", `rename ${from} -> ${to}`);
+			try {
+				await rename(from, to);
+				logger.debug("fs", "-> OK");
+				return Result.ok(undefined);
+			} catch (error) {
+				logger.debug("fs", "-> ERROR");
+				const code = (error as NodeJS.ErrnoException).code;
+				if (code === "ENOENT") {
+					return Result.err({
+						code: "NOT_FOUND",
+						message: "File not found",
+						path: from,
+					});
+				}
+				return Result.err({
+					code: "UNKNOWN",
+					message: "Failed to rename file",
+					path: from,
 				});
 			}
 		},
