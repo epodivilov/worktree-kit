@@ -3,6 +3,10 @@
 
 ## Bug Fixes
 
+- handle trailing commas in JSONC and warn on config load failure
+
+## Bug Fixes
+
 - return defaultBranch when branch has zero diverged commits
 - clarify branch deletion warnings and add interactive force-delete prompt
 
