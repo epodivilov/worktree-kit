@@ -251,6 +251,7 @@ Create a `.worktreekit.jsonc` file in the project root (or use `wt init`). JSONC
 
 ```jsonc
 {
+  "$schema": "https://raw.githubusercontent.com/epodivilov/worktree-kit/main/schema/worktreekit.schema.json",
   // Directory for new worktrees (relative to main worktree)
   "rootDir": "../worktrees",
   "copy": [
@@ -325,7 +326,7 @@ If you have an existing `.worktreekitrc` config, run:
 wt init --migrate
 ```
 
-This renames `.worktreekitrc` to `.worktreekit.jsonc`. The new format supports comments and can use `$schema` for editor autocompletion.
+This renames `.worktreekitrc` to `.worktreekit.jsonc` and automatically injects the `$schema` field for editor autocompletion and validation. Comments in the file are preserved.
 
 The old `.worktreekitrc` is still supported as a fallback — commands will show a warning suggesting migration.
 
