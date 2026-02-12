@@ -1,0 +1,82 @@
+{
+	"$schema": "http://json-schema.org/draft-07/schema#",
+	"$id": "https://raw.githubusercontent.com/epodivilov/worktree-kit/main/schema/worktreekit.schema.json",
+	"title": "worktree-kit configuration",
+	"description": "Configuration file for worktree-kit CLI tool (.worktreekit.jsonc)",
+	"type": "object",
+	"required": ["rootDir"],
+	"additionalProperties": false,
+	"properties": {
+		"$schema": {
+			"type": "string",
+			"description": "JSON Schema reference for editor support"
+		},
+		"rootDir": {
+			"type": "string",
+			"description": "Root directory for worktrees, relative to the main worktree"
+		},
+		"copy": {
+			"type": "array",
+			"items": { "type": "string" },
+			"default": [],
+			"description": "Files and directories to copy into each new worktree"
+		},
+		"symlinks": {
+			"type": "array",
+			"items": { "type": "string" },
+			"default": [],
+			"description": "Files and directories to symlink into each new worktree"
+		},
+		"hooks": {
+			"type": "object",
+			"description": "Lifecycle hooks executed during worktree operations",
+			"additionalProperties": false,
+			"properties": {
+				"post-create": {
+					"type": "array",
+					"items": { "type": "string" },
+					"default": [],
+					"description": "Commands to run after creating a worktree"
+				},
+				"pre-remove": {
+					"type": "array",
+					"items": { "type": "string" },
+					"default": [],
+					"description": "Commands to run before removing a worktree"
+				}
+			}
+		},
+		"defaultBase": {
+			"type": "string",
+			"enum": ["current", "default", "ask"],
+			"default": "ask",
+			"description": "Default base branch strategy: 'current' uses the current branch, 'default' uses the repository default branch, 'ask' prompts the user"
+		},
+		"create": {
+			"type": "object",
+			"description": "Options for the create command",
+			"additionalProperties": false,
+			"properties": {
+				"base": {
+					"type": "string",
+					"description": "Default base branch name for new worktrees"
+				}
+			}
+		},
+		"remove": {
+			"type": "object",
+			"description": "Options for the remove command",
+			"additionalProperties": false,
+			"properties": {
+				"deleteBranch": {
+					"type": "boolean",
+					"description": "Delete the local branch when removing a worktree"
+				},
+				"deleteRemoteBranch": {
+					"type": "boolean",
+					"description": "Delete the remote branch when removing a worktree"
+				}
+			}
+		}
+	}
+}

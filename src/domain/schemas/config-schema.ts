@@ -20,6 +20,7 @@ const RemoveCommandConfigSchema = v.optional(
 
 export const WorktreeConfigSchema = v.pipe(
 	v.object({
+		$schema: v.optional(v.string()),
 		rootDir: v.string(),
 		copy: v.optional(v.array(v.string())),
 		symlinks: v.optional(v.array(v.string())),

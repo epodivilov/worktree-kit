@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { CONFIG_FILENAME, INIT_ROOT_DIR, LEGACY_CONFIG_FILENAME } from "../../domain/constants.ts";
+import { CONFIG_FILENAME, INIT_ROOT_DIR, LEGACY_CONFIG_FILENAME, SCHEMA_URL } from "../../domain/constants.ts";
 import type { FilesystemPort } from "../../domain/ports/filesystem-port.ts";
 import type { GitPort } from "../../domain/ports/git-port.ts";
 import type { Result } from "../../shared/result.ts";
@@ -47,6 +47,13 @@ export async function initConfig(
 			return R.err(new Error(`Failed to rename config: ${renameResult.error.message}`));
 		}
 
+		const readResult = await fs.readFile(configPath);
+		if (readResult.success && !readResult.data.includes('"$schema"')) {
+			const schemaLine = `\t"$schema": "${SCHEMA_URL}",`;
+			const updated = readResult.data.replace(/\{/, `{\n${schemaLine}`);
+			await fs.writeFile(configPath, updated);
+		}
+
 		return R.ok({ configPath });
 	}
 
@@ -54,7 +61,17 @@ export async function initConfig(
 		return R.err(new Error(`Config already exists at ${configPath}`));
 	}
 
-	const content = JSON.stringify({ rootDir: INIT_ROOT_DIR, copy: [], symlinks: [], defaultBase: "ask" }, null, 2);
+	const content = JSON.stringify(
+		{
+			$schema: SCHEMA_URL,
+			rootDir: INIT_ROOT_DIR,
+			copy: [],
+			symlinks: [],
+			defaultBase: "ask",
+		},
+		null,
+		2,
+	);
 	const writeResult = await fs.writeFile(configPath, content);
 	if (!writeResult.success) {
 		return R.err(new Error(`Failed to write config: ${writeResult.error.message}`));
