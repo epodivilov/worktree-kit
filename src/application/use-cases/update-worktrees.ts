@@ -43,6 +43,9 @@ async function findParentBranch(
 	const defaultMergeBase = await git.getMergeBase(branch, defaultBranch);
 	if (defaultMergeBase.success) {
 		const defaultCount = await git.getCommitCount(defaultMergeBase.data, branch);
+		if (defaultCount.success && defaultCount.data === 0) {
+			return defaultBranch;
+		}
 		if (defaultCount.success && defaultCount.data > 0) {
 			candidates.push({ branch: defaultBranch, distance: defaultCount.data });
 		}

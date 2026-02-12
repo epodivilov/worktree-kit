@@ -254,6 +254,37 @@ describe("updateWorktrees — parent detection", () => {
 	});
 });
 
+describe("updateWorktrees — fresh branch (zero commits from default)", () => {
+	test("fresh branch with no own commits — parent is defaultBranch, not another worktree", async () => {
+		const main: Worktree = { path: "/repo", branch: "main", head: "aaa", isMain: true };
+		const featA: Worktree = { path: "/repo-a", branch: "feat-a", head: "ddd", isMain: false };
+		const fresh: Worktree = { path: "/repo-fresh", branch: "fresh", head: "aaa", isMain: false };
+
+		const mergeBaseMap = new Map([
+			["fresh:main", "aaa"],
+			["fresh:feat-a", "bbb"],
+			["feat-a:main", "aaa"],
+			["feat-a:fresh", "aaa"],
+			["main:feat-a", "aaa"],
+			["main:fresh", "aaa"],
+		]);
+
+		const commitCountMap = new Map([
+			["aaa..fresh", 0],
+			["bbb..fresh", 17],
+			["aaa..feat-a", 3],
+		]);
+
+		const git = createFakeGit({ worktrees: [main, featA, fresh], mergeBaseMap, commitCountMap });
+		const result = await updateWorktrees({ dryRun: true }, { git });
+
+		const output = expectOk(result);
+		const freshReport = output.reports.find((r) => r.branch === "fresh");
+		expect(freshReport).toBeDefined();
+		expect(freshReport?.parent).toBe("main");
+	});
+});
+
 describe("updateWorktrees — no main worktree", () => {
 	test("multiple flat features without main worktree — all rebased onto default branch", async () => {
 		const worktrees = [featureA, featureB];
