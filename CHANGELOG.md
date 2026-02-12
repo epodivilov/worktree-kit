@@ -3,6 +3,25 @@
 
 ## Bug Fixes
 
+- return defaultBranch when branch has zero diverged commits
+- clarify branch deletion warnings and add interactive force-delete prompt
+
+## Documentation
+
+- add $schema to config example and update migration section
+
+## Features
+
+- add JSONC support infrastructure
+- migrate config format to .worktreekit.jsonc
+- add JSON Schema and $schema support
+
+## Testing
+
+- add JSONC migration tests and update docs
+
+## Bug Fixes
+
 - enable glob matching for dotfiles in copy config
 - ignore remote branch deletion when ref does not exist
 - include default branch as parent candidate in findParentBranch
