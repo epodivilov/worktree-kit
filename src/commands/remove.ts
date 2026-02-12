@@ -211,6 +211,7 @@ export function removeCommand(container: Container) {
 				ui.info(`Removing ${branchesToRemove.length} worktrees...`);
 				const ms = ui.createMultiSpinner(branchesToRemove);
 				const warnings: string[] = [];
+				const unmergedBranches: string[] = [];
 
 				await Promise.all(
 					branchesToRemove.map(async (branchToRemove) => {
@@ -257,7 +258,8 @@ export function removeCommand(container: Container) {
 										localDeleted = Result.isOk(forceResult);
 									}
 									if (!localDeleted) {
-										branchStatus = " (branch not merged, use --force)";
+										unmergedBranches.push(branchToRemove);
+										branchStatus = " (branch kept — not fully merged)";
 									}
 								}
 							} else {
@@ -283,6 +285,50 @@ export function removeCommand(container: Container) {
 
 				for (const warning of warnings) {
 					ui.warn(warning);
+				}
+
+				// Prompt to force-delete unmerged branches
+				if (unmergedBranches.length > 0 && !ui.nonInteractive) {
+					const confirmMessage =
+						unmergedBranches.length === 1
+							? `Branch "${unmergedBranches[0]}" is not fully merged. Force delete?`
+							: `${unmergedBranches.length} branches are not fully merged (${unmergedBranches.join(", ")}). Force delete?`;
+
+					const forceConfirm = await ui.confirm({
+						message: confirmMessage,
+						initialValue: false,
+					});
+
+					if (!ui.isCancel(forceConfirm) && forceConfirm) {
+						for (const branch of unmergedBranches) {
+							const spinner = ui.createSpinner();
+							spinner.start(`Force deleting branch "${branch}"...`);
+							const forceResult = await git.deleteBranchForce(branch);
+							if (Result.isOk(forceResult)) {
+								if (shouldDeleteRemoteBranches) {
+									spinner.message(`Deleting remote branch "${branch}"...`);
+									const remoteResult = await git.deleteRemoteBranch(branch);
+									spinner.stop(
+										Result.isOk(remoteResult)
+											? pc.green(`Branch "${branch}" deleted (local & remote)`)
+											: pc.green(`Branch "${branch}" deleted (local)`),
+									);
+								} else {
+									spinner.stop(pc.green(`Branch "${branch}" deleted (local)`));
+								}
+							} else {
+								spinner.stop(pc.red(`Failed to delete branch "${branch}"`));
+							}
+						}
+					} else {
+						for (const branch of unmergedBranches) {
+							ui.info(`Branch "${branch}" was not deleted`);
+						}
+					}
+				} else if (unmergedBranches.length > 0) {
+					for (const branch of unmergedBranches) {
+						ui.warn(`Branch "${branch}" was not deleted (not fully merged, use --force)`);
+					}
 				}
 			}
 
