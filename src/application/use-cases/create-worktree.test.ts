@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { CONFIG_FILENAME } from "../../domain/constants.ts";
 import { expectErr, expectOk } from "../../test-utils/assertions.ts";
 import { createFakeFilesystem } from "../../test-utils/fake-filesystem.ts";
 import { createFakeGit } from "../../test-utils/fake-git.ts";
@@ -11,7 +12,7 @@ describe("createWorktree", () => {
 	test("creates a worktree and returns it on success", async () => {
 		const git = createFakeGit({ root: ROOT, worktrees: [] });
 		const fs = createFakeFilesystem({
-			files: { [`${ROOT}/.worktreekitrc`]: CONFIG, [`${ROOT}/.env`]: "SECRET=123" },
+			files: { [`${ROOT}/${CONFIG_FILENAME}`]: CONFIG, [`${ROOT}/.env`]: "SECRET=123" },
 			cwd: ROOT,
 		});
 		const result = await createWorktree({ branch: "feat-x" }, { git, fs });
@@ -24,7 +25,7 @@ describe("createWorktree", () => {
 	test("returns files to copy from config with isDirectory false", async () => {
 		const git = createFakeGit({ root: ROOT, worktrees: [] });
 		const fs = createFakeFilesystem({
-			files: { [`${ROOT}/.worktreekitrc`]: CONFIG, [`${ROOT}/.env`]: "SECRET=123" },
+			files: { [`${ROOT}/${CONFIG_FILENAME}`]: CONFIG, [`${ROOT}/.env`]: "SECRET=123" },
 			cwd: ROOT,
 		});
 		const result = await createWorktree({ branch: "feat-copy" }, { git, fs });
@@ -41,7 +42,7 @@ describe("createWorktree", () => {
 		const git = createFakeGit({ root: ROOT, worktrees: [] });
 		const fs = createFakeFilesystem({
 			files: {
-				[`${ROOT}/.worktreekitrc`]: configWithDir,
+				[`${ROOT}/${CONFIG_FILENAME}`]: configWithDir,
 				[`${ROOT}/.env`]: "SECRET=123",
 				[`${ROOT}/config/settings.json`]: "{}",
 			},
@@ -61,7 +62,7 @@ describe("createWorktree", () => {
 			root: ROOT,
 			worktrees: [{ path: "/other", branch: "existing", head: "abc", isMain: false }],
 		});
-		const fs = createFakeFilesystem({ files: { [`${ROOT}/.worktreekitrc`]: CONFIG }, cwd: ROOT });
+		const fs = createFakeFilesystem({ files: { [`${ROOT}/${CONFIG_FILENAME}`]: CONFIG }, cwd: ROOT });
 		const result = await createWorktree({ branch: "existing" }, { git, fs });
 
 		expectErr(result);
@@ -94,7 +95,7 @@ describe("createWorktree", () => {
 		});
 		const git = createFakeGit({ root: ROOT, worktrees: [] });
 		const fs = createFakeFilesystem({
-			files: { [`${ROOT}/.worktreekitrc`]: configWithHooks },
+			files: { [`${ROOT}/${CONFIG_FILENAME}`]: configWithHooks },
 			cwd: ROOT,
 		});
 		const result = await createWorktree({ branch: "feat-hooks" }, { git, fs });
@@ -110,7 +111,7 @@ describe("createWorktree", () => {
 	test("returns null hookContext when no hooks configured", async () => {
 		const git = createFakeGit({ root: ROOT, worktrees: [] });
 		const fs = createFakeFilesystem({
-			files: { [`${ROOT}/.worktreekitrc`]: CONFIG },
+			files: { [`${ROOT}/${CONFIG_FILENAME}`]: CONFIG },
 			cwd: ROOT,
 		});
 		const result = await createWorktree({ branch: "feat-no-hooks" }, { git, fs });
@@ -128,7 +129,7 @@ describe("createWorktree", () => {
 		});
 		const git = createFakeGit({ root: ROOT, worktrees: [] });
 		const fs = createFakeFilesystem({
-			files: { [`${ROOT}/.worktreekitrc`]: configWithHooks },
+			files: { [`${ROOT}/${CONFIG_FILENAME}`]: configWithHooks },
 			cwd: ROOT,
 		});
 		const result = await createWorktree({ branch: "feat-base", baseBranch: "develop" }, { git, fs });
@@ -142,7 +143,7 @@ describe("createWorktree", () => {
 		const git = createFakeGit({ root: ROOT, worktrees: [] });
 		const fs = createFakeFilesystem({
 			files: {
-				[`${ROOT}/.worktreekitrc`]: config,
+				[`${ROOT}/${CONFIG_FILENAME}`]: config,
 				[`${ROOT}/config/db.json`]: "{}",
 				[`${ROOT}/config/api.json`]: "{}",
 				[`${ROOT}/config/readme.txt`]: "not matched",
@@ -163,7 +164,7 @@ describe("createWorktree", () => {
 		const git = createFakeGit({ root: ROOT, worktrees: [] });
 		const fs = createFakeFilesystem({
 			files: {
-				[`${ROOT}/.worktreekitrc`]: config,
+				[`${ROOT}/${CONFIG_FILENAME}`]: config,
 				[`${ROOT}/config/db/settings.json`]: "{}",
 				[`${ROOT}/config/api/endpoints.json`]: "{}",
 			},
@@ -182,7 +183,7 @@ describe("createWorktree", () => {
 		const config = JSON.stringify({ rootDir: "../worktrees", copy: ["nonexistent/*.json"] });
 		const git = createFakeGit({ root: ROOT, worktrees: [] });
 		const fs = createFakeFilesystem({
-			files: { [`${ROOT}/.worktreekitrc`]: config },
+			files: { [`${ROOT}/${CONFIG_FILENAME}`]: config },
 			cwd: ROOT,
 		});
 		const result = await createWorktree({ branch: "feat-no-match" }, { git, fs });
@@ -197,7 +198,7 @@ describe("createWorktree", () => {
 		const git = createFakeGit({ root: ROOT, worktrees: [] });
 		const fs = createFakeFilesystem({
 			files: {
-				[`${ROOT}/.worktreekitrc`]: config,
+				[`${ROOT}/${CONFIG_FILENAME}`]: config,
 				[`${ROOT}/.env`]: "SECRET=123",
 				[`${ROOT}/config/db.json`]: "{}",
 			},
@@ -217,7 +218,7 @@ describe("createWorktree", () => {
 		const git = createFakeGit({ root: ROOT, worktrees: [] });
 		const fs = createFakeFilesystem({
 			files: {
-				[`${ROOT}/.worktreekitrc`]: config,
+				[`${ROOT}/${CONFIG_FILENAME}`]: config,
 				[`${ROOT}/config/settings.json`]: "{}",
 				[`${ROOT}/config/nested/deep.json`]: "{}",
 			},
@@ -237,7 +238,7 @@ describe("createWorktree", () => {
 		const git = createFakeGit({ root: ROOT, worktrees: [] });
 		const fs = createFakeFilesystem({
 			files: {
-				[`${ROOT}/.worktreekitrc`]: config,
+				[`${ROOT}/${CONFIG_FILENAME}`]: config,
 				[`${ROOT}/.env`]: "ROOT_SECRET=1",
 				[`${ROOT}/.env.local`]: "LOCAL_SECRET=2",
 				[`${ROOT}/packages/api/.env`]: "API_SECRET=3",
@@ -266,7 +267,7 @@ describe("createWorktree", () => {
 		const git = createFakeGit({ root: ROOT, worktrees: [] });
 		const fs = createFakeFilesystem({
 			files: {
-				[`${ROOT}/.worktreekitrc`]: config,
+				[`${ROOT}/${CONFIG_FILENAME}`]: config,
 				[`${ROOT}/.env`]: "ROOT=1",
 				[`${ROOT}/.env.local`]: "should not match",
 				[`${ROOT}/packages/api/.env`]: "API=2",
@@ -291,7 +292,7 @@ describe("createWorktree", () => {
 		});
 		const git = createFakeGit({ root: ROOT, worktrees: [] });
 		const fs = createFakeFilesystem({
-			files: { [`${ROOT}/.worktreekitrc`]: configWithHooks, [`${ROOT}/.env`]: "SECRET=123" },
+			files: { [`${ROOT}/${CONFIG_FILENAME}`]: configWithHooks, [`${ROOT}/.env`]: "SECRET=123" },
 			cwd: ROOT,
 		});
 		const result = await createWorktree({ branch: "feat-dry", baseBranch: "main", dryRun: true }, { git, fs });
@@ -307,7 +308,7 @@ describe("createWorktree", () => {
 	test("dry-run does not add worktree to git store", async () => {
 		const git = createFakeGit({ root: ROOT, worktrees: [] });
 		const fs = createFakeFilesystem({
-			files: { [`${ROOT}/.worktreekitrc`]: CONFIG },
+			files: { [`${ROOT}/${CONFIG_FILENAME}`]: CONFIG },
 			cwd: ROOT,
 		});
 		await createWorktree({ branch: "feat-dry-no-wt", dryRun: true }, { git, fs });
@@ -320,7 +321,7 @@ describe("createWorktree", () => {
 		const config = JSON.stringify({ rootDir: "../worktrees", symlinks: [".env"] });
 		const git = createFakeGit({ root: ROOT, worktrees: [] });
 		const fs = createFakeFilesystem({
-			files: { [`${ROOT}/.worktreekitrc`]: config, [`${ROOT}/.env`]: "SECRET=123" },
+			files: { [`${ROOT}/${CONFIG_FILENAME}`]: config, [`${ROOT}/.env`]: "SECRET=123" },
 			cwd: ROOT,
 		});
 		const result = await createWorktree({ branch: "feat-sym" }, { git, fs });
@@ -336,7 +337,7 @@ describe("createWorktree", () => {
 		const git = createFakeGit({ root: ROOT, worktrees: [] });
 		const fs = createFakeFilesystem({
 			files: {
-				[`${ROOT}/.worktreekitrc`]: config,
+				[`${ROOT}/${CONFIG_FILENAME}`]: config,
 				[`${ROOT}/config/db.json`]: "{}",
 				[`${ROOT}/config/api.json`]: "{}",
 			},
@@ -355,7 +356,7 @@ describe("createWorktree", () => {
 		const config = JSON.stringify({ rootDir: "../worktrees", symlinks: ["nonexistent/*.json"] });
 		const git = createFakeGit({ root: ROOT, worktrees: [] });
 		const fs = createFakeFilesystem({
-			files: { [`${ROOT}/.worktreekitrc`]: config },
+			files: { [`${ROOT}/${CONFIG_FILENAME}`]: config },
 			cwd: ROOT,
 		});
 		const result = await createWorktree({ branch: "feat-sym-none" }, { git, fs });
@@ -370,7 +371,7 @@ describe("createWorktree", () => {
 		const git = createFakeGit({ root: ROOT, worktrees: [] });
 		const fs = createFakeFilesystem({
 			files: {
-				[`${ROOT}/.worktreekitrc`]: config,
+				[`${ROOT}/${CONFIG_FILENAME}`]: config,
 				[`${ROOT}/.env`]: "SECRET=123",
 				[`${ROOT}/.gitignore`]: "node_modules",
 			},
@@ -386,7 +387,7 @@ describe("createWorktree", () => {
 	test("returns empty symlinks when not configured", async () => {
 		const git = createFakeGit({ root: ROOT, worktrees: [] });
 		const fs = createFakeFilesystem({
-			files: { [`${ROOT}/.worktreekitrc`]: CONFIG },
+			files: { [`${ROOT}/${CONFIG_FILENAME}`]: CONFIG },
 			cwd: ROOT,
 		});
 		const result = await createWorktree({ branch: "feat-no-sym" }, { git, fs });
@@ -400,7 +401,7 @@ describe("createWorktree", () => {
 		const git = createFakeGit({ root: ROOT, worktrees: [] });
 		const fs = createFakeFilesystem({
 			files: {
-				[`${ROOT}/.worktreekitrc`]: config,
+				[`${ROOT}/${CONFIG_FILENAME}`]: config,
 				[`${ROOT}/.env`]: "SECRET=123",
 				[`${ROOT}/.gitignore`]: "node_modules",
 			},

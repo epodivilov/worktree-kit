@@ -82,7 +82,7 @@ This is useful for CI pipelines, shell scripts, and AI agents.
 
 ### `wt init`
 
-Create `.worktreekitrc` configuration file in the repository root.
+Create `.worktreekit.jsonc` configuration file in the repository root.
 
 ```bash
 wt init [options]
@@ -91,6 +91,7 @@ wt init [options]
 | Flag | Alias | Description |
 |------|-------|-------------|
 | `--force` | `-f` | Overwrite existing config |
+| `--migrate` | `-m` | Rename legacy `.worktreekitrc` to `.worktreekit.jsonc` |
 
 ### `wt create`
 
@@ -246,10 +247,11 @@ Runs `git fetch --prune`, finds branches with gone remotes, shows candidates, an
 
 ## Configuration
 
-Create a `.worktreekitrc` file in the project root (or use `wt init`):
+Create a `.worktreekit.jsonc` file in the project root (or use `wt init`). JSONC format supports comments:
 
-```json
+```jsonc
 {
+  // Directory for new worktrees (relative to main worktree)
   "rootDir": "../worktrees",
   "copy": [
     ".env",
@@ -314,6 +316,18 @@ Both `post-create` and `pre-remove` hooks receive the following environment vari
 | `WORKTREE_BRANCH` | Branch name | both |
 | `REPO_ROOT` | Repository root path | both |
 | `BASE_BRANCH` | Base branch (if specified with `--base`) | `post-create` |
+
+## Migration from `.worktreekitrc`
+
+If you have an existing `.worktreekitrc` config, run:
+
+```bash
+wt init --migrate
+```
+
+This renames `.worktreekitrc` to `.worktreekit.jsonc`. The new format supports comments and can use `$schema` for editor autocompletion.
+
+The old `.worktreekitrc` is still supported as a fallback — commands will show a warning suggesting migration.
 
 ## Development
 

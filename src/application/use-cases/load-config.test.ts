@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { CONFIG_FILENAME } from "../../domain/constants.ts";
+import { CONFIG_FILENAME, LEGACY_CONFIG_FILENAME } from "../../domain/constants.ts";
 import { expectErr, expectOk } from "../../test-utils/assertions.ts";
 import { createFakeFilesystem } from "../../test-utils/fake-filesystem.ts";
 import { createFakeGit } from "../../test-utils/fake-git.ts";
@@ -8,6 +8,7 @@ import { loadConfig } from "./load-config.ts";
 describe("loadConfig", () => {
 	const ROOT = "/fake/project";
 	const CONFIG_PATH = `${ROOT}/${CONFIG_FILENAME}`;
+	const LEGACY_CONFIG_PATH = `${ROOT}/${LEGACY_CONFIG_FILENAME}`;
 
 	test("loads config from repo root", async () => {
 		const content = JSON.stringify({ rootDir: "../wt", copy: [".env"] });
@@ -15,11 +16,12 @@ describe("loadConfig", () => {
 		const git = createFakeGit({ root: ROOT });
 
 		const result = await loadConfig({ fs, git });
-		const { config, configPath } = expectOk(result);
+		const { config, configPath, isLegacyConfig } = expectOk(result);
 
 		expect(config.rootDir).toBe("../wt");
 		expect(config.copy).toEqual([".env"]);
 		expect(configPath).toBe(CONFIG_PATH);
+		expect(isLegacyConfig).toBe(false);
 	});
 
 	test("defaults copy to empty array when not specified", async () => {
@@ -51,7 +53,7 @@ describe("loadConfig", () => {
 		const result = await loadConfig({ fs, git });
 		const error = expectErr(result);
 
-		expect(error.message).toContain("Invalid JSON");
+		expect(error.message).toContain("Invalid JSONC");
 	});
 
 	test("returns error when rootDir is missing", async () => {
@@ -87,5 +89,49 @@ describe("loadConfig", () => {
 
 		expect(config.rootDir).toBe("../wt");
 		expect(configPath).toBe(`${MAIN_ROOT}/${CONFIG_FILENAME}`);
+	});
+
+	test("falls back to legacy config when new config not found", async () => {
+		const content = JSON.stringify({ rootDir: "../wt", copy: [".env"] });
+		const fs = createFakeFilesystem({ files: { [LEGACY_CONFIG_PATH]: content } });
+		const git = createFakeGit({ root: ROOT });
+
+		const result = await loadConfig({ fs, git });
+		const { config, configPath, isLegacyConfig } = expectOk(result);
+
+		expect(config.rootDir).toBe("../wt");
+		expect(configPath).toBe(LEGACY_CONFIG_PATH);
+		expect(isLegacyConfig).toBe(true);
+	});
+
+	test("prefers new config over legacy when both exist", async () => {
+		const newContent = JSON.stringify({ rootDir: "../new" });
+		const legacyContent = JSON.stringify({ rootDir: "../old" });
+		const fs = createFakeFilesystem({
+			files: { [CONFIG_PATH]: newContent, [LEGACY_CONFIG_PATH]: legacyContent },
+		});
+		const git = createFakeGit({ root: ROOT });
+
+		const result = await loadConfig({ fs, git });
+		const { config, isLegacyConfig } = expectOk(result);
+
+		expect(config.rootDir).toBe("../new");
+		expect(isLegacyConfig).toBe(false);
+	});
+
+	test("parses JSONC with comments", async () => {
+		const content = `{
+			// This is a comment
+			"rootDir": "../wt",
+			"copy": [".env"] /* inline comment */
+		}`;
+		const fs = createFakeFilesystem({ files: { [CONFIG_PATH]: content } });
+		const git = createFakeGit({ root: ROOT });
+
+		const result = await loadConfig({ fs, git });
+		const { config } = expectOk(result);
+
+		expect(config.rootDir).toBe("../wt");
+		expect(config.copy).toEqual([".env"]);
 	});
 });
