@@ -45,7 +45,9 @@ export function createCommand(container: Container) {
 				create: {},
 			};
 			const config = configResult.success ? configResult.data.config : fallbackConfig;
-			if (configResult.success && configResult.data.isLegacyConfig) {
+			if (!configResult.success) {
+				ui.warn(configResult.error.message);
+			} else if (configResult.data.isLegacyConfig) {
 				ui.warn("Using legacy .worktreekitrc config. Run 'wt init --migrate' to upgrade to .worktreekit.jsonc");
 			}
 

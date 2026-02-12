@@ -8,6 +8,7 @@ import type { GitPort } from "../../domain/ports/git-port.ts";
 import { WorktreeConfigSchema } from "../../domain/schemas/config-schema.ts";
 import type { Result } from "../../shared/result.ts";
 import { Result as R } from "../../shared/result.ts";
+import { stripTrailingCommas } from "../../shared/strip-trailing-commas.ts";
 
 export interface LoadConfigOutput {
 	config: WorktreeConfig;
@@ -51,7 +52,7 @@ export async function loadConfig(deps: LoadConfigDeps): Promise<Result<LoadConfi
 
 	let raw: unknown;
 	try {
-		raw = JSON.parse(stripJsonComments(readResult.data));
+		raw = JSON.parse(stripTrailingCommas(stripJsonComments(readResult.data)));
 	} catch {
 		return R.err(new Error(`Invalid JSONC in ${actualPath}`));
 	}
