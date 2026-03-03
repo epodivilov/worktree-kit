@@ -446,6 +446,114 @@ describe("createWorktree", () => {
 		expect(notifications.some((n) => n.message.includes("config/db.json"))).toBe(true);
 	});
 
+	test("excludes literal negation pattern from copy", async () => {
+		const config = JSON.stringify({
+			rootDir: "../worktrees",
+			copy: [".claude", "!.claude/settings.local.json"],
+		});
+		const git = createFakeGit({ root: ROOT, worktrees: [] });
+		const fs = createFakeFilesystem({
+			files: {
+				[`${ROOT}/${CONFIG_FILENAME}`]: config,
+				[`${ROOT}/.claude/settings.local.json`]: "{}",
+			},
+			directories: [`${ROOT}/.claude`],
+			cwd: ROOT,
+		});
+		const result = await createWorktree({ branch: "feat-neg-literal" }, { git, fs });
+
+		const { filesToCopy } = expectOk(result);
+		expect(filesToCopy).toHaveLength(1);
+		expect(filesToCopy[0]?.src).toBe(`${ROOT}/.claude`);
+	});
+
+	test("excludes glob negation pattern from copy", async () => {
+		const config = JSON.stringify({
+			rootDir: "../worktrees",
+			copy: ["config/*", "!config/*.secret"],
+		});
+		const git = createFakeGit({ root: ROOT, worktrees: [] });
+		const fs = createFakeFilesystem({
+			files: {
+				[`${ROOT}/${CONFIG_FILENAME}`]: config,
+				[`${ROOT}/config/db.json`]: "{}",
+				[`${ROOT}/config/api.json`]: "{}",
+				[`${ROOT}/config/keys.secret`]: "TOP_SECRET",
+			},
+			directories: [`${ROOT}/config`],
+			cwd: ROOT,
+		});
+		const result = await createWorktree({ branch: "feat-neg-glob" }, { git, fs });
+
+		const { filesToCopy } = expectOk(result);
+		expect(filesToCopy).toHaveLength(2);
+		const srcs = filesToCopy.map((f) => f.src).sort();
+		expect(srcs).toEqual([`${ROOT}/config/api.json`, `${ROOT}/config/db.json`]);
+	});
+
+	test("excludes negation pattern from symlinks", async () => {
+		const config = JSON.stringify({
+			rootDir: "../worktrees",
+			symlinks: ["config/*", "!config/local.json"],
+		});
+		const git = createFakeGit({ root: ROOT, worktrees: [] });
+		const fs = createFakeFilesystem({
+			files: {
+				[`${ROOT}/${CONFIG_FILENAME}`]: config,
+				[`${ROOT}/config/shared.json`]: "{}",
+				[`${ROOT}/config/local.json`]: "{}",
+			},
+			directories: [`${ROOT}/config`],
+			cwd: ROOT,
+		});
+		const result = await createWorktree({ branch: "feat-neg-sym" }, { git, fs });
+
+		const { symlinksToCreate } = expectOk(result);
+		expect(symlinksToCreate).toHaveLength(1);
+		expect(symlinksToCreate[0]?.target).toBe(`${ROOT}/config/shared.json`);
+	});
+
+	test("combined copy with exclusion + symlink excluded file", async () => {
+		const config = JSON.stringify({
+			rootDir: "../worktrees",
+			copy: [".claude", "!.claude/settings.local.json"],
+			symlinks: [".claude/settings.local.json"],
+		});
+		const git = createFakeGit({ root: ROOT, worktrees: [] });
+		const fs = createFakeFilesystem({
+			files: {
+				[`${ROOT}/${CONFIG_FILENAME}`]: config,
+				[`${ROOT}/.claude/settings.local.json`]: "{}",
+			},
+			directories: [`${ROOT}/.claude`],
+			cwd: ROOT,
+		});
+		const result = await createWorktree({ branch: "feat-neg-combined" }, { git, fs });
+
+		const { filesToCopy, symlinksToCreate } = expectOk(result);
+		expect(filesToCopy).toHaveLength(1);
+		expect(filesToCopy[0]?.src).toBe(`${ROOT}/.claude`);
+		expect(symlinksToCreate).toHaveLength(1);
+		expect(symlinksToCreate[0]?.target).toBe(`${ROOT}/.claude/settings.local.json`);
+	});
+
+	test("negation without matching positive is a no-op", async () => {
+		const config = JSON.stringify({
+			rootDir: "../worktrees",
+			copy: [".env", "!nonexistent.txt"],
+		});
+		const git = createFakeGit({ root: ROOT, worktrees: [] });
+		const fs = createFakeFilesystem({
+			files: { [`${ROOT}/${CONFIG_FILENAME}`]: config, [`${ROOT}/.env`]: "SECRET=123" },
+			cwd: ROOT,
+		});
+		const result = await createWorktree({ branch: "feat-neg-noop" }, { git, fs });
+
+		const { filesToCopy } = expectOk(result);
+		expect(filesToCopy).toHaveLength(1);
+		expect(filesToCopy[0]?.src).toBe(`${ROOT}/.env`);
+	});
+
 	test("deduplicates overlapping glob and literal paths", async () => {
 		const config = JSON.stringify({ rootDir: "../worktrees", copy: [".env", ".*"] });
 		const git = createFakeGit({ root: ROOT, worktrees: [] });

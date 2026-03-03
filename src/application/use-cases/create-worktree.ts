@@ -15,6 +15,38 @@ function isGlobPattern(str: string): boolean {
 	return /[*?[\]{}]/.test(str);
 }
 
+function splitPatterns(entries: readonly string[]): { positive: string[]; negative: string[] } {
+	const positive: string[] = [];
+	const negative: string[] = [];
+	for (const entry of entries) {
+		if (entry.startsWith("!")) {
+			negative.push(entry.slice(1));
+		} else {
+			positive.push(entry);
+		}
+	}
+	return { positive, negative };
+}
+
+async function resolveExclusions(
+	negativePatterns: string[],
+	repoRoot: string,
+	fs: FilesystemPort,
+): Promise<Set<string>> {
+	const excluded = new Set<string>();
+	for (const pattern of negativePatterns) {
+		if (isGlobPattern(pattern)) {
+			const matches = await fs.glob(pattern, { cwd: repoRoot });
+			for (const match of matches) {
+				excluded.add(match);
+			}
+		} else {
+			excluded.add(join(repoRoot, pattern));
+		}
+	}
+	return excluded;
+}
+
 export interface CreateWorktreeInput {
 	branch: string;
 	baseBranch?: string;
@@ -93,9 +125,12 @@ export async function createWorktree(
 		worktree = createResult.data;
 	}
 
+	const { positive: copyPositive, negative: copyNegative } = splitPatterns(config.copy);
+	const copyExclusions = await resolveExclusions(copyNegative, repoRoot, fs);
+
 	const rawFiles: FileToCopy[] = [];
 
-	for (const entry of config.copy) {
+	for (const entry of copyPositive) {
 		if (isGlobPattern(entry)) {
 			const matches = await fs.glob(entry, { cwd: repoRoot });
 			if (matches.length === 0) {
@@ -120,11 +155,17 @@ export async function createWorktree(
 		}
 	}
 
-	const filesToCopy = uniqueBy(rawFiles, (f) => f.src);
+	const filesToCopy = uniqueBy(
+		rawFiles.filter((f) => !copyExclusions.has(f.src)),
+		(f) => f.src,
+	);
+
+	const { positive: symlinkPositive, negative: symlinkNegative } = splitPatterns(config.symlinks);
+	const symlinkExclusions = await resolveExclusions(symlinkNegative, repoRoot, fs);
 
 	const rawSymlinks: SymlinkToCreate[] = [];
 
-	for (const entry of config.symlinks) {
+	for (const entry of symlinkPositive) {
 		if (isGlobPattern(entry)) {
 			const matches = await fs.glob(entry, { cwd: repoRoot });
 			if (matches.length === 0) {
@@ -147,7 +188,10 @@ export async function createWorktree(
 		}
 	}
 
-	const dedupedSymlinks = uniqueBy(rawSymlinks, (s) => s.target);
+	const dedupedSymlinks = uniqueBy(
+		rawSymlinks.filter((s) => !symlinkExclusions.has(s.target)),
+		(s) => s.target,
+	);
 
 	const symlinksToCreate: SymlinkToCreate[] = [];
 	for (const s of dedupedSymlinks) {
