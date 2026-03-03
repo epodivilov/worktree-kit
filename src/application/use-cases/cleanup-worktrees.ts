@@ -83,7 +83,7 @@ export async function cleanupWorktrees(
 				continue;
 			}
 
-			const removeResult = await git.removeWorktree(worktree.path);
+			const removeResult = await git.removeWorktree(worktree.path, { force: input.force });
 			if (!removeResult.success) {
 				reports.push({
 					branch,

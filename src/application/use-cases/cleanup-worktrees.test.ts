@@ -81,6 +81,19 @@ describe("cleanupWorktrees", () => {
 		expect(output.reports[0]).toMatchObject({ branch: "feature-a", result: { status: "skipped-dirty" } });
 	});
 
+	test("dirty worktree with --force — force removed and cleaned", async () => {
+		const git = createFakeGit({
+			worktrees: [mainWt, featureA],
+			branches: ["main", "feature-a"],
+			goneBranches: ["feature-a"],
+			mergedBranches: ["feature-a"],
+			dirtyWorktrees: new Set(["/wt/feature-a"]),
+		});
+		const output = expectOk(await cleanupWorktrees({ force: true, dryRun: false }, { git }));
+
+		expect(output.reports[0]).toMatchObject({ branch: "feature-a", result: { status: "cleaned" } });
+	});
+
 	test("dry-run — reports candidates without deleting", async () => {
 		const git = createFakeGit({
 			worktrees: [mainWt, featureA],
