@@ -1,10 +1,15 @@
 import type { Worktree } from "../../domain/entities/worktree.ts";
 import type { GitPort } from "../../domain/ports/git-port.ts";
+import type { ShellPort } from "../../domain/ports/shell-port.ts";
+import type { Notification } from "../../shared/notification.ts";
 import { Result as R, type Result } from "../../shared/result.ts";
+import { runHooks } from "./run-hooks.ts";
 
 export interface UpdateWorktreesInput {
 	dryRun: boolean;
 	branch?: string;
+	postUpdateHooks?: readonly string[];
+	repoRoot?: string;
 }
 
 export type WorktreeUpdateStatus =
@@ -26,10 +31,12 @@ export interface UpdateWorktreesOutput {
 	defaultBranch: string;
 	defaultBranchUpdate: "ff-updated" | "ref-updated";
 	reports: WorktreeReport[];
+	hookNotifications: Notification[];
 }
 
 export interface UpdateWorktreesDeps {
 	git: GitPort;
+	shell?: ShellPort;
 }
 
 async function findParentBranch(
@@ -274,5 +281,29 @@ export async function updateWorktrees(
 		}
 	}
 
-	return R.ok({ defaultBranch, defaultBranchUpdate, reports });
+	const hookNotifications: Notification[] = [];
+
+	if (input.postUpdateHooks?.length && deps.shell) {
+		for (const report of reports) {
+			if (report.result.status === "rebased" || report.result.status === "rebased-dirty") {
+				const hookResult = await runHooks(
+					{
+						commands: input.postUpdateHooks,
+						context: {
+							worktreePath: report.path,
+							branch: report.branch,
+							repoRoot: input.repoRoot ?? "",
+							baseBranch: report.parent,
+						},
+					},
+					{ shell: deps.shell },
+				);
+				if (hookResult.success) {
+					hookNotifications.push(...hookResult.data.notifications);
+				}
+			}
+		}
+	}
+
+	return R.ok({ defaultBranch, defaultBranchUpdate, reports, hookNotifications });
 }

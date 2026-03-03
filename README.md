@@ -18,7 +18,7 @@ worktree-kit fills these gaps with a single CLI.
 - Interactive branch selection with local and remote branch support
 - Automatic file and directory copying with glob patterns
 - Symlinks from root repo for sharing gitignored content across worktrees
-- Post-create and pre-remove hooks with environment variables
+- Post-create, pre-remove, and post-update hooks with environment variables
 - Smart update: fetch, fast-forward default branch, rebase feature branches in correct order
 - Parent branch detection via merge-base for proper rebase ordering
 - Automatic cleanup of worktrees with deleted remote branches
@@ -217,6 +217,16 @@ wt update --dry-run
 
 If a worktree has uncommitted changes, a temporary WIP commit is created before rebase and reset afterwards. On rebase conflict, the rebase is aborted and the issue is reported.
 
+After each successful rebase, `post-update` hooks are executed for that branch. This is useful for auto-pushing rebased branches:
+
+```jsonc
+{
+  "hooks": {
+    "post-update": ["git push --force-with-lease"]
+  }
+}
+```
+
 ### `wt cleanup`
 
 Remove worktrees and branches whose remote tracking branch has been deleted.
@@ -275,7 +285,10 @@ Create a `.worktreekit.jsonc` file in the project root (or use `wt init`). JSONC
     "post-create": [
       "pnpm install --frozen-lockfile"
     ],
-    "pre-remove": []
+    "pre-remove": [],
+    "post-update": [
+      "git push --force-with-lease"
+    ]
   }
 }
 ```
@@ -293,6 +306,7 @@ Create a `.worktreekit.jsonc` file in the project root (or use `wt init`). JSONC
 | `remove.deleteRemoteBranch` | `boolean` | — | Auto-delete remote branch on removal. Prompts if not set |
 | `hooks.post-create` | `string[]` | `[]` | Commands to run after creating a worktree |
 | `hooks.pre-remove` | `string[]` | `[]` | Commands to run before removing a worktree |
+| `hooks.post-update` | `string[]` | `[]` | Commands to run after each branch is successfully rebased |
 
 ### Copy vs Symlinks
 
@@ -309,14 +323,14 @@ Both `copy` and `symlinks` support exact paths and glob patterns. The difference
 
 ### Hook Environment Variables
 
-Both `post-create` and `pre-remove` hooks receive the following environment variables:
+All hooks receive the following environment variables:
 
 | Variable | Description | Hooks |
 |----------|-------------|-------|
-| `WORKTREE_PATH` | Absolute path to the worktree | both |
-| `WORKTREE_BRANCH` | Branch name | both |
-| `REPO_ROOT` | Repository root path | both |
-| `BASE_BRANCH` | Base branch (if specified with `--base`) | `post-create` |
+| `WORKTREE_PATH` | Absolute path to the worktree | all |
+| `WORKTREE_BRANCH` | Branch name | all |
+| `REPO_ROOT` | Repository root path | all |
+| `BASE_BRANCH` | Base branch (create: `--base` value; update: parent branch) | `post-create`, `post-update` |
 
 ## Migration from `.worktreekitrc`
 

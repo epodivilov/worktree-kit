@@ -43,6 +43,12 @@
 					"items": { "type": "string" },
 					"default": [],
 					"description": "Commands to run before removing a worktree"
+				},
+				"post-update": {
+					"type": "array",
+					"items": { "type": "string" },
+					"default": [],
+					"description": "Commands to run after each branch is successfully rebased during update"
 				}
 			}
 		},

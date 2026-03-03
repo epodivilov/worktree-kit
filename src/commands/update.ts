@@ -1,6 +1,8 @@
 import { defineCommand } from "citty";
 import pc from "picocolors";
+import { loadConfig } from "../application/use-cases/load-config.ts";
 import { updateWorktrees } from "../application/use-cases/update-worktrees.ts";
+import { renderNotifications } from "../cli/render-notifications.ts";
 import type { Container } from "../infrastructure/container.ts";
 import { Result } from "../shared/result.ts";
 
@@ -23,17 +25,31 @@ export function updateCommand(container: Container) {
 			},
 		},
 		async run({ args }) {
-			const { ui, git } = container;
+			const { ui, git, fs, shell } = container;
 
 			const branch = args.branch as string | undefined;
 			const dryRun = (args["dry-run"] as boolean | undefined) ?? false;
 
 			ui.intro("worktree-kit update");
 
+			const configResult = await loadConfig({ git, fs });
+			const postUpdateHooks = configResult.success ? configResult.data.config.hooks["post-update"] : [];
+
+			let repoRoot = "";
+			if (postUpdateHooks.length > 0) {
+				const rootResult = await git.getRepositoryRoot();
+				if (rootResult.success) {
+					repoRoot = rootResult.data;
+				}
+			}
+
 			const spinner = ui.createSpinner();
 			spinner.start("Fetching and updating worktrees...");
 
-			const result = await updateWorktrees({ dryRun, branch }, { git });
+			const result = await updateWorktrees(
+				{ dryRun, branch, postUpdateHooks, repoRoot },
+				{ git, shell: postUpdateHooks.length > 0 ? shell : undefined },
+			);
 
 			if (Result.isErr(result)) {
 				spinner.stop(pc.red("Failed"));
@@ -43,7 +59,7 @@ export function updateCommand(container: Container) {
 
 			spinner.stop(pc.green("Done"));
 
-			const { defaultBranch, defaultBranchUpdate, reports } = result.data;
+			const { defaultBranch, defaultBranchUpdate, reports, hookNotifications } = result.data;
 
 			if (defaultBranchUpdate === "ff-updated") {
 				ui.success(`${defaultBranch} fast-forwarded`);
@@ -75,6 +91,8 @@ export function updateCommand(container: Container) {
 						break;
 				}
 			}
+
+			renderNotifications(ui, hookNotifications);
 
 			ui.outro(dryRun ? "Dry run — no changes made" : "Done!");
 		},

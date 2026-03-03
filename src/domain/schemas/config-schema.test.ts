@@ -10,7 +10,7 @@ describe("WorktreeConfigSchema", () => {
 		if (result.success) {
 			expect(result.output.rootDir).toBe("../wt");
 			expect(result.output.copy).toEqual([".env", ".env.local"]);
-			expect(result.output.hooks).toEqual({ "post-create": [], "pre-remove": [] });
+			expect(result.output.hooks).toEqual({ "post-create": [], "pre-remove": [], "post-update": [] });
 		}
 	});
 
@@ -40,7 +40,7 @@ describe("WorktreeConfigSchema", () => {
 		const result = v.safeParse(WorktreeConfigSchema, { rootDir: "../wt" });
 		expect(result.success).toBe(true);
 		if (result.success) {
-			expect(result.output.hooks).toEqual({ "post-create": [], "pre-remove": [] });
+			expect(result.output.hooks).toEqual({ "post-create": [], "pre-remove": [], "post-update": [] });
 		}
 	});
 
@@ -48,7 +48,7 @@ describe("WorktreeConfigSchema", () => {
 		const result = v.safeParse(WorktreeConfigSchema, { rootDir: "../wt", hooks: {} });
 		expect(result.success).toBe(true);
 		if (result.success) {
-			expect(result.output.hooks).toEqual({ "post-create": [], "pre-remove": [] });
+			expect(result.output.hooks).toEqual({ "post-create": [], "pre-remove": [], "post-update": [] });
 		}
 	});
 

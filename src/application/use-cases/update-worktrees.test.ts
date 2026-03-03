@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { Worktree } from "../../domain/entities/worktree.ts";
 import { expectErr, expectOk } from "../../test-utils/assertions.ts";
 import { createFakeGit } from "../../test-utils/fake-git.ts";
+import { createFakeShell } from "../../test-utils/fake-shell.ts";
 import { updateWorktrees } from "./update-worktrees.ts";
 
 const mainWt: Worktree = { path: "/repo", branch: "main", head: "aaa", isMain: true };
@@ -396,5 +397,127 @@ describe("updateWorktrees — branch filter", () => {
 		const error = expectErr(result);
 		expect(error.message).toContain("nonexistent");
 		expect(error.message).toContain("not found");
+	});
+});
+
+describe("updateWorktrees — post-update hooks", () => {
+	test("runs hooks for each successfully rebased branch", async () => {
+		const worktrees = [mainWt, featureA, featureB];
+		const git = createFakeGit({ worktrees, ...flatBranchesConfig(worktrees) });
+		const shell = createFakeShell();
+
+		const result = await updateWorktrees(
+			{ dryRun: false, postUpdateHooks: ["git push --force-with-lease"], repoRoot: "/repo" },
+			{ git, shell },
+		);
+
+		const output = expectOk(result);
+		expect(shell.calls).toHaveLength(2);
+		expect(shell.calls[0]?.command).toBe("git push --force-with-lease");
+		expect(shell.calls[0]?.options.cwd).toBe("/repo-a");
+		expect(shell.calls[0]?.options.env).toMatchObject({
+			WORKTREE_BRANCH: "feature-a",
+			WORKTREE_PATH: "/repo-a",
+			REPO_ROOT: "/repo",
+		});
+		expect(shell.calls[1]?.options.cwd).toBe("/repo-b");
+		expect(output.hookNotifications).toHaveLength(2);
+		expect(output.hookNotifications[0]?.level).toBe("info");
+	});
+
+	test("does not run hooks for conflicted or skipped branches", async () => {
+		const worktrees = [mainWt, featureA, featureB];
+		const git = createFakeGit({
+			worktrees,
+			rebaseConflicts: new Set(["/repo-a"]),
+			...flatBranchesConfig(worktrees),
+		});
+		const shell = createFakeShell();
+
+		const result = await updateWorktrees(
+			{ dryRun: false, postUpdateHooks: ["echo done"], repoRoot: "/repo" },
+			{ git, shell },
+		);
+
+		const output = expectOk(result);
+		expect(shell.calls).toHaveLength(1);
+		expect(shell.calls[0]?.options.cwd).toBe("/repo-b");
+		expect(output.hookNotifications).toHaveLength(1);
+	});
+
+	test("does not run hooks in dry-run mode", async () => {
+		const worktrees = [mainWt, featureA, featureB];
+		const git = createFakeGit({ worktrees, ...flatBranchesConfig(worktrees) });
+		const shell = createFakeShell();
+
+		const result = await updateWorktrees(
+			{ dryRun: true, postUpdateHooks: ["echo done"], repoRoot: "/repo" },
+			{ git, shell },
+		);
+
+		const output = expectOk(result);
+		expect(shell.calls).toHaveLength(0);
+		expect(output.hookNotifications).toHaveLength(0);
+	});
+
+	test("does not run hooks when no hooks configured", async () => {
+		const worktrees = [mainWt, featureA];
+		const git = createFakeGit({ worktrees, ...flatBranchesConfig(worktrees) });
+		const shell = createFakeShell();
+
+		const result = await updateWorktrees({ dryRun: false }, { git, shell });
+
+		const output = expectOk(result);
+		expect(shell.calls).toHaveLength(0);
+		expect(output.hookNotifications).toHaveLength(0);
+	});
+
+	test("passes baseBranch (parent) in hook context", async () => {
+		const main: Worktree = { path: "/repo", branch: "main", head: "aaa", isMain: true };
+		const featA: Worktree = { path: "/repo-a", branch: "feat-a", head: "eee", isMain: false };
+		const featSub: Worktree = { path: "/repo-sub", branch: "feat-sub", head: "ggg", isMain: false };
+
+		const mergeBaseMap = new Map([
+			["feat-a:main", "aaa"],
+			["feat-a:feat-sub", "eee"],
+			["feat-sub:main", "aaa"],
+			["feat-sub:feat-a", "eee"],
+			["main:feat-a", "aaa"],
+			["main:feat-sub", "aaa"],
+		]);
+		const commitCountMap = new Map([
+			["aaa..feat-a", 2],
+			["aaa..feat-sub", 4],
+			["eee..feat-sub", 2],
+			["eee..feat-a", 0],
+		]);
+
+		const git = createFakeGit({ worktrees: [main, featA, featSub], mergeBaseMap, commitCountMap });
+		const shell = createFakeShell();
+
+		await updateWorktrees({ dryRun: false, postUpdateHooks: ["echo done"], repoRoot: "/repo" }, { git, shell });
+
+		expect(shell.calls).toHaveLength(2);
+		expect(shell.calls[0]?.options.env).toMatchObject({ BASE_BRANCH: "main" });
+		expect(shell.calls[1]?.options.env).toMatchObject({ BASE_BRANCH: "feat-a" });
+	});
+
+	test("continues after hook failure", async () => {
+		const worktrees = [mainWt, featureA, featureB];
+		const git = createFakeGit({ worktrees, ...flatBranchesConfig(worktrees) });
+		const results = new Map();
+		results.set("failing-hook", { success: false, error: { code: "EXECUTION_FAILED", message: "Hook failed" } });
+		const shell = createFakeShell({ results });
+
+		const result = await updateWorktrees(
+			{ dryRun: false, postUpdateHooks: ["failing-hook"], repoRoot: "/repo" },
+			{ git, shell },
+		);
+
+		const output = expectOk(result);
+		expect(shell.calls).toHaveLength(2);
+		expect(output.hookNotifications).toHaveLength(2);
+		expect(output.hookNotifications[0]?.level).toBe("warn");
+		expect(output.hookNotifications[1]?.level).toBe("warn");
 	});
 });
