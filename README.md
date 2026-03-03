@@ -267,10 +267,12 @@ Create a `.worktreekit.jsonc` file in the project root (or use `wt init`). JSONC
   "copy": [
     ".env",
     ".env.local",
-    "config/*.json"
+    "config/*.json",
+    ".claude",
+    "!.claude/settings.local.json"  // exclude from copy
   ],
   "symlinks": [
-    ".claude",
+    ".claude/settings.local.json",  // symlink instead
     ".idea"
   ],
   "defaultBase": "ask",
@@ -298,8 +300,8 @@ Create a `.worktreekit.jsonc` file in the project root (or use `wt init`). JSONC
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `rootDir` | `string` | `"../worktrees"` | Directory for new worktrees (relative to main worktree) |
-| `copy` | `string[]` | `[]` | Files to copy. Supports exact paths, directories, and glob patterns |
-| `symlinks` | `string[]` | `[]` | Paths to symlink from root repo. Supports exact paths and glob patterns |
+| `copy` | `string[]` | `[]` | Files to copy. Supports exact paths, directories, glob patterns, and `!` negation |
+| `symlinks` | `string[]` | `[]` | Paths to symlink from root repo. Supports exact paths, glob patterns, and `!` negation |
 | `defaultBase` | `"current"` \| `"default"` \| `"ask"` | `"ask"` | Base branch selection strategy when creating new branches |
 | `create.base` | `string` | — | Fixed base branch for all new worktrees (overrides `defaultBase`) |
 | `remove.deleteBranch` | `boolean` | — | Auto-delete local branch on removal. Prompts if not set |
@@ -310,7 +312,7 @@ Create a `.worktreekit.jsonc` file in the project root (or use `wt init`). JSONC
 
 ### Copy vs Symlinks
 
-Both `copy` and `symlinks` support exact paths and glob patterns. The difference is how files end up in the worktree:
+Both `copy` and `symlinks` support exact paths, glob patterns, and `!` negation patterns. The difference is how files end up in the worktree:
 
 | | `copy` | `symlinks` |
 |---|--------|------------|
@@ -319,7 +321,18 @@ Both `copy` and `symlinks` support exact paths and glob patterns. The difference
 | **Edits** | Local to the worktree | Reflected in root repo (commit from there) |
 | **Use case** | `.env`, local overrides | IDE configs, shared tooling configs |
 
-**Important:** symlinks only work for gitignored content. Tracked files already exist in the worktree after checkout, so symlink creation will fail with "already exists". When symlinking directories, make sure your `.gitignore` uses patterns **without** a trailing slash (`.claude` not `.claude/`) — git treats symlinks as files, so directory-only patterns won't match them.
+**Negation patterns:** prefix an entry with `!` to exclude matching files from the result set. This lets you combine strategies — copy a directory but symlink a specific file inside it:
+
+```jsonc
+{
+  "copy": [".claude", "!.claude/settings.local.json"],
+  "symlinks": [".claude/settings.local.json"]
+}
+```
+
+Negation patterns support globs too: `"!*.log"`, `"!config/**/*.secret"`.
+
+**Important:** symlinks only work for gitignored content. Tracked files already exist in the worktree after checkout, so a warning is shown and the symlink is skipped. When symlinking directories, make sure your `.gitignore` uses patterns **without** a trailing slash (`.claude` not `.claude/`) — git treats symlinks as files, so directory-only patterns won't match them.
 
 ### Hook Environment Variables
 
