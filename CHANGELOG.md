@@ -3,6 +3,28 @@
 
 ## Bug Fixes
 
+- pass force flag to git worktree remove
+
+## Documentation
+
+- document negation patterns and update config examples
+
+## Features
+
+- add post-update hook support
+- warn when symlink target is a git-tracked path
+- support negation patterns in copy and symlinks config
+
+## Miscellaneous
+
+- remove bun.lock from repository
+
+## Refactoring
+
+- extract uniqueBy array dedup utility
+
+## Bug Fixes
+
 - handle trailing commas in JSONC and warn on config load failure
 
 ## Bug Fixes
