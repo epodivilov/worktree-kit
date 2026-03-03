@@ -497,6 +497,18 @@ export function createBunGitAdapter(logger: LoggerPort): GitPort {
 			}
 		},
 
+		async isPathTracked(repoRoot: string, relativePath: string): Promise<Result<boolean, GitError>> {
+			try {
+				const { exitCode } = await runGit(["-C", repoRoot, "ls-files", "--error-unmatch", relativePath]);
+				return Result.ok(exitCode === 0);
+			} catch {
+				return Result.err({
+					code: "UNKNOWN",
+					message: `Failed to check if path is tracked: ${relativePath}`,
+				});
+			}
+		},
+
 		async deleteBranchForce(branch: string): Promise<Result<void, GitError>> {
 			try {
 				const { exitCode, stderr } = await runGit(["branch", "-D", branch]);

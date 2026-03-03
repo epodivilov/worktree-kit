@@ -396,6 +396,56 @@ describe("createWorktree", () => {
 		expect(symlinksToCreate).toEqual([]);
 	});
 
+	test("warns and excludes symlink targets tracked by git", async () => {
+		const config = JSON.stringify({ rootDir: "../worktrees", symlinks: [".env", "node_modules"] });
+		const git = createFakeGit({ root: ROOT, worktrees: [], trackedPaths: new Set([".env"]) });
+		const fs = createFakeFilesystem({
+			files: { [`${ROOT}/${CONFIG_FILENAME}`]: config, [`${ROOT}/.env`]: "SECRET=123" },
+			cwd: ROOT,
+		});
+		const result = await createWorktree({ branch: "feat-tracked" }, { git, fs });
+
+		const { symlinksToCreate, notifications } = expectOk(result);
+		expect(symlinksToCreate).toHaveLength(1);
+		expect(symlinksToCreate[0]?.target).toBe(`${ROOT}/node_modules`);
+		expect(notifications.some((n) => n.level === "warn" && n.message.includes(".env"))).toBe(true);
+		expect(notifications.some((n) => n.message.includes("copy"))).toBe(true);
+	});
+
+	test("does not warn for non-tracked symlink targets", async () => {
+		const config = JSON.stringify({ rootDir: "../worktrees", symlinks: ["node_modules", ".cache"] });
+		const git = createFakeGit({ root: ROOT, worktrees: [], trackedPaths: new Set() });
+		const fs = createFakeFilesystem({
+			files: { [`${ROOT}/${CONFIG_FILENAME}`]: config },
+			cwd: ROOT,
+		});
+		const result = await createWorktree({ branch: "feat-untracked" }, { git, fs });
+
+		const { symlinksToCreate, notifications } = expectOk(result);
+		expect(symlinksToCreate).toHaveLength(2);
+		expect(notifications.filter((n) => n.message.includes("tracked by git"))).toHaveLength(0);
+	});
+
+	test("warns for tracked symlink targets from glob pattern", async () => {
+		const config = JSON.stringify({ rootDir: "../worktrees", symlinks: ["config/*.json"] });
+		const git = createFakeGit({ root: ROOT, worktrees: [], trackedPaths: new Set(["config/db.json"]) });
+		const fs = createFakeFilesystem({
+			files: {
+				[`${ROOT}/${CONFIG_FILENAME}`]: config,
+				[`${ROOT}/config/db.json`]: "{}",
+				[`${ROOT}/config/local.json`]: "{}",
+			},
+			directories: [`${ROOT}/config`],
+			cwd: ROOT,
+		});
+		const result = await createWorktree({ branch: "feat-tracked-glob" }, { git, fs });
+
+		const { symlinksToCreate, notifications } = expectOk(result);
+		expect(symlinksToCreate).toHaveLength(1);
+		expect(symlinksToCreate[0]?.target).toBe(`${ROOT}/config/local.json`);
+		expect(notifications.some((n) => n.message.includes("config/db.json"))).toBe(true);
+	});
+
 	test("deduplicates overlapping glob and literal paths", async () => {
 		const config = JSON.stringify({ rootDir: "../worktrees", copy: [".env", ".*"] });
 		const git = createFakeGit({ root: ROOT, worktrees: [] });

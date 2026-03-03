@@ -1,4 +1,4 @@
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { INIT_ROOT_DIR } from "../../domain/constants.ts";
 import type { WorktreeConfig } from "../../domain/entities/config.ts";
 import type { Worktree } from "../../domain/entities/worktree.ts";
@@ -7,6 +7,7 @@ import type { GitPort } from "../../domain/ports/git-port.ts";
 import { Notification as N, type Notification } from "../../shared/notification.ts";
 import type { Result } from "../../shared/result.ts";
 import { Result as R } from "../../shared/result.ts";
+import { uniqueBy } from "../../shared/unique-by.ts";
 import { loadConfig } from "./load-config.ts";
 import type { HookContext } from "./run-hooks.ts";
 
@@ -119,12 +120,7 @@ export async function createWorktree(
 		}
 	}
 
-	const seen = new Set<string>();
-	const filesToCopy = rawFiles.filter((f) => {
-		if (seen.has(f.src)) return false;
-		seen.add(f.src);
-		return true;
-	});
+	const filesToCopy = uniqueBy(rawFiles, (f) => f.src);
 
 	const rawSymlinks: SymlinkToCreate[] = [];
 
@@ -151,12 +147,22 @@ export async function createWorktree(
 		}
 	}
 
-	const seenSymlinks = new Set<string>();
-	const symlinksToCreate = rawSymlinks.filter((s) => {
-		if (seenSymlinks.has(s.target)) return false;
-		seenSymlinks.add(s.target);
-		return true;
-	});
+	const dedupedSymlinks = uniqueBy(rawSymlinks, (s) => s.target);
+
+	const symlinksToCreate: SymlinkToCreate[] = [];
+	for (const s of dedupedSymlinks) {
+		const rel = relative(repoRoot, s.target);
+		const trackedResult = await git.isPathTracked(repoRoot, rel);
+		if (trackedResult.success && trackedResult.data) {
+			notifications.push(
+				N.warn(
+					`Symlink target "${rel}" is tracked by git and will be skipped. Git checkout replaces symlinks with tracked content. Consider using "copy" instead.`,
+				),
+			);
+			continue;
+		}
+		symlinksToCreate.push(s);
+	}
 
 	const hookCommands = config.hooks["post-create"];
 	const hookContext: HookContext | null =

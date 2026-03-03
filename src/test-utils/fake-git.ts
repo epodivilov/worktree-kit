@@ -18,6 +18,7 @@ export interface FakeGitOptions {
 	mergeFFOnlyFails?: boolean;
 	mergeBaseMap?: Map<string, string>;
 	commitCountMap?: Map<string, number>;
+	trackedPaths?: Set<string>;
 }
 
 export function createFakeGit(options: FakeGitOptions = {}): GitPort {
@@ -219,6 +220,10 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 				});
 			}
 			return Result.ok(count);
+		},
+
+		async isPathTracked(_repoRoot: string, relativePath: string): Promise<Result<boolean, GitError>> {
+			return Result.ok(options.trackedPaths?.has(relativePath) ?? false);
 		},
 
 		async deleteBranchForce(branch: string): Promise<Result<void, GitError>> {
