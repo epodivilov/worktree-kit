@@ -2,7 +2,6 @@ import { defineCommand } from "citty";
 import pc from "picocolors";
 import { loadConfig } from "../application/use-cases/load-config.ts";
 import { updateWorktrees } from "../application/use-cases/update-worktrees.ts";
-import { renderNotifications } from "../cli/render-notifications.ts";
 import type { Container } from "../infrastructure/container.ts";
 import { Result } from "../shared/result.ts";
 
@@ -59,7 +58,7 @@ export function updateCommand(container: Container) {
 
 			spinner.stop(pc.green("Done"));
 
-			const { defaultBranch, defaultBranchUpdate, reports, hookNotifications } = result.data;
+			const { defaultBranch, defaultBranchUpdate, reports } = result.data;
 
 			if (defaultBranchUpdate === "ff-updated") {
 				ui.success(`${defaultBranch} fast-forwarded`);
@@ -69,15 +68,22 @@ export function updateCommand(container: Container) {
 
 			for (const report of reports) {
 				const onto = report.parent ?? defaultBranch;
+				const hookFailures = report.hookNotifications.filter((n) => n.level === "warn");
+
 				switch (report.result.status) {
 					case "is-default-branch":
 						break;
 					case "rebased":
-						ui.success(`${report.branch} rebased onto ${onto}`);
+					case "rebased-dirty": {
+						const suffix = report.result.status === "rebased-dirty" ? " (via WIP commit)" : "";
+						if (hookFailures.length > 0) {
+							const failMsgs = hookFailures.map((n) => n.message).join("; ");
+							ui.warn(`${report.branch} rebased onto ${onto}${suffix} — ${failMsgs}`);
+						} else {
+							ui.success(`${report.branch} rebased onto ${onto}${suffix}`);
+						}
 						break;
-					case "rebased-dirty":
-						ui.success(`${report.branch} rebased onto ${onto} (via WIP commit)`);
-						break;
+					}
 					case "rebase-conflict":
 						ui.warn(`${report.branch} has conflicts, rebase aborted`);
 						break;
@@ -91,8 +97,6 @@ export function updateCommand(container: Container) {
 						break;
 				}
 			}
-
-			renderNotifications(ui, hookNotifications);
 
 			ui.outro(dryRun ? "Dry run — no changes made" : "Done!");
 		},

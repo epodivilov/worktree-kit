@@ -25,13 +25,13 @@ export interface WorktreeReport {
 	path: string;
 	parent?: string;
 	result: WorktreeUpdateStatus;
+	hookNotifications: Notification[];
 }
 
 export interface UpdateWorktreesOutput {
 	defaultBranch: string;
 	defaultBranchUpdate: "ff-updated" | "ref-updated";
 	reports: WorktreeReport[];
-	hookNotifications: Notification[];
 }
 
 export interface UpdateWorktreesDeps {
@@ -189,7 +189,7 @@ export async function updateWorktrees(
 	const failedBranches = new Set<string>();
 
 	if (mainWorktree) {
-		reports.push({ branch: defaultBranch, path: mainWorktree.path, result: { status: "is-default-branch" } });
+		reports.push({ branch: defaultBranch, path: mainWorktree.path, result: { status: "is-default-branch" }, hookNotifications: [] });
 	}
 
 	for (const wt of targetWorktrees) {
@@ -201,6 +201,7 @@ export async function updateWorktrees(
 				path: wt.path,
 				parent,
 				result: { status: "skipped", reason: `parent ${parent} failed` },
+				hookNotifications: [],
 			});
 			failedBranches.add(wt.branch);
 			continue;
@@ -213,6 +214,7 @@ export async function updateWorktrees(
 				path: wt.path,
 				parent,
 				result: { status: "rebase-conflict", message: "Could not check worktree status" },
+				hookNotifications: [],
 			});
 			failedBranches.add(wt.branch);
 			continue;
@@ -226,6 +228,7 @@ export async function updateWorktrees(
 				path: wt.path,
 				parent,
 				result: { status: "dry-run", dirty: isDirty },
+				hookNotifications: [],
 			});
 			continue;
 		}
@@ -238,6 +241,7 @@ export async function updateWorktrees(
 					path: wt.path,
 					parent,
 					result: { status: "rebase-conflict", message: "Failed to stage changes for WIP commit" },
+					hookNotifications: [],
 				});
 				failedBranches.add(wt.branch);
 				continue;
@@ -249,6 +253,7 @@ export async function updateWorktrees(
 					path: wt.path,
 					parent,
 					result: { status: "rebase-conflict", message: "Failed to create WIP commit" },
+					hookNotifications: [],
 				});
 				failedBranches.add(wt.branch);
 				continue;
@@ -260,11 +265,32 @@ export async function updateWorktrees(
 			if (isDirty) {
 				await git.resetLastCommit(wt.path);
 			}
+
+			let hookNotifications: Notification[] = [];
+			if (input.postUpdateHooks?.length && deps.shell) {
+				const hookResult = await runHooks(
+					{
+						commands: input.postUpdateHooks,
+						context: {
+							worktreePath: wt.path,
+							branch: wt.branch,
+							repoRoot: input.repoRoot ?? "",
+							baseBranch: parent,
+						},
+					},
+					{ shell: deps.shell },
+				);
+				if (hookResult.success) {
+					hookNotifications = hookResult.data.notifications;
+				}
+			}
+
 			reports.push({
 				branch: wt.branch,
 				path: wt.path,
 				parent,
 				result: { status: isDirty ? "rebased-dirty" : "rebased" },
+				hookNotifications,
 			});
 		} else {
 			await git.rebaseAbort(wt.path);
@@ -276,34 +302,11 @@ export async function updateWorktrees(
 				path: wt.path,
 				parent,
 				result: { status: "rebase-conflict", message: rebaseResult.error.message },
+				hookNotifications: [],
 			});
 			failedBranches.add(wt.branch);
 		}
 	}
 
-	const hookNotifications: Notification[] = [];
-
-	if (input.postUpdateHooks?.length && deps.shell) {
-		for (const report of reports) {
-			if (report.result.status === "rebased" || report.result.status === "rebased-dirty") {
-				const hookResult = await runHooks(
-					{
-						commands: input.postUpdateHooks,
-						context: {
-							worktreePath: report.path,
-							branch: report.branch,
-							repoRoot: input.repoRoot ?? "",
-							baseBranch: report.parent,
-						},
-					},
-					{ shell: deps.shell },
-				);
-				if (hookResult.success) {
-					hookNotifications.push(...hookResult.data.notifications);
-				}
-			}
-		}
-	}
-
-	return R.ok({ defaultBranch, defaultBranchUpdate, reports, hookNotifications });
+	return R.ok({ defaultBranch, defaultBranchUpdate, reports });
 }

@@ -421,8 +421,12 @@ describe("updateWorktrees — post-update hooks", () => {
 			REPO_ROOT: "/repo",
 		});
 		expect(shell.calls[1]?.options.cwd).toBe("/repo-b");
-		expect(output.hookNotifications).toHaveLength(2);
-		expect(output.hookNotifications[0]?.level).toBe("info");
+		const featureAReport = output.reports.find((r) => r.branch === "feature-a");
+		const featureBReport = output.reports.find((r) => r.branch === "feature-b");
+		expect(featureAReport?.hookNotifications).toHaveLength(1);
+		expect(featureAReport?.hookNotifications[0]?.level).toBe("info");
+		expect(featureBReport?.hookNotifications).toHaveLength(1);
+		expect(featureBReport?.hookNotifications[0]?.level).toBe("info");
 	});
 
 	test("does not run hooks for conflicted or skipped branches", async () => {
@@ -442,7 +446,10 @@ describe("updateWorktrees — post-update hooks", () => {
 		const output = expectOk(result);
 		expect(shell.calls).toHaveLength(1);
 		expect(shell.calls[0]?.options.cwd).toBe("/repo-b");
-		expect(output.hookNotifications).toHaveLength(1);
+		const conflictedReport = output.reports.find((r) => r.branch === "feature-a");
+		expect(conflictedReport?.hookNotifications).toHaveLength(0);
+		const rebasedReport = output.reports.find((r) => r.branch === "feature-b");
+		expect(rebasedReport?.hookNotifications).toHaveLength(1);
 	});
 
 	test("does not run hooks in dry-run mode", async () => {
@@ -457,7 +464,9 @@ describe("updateWorktrees — post-update hooks", () => {
 
 		const output = expectOk(result);
 		expect(shell.calls).toHaveLength(0);
-		expect(output.hookNotifications).toHaveLength(0);
+		for (const report of output.reports) {
+			expect(report.hookNotifications).toHaveLength(0);
+		}
 	});
 
 	test("does not run hooks when no hooks configured", async () => {
@@ -469,7 +478,9 @@ describe("updateWorktrees — post-update hooks", () => {
 
 		const output = expectOk(result);
 		expect(shell.calls).toHaveLength(0);
-		expect(output.hookNotifications).toHaveLength(0);
+		for (const report of output.reports) {
+			expect(report.hookNotifications).toHaveLength(0);
+		}
 	});
 
 	test("passes baseBranch (parent) in hook context", async () => {
@@ -516,8 +527,11 @@ describe("updateWorktrees — post-update hooks", () => {
 
 		const output = expectOk(result);
 		expect(shell.calls).toHaveLength(2);
-		expect(output.hookNotifications).toHaveLength(2);
-		expect(output.hookNotifications[0]?.level).toBe("warn");
-		expect(output.hookNotifications[1]?.level).toBe("warn");
+		const reportA = output.reports.find((r) => r.branch === "feature-a");
+		const reportB = output.reports.find((r) => r.branch === "feature-b");
+		expect(reportA?.hookNotifications).toHaveLength(1);
+		expect(reportA?.hookNotifications[0]?.level).toBe("warn");
+		expect(reportB?.hookNotifications).toHaveLength(1);
+		expect(reportB?.hookNotifications[0]?.level).toBe("warn");
 	});
 });
