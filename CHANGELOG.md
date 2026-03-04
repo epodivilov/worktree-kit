@@ -3,6 +3,10 @@
 
 ## Bug Fixes
 
+- render hook failures inline with worktree branch line
+
+## Bug Fixes
+
 - pass force flag to git worktree remove
 
 ## Documentation
