@@ -189,7 +189,12 @@ export async function updateWorktrees(
 	const failedBranches = new Set<string>();
 
 	if (mainWorktree) {
-		reports.push({ branch: defaultBranch, path: mainWorktree.path, result: { status: "is-default-branch" }, hookNotifications: [] });
+		reports.push({
+			branch: defaultBranch,
+			path: mainWorktree.path,
+			result: { status: "is-default-branch" },
+			hookNotifications: [],
+		});
 	}
 
 	for (const wt of targetWorktrees) {
