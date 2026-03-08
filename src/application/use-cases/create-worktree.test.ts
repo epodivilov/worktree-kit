@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { CONFIG_FILENAME } from "../../domain/constants.ts";
+import { CONFIG_FILENAME, LEGACY_CONFIG_FILENAME } from "../../domain/constants.ts";
 import { expectErr, expectOk } from "../../test-utils/assertions.ts";
 import { createFakeFilesystem } from "../../test-utils/fake-filesystem.ts";
 import { createFakeGit } from "../../test-utils/fake-git.ts";
@@ -535,6 +535,68 @@ describe("createWorktree", () => {
 		expect(filesToCopy[0]?.src).toBe(`${ROOT}/.claude`);
 		expect(symlinksToCreate).toHaveLength(1);
 		expect(symlinksToCreate[0]?.target).toBe(`${ROOT}/.claude/settings.local.json`);
+	});
+
+	test("returns configSymlink when config is found", async () => {
+		const git = createFakeGit({ root: ROOT, worktrees: [] });
+		const fs = createFakeFilesystem({
+			files: { [`${ROOT}/${CONFIG_FILENAME}`]: CONFIG, [`${ROOT}/.env`]: "SECRET=123" },
+			cwd: ROOT,
+		});
+		const result = await createWorktree({ branch: "feat-cfg-sym" }, { git, fs });
+
+		const { configSymlink } = expectOk(result);
+		expect(configSymlink).not.toBeNull();
+		expect(configSymlink?.target).toBe(`${ROOT}/${CONFIG_FILENAME}`);
+		expect(configSymlink?.linkPath).toContain(`feat-cfg-sym/${CONFIG_FILENAME}`);
+	});
+
+	test("returns null configSymlink for legacy config with warning", async () => {
+		const git = createFakeGit({ root: ROOT, worktrees: [] });
+		const fs = createFakeFilesystem({
+			files: { [`${ROOT}/${LEGACY_CONFIG_FILENAME}`]: CONFIG },
+			cwd: ROOT,
+		});
+		const result = await createWorktree({ branch: "feat-legacy-sym" }, { git, fs });
+
+		const { configSymlink, notifications } = expectOk(result);
+		expect(configSymlink).toBeNull();
+		expect(notifications.some((n) => n.level === "warn" && n.message.includes("Legacy config"))).toBe(true);
+	});
+
+	test("skips configSymlink when config is tracked by git", async () => {
+		const git = createFakeGit({ root: ROOT, worktrees: [], trackedPaths: new Set([".worktreekit.jsonc"]) });
+		const fs = createFakeFilesystem({
+			files: { [`${ROOT}/${CONFIG_FILENAME}`]: CONFIG, [`${ROOT}/.env`]: "SECRET=123" },
+			cwd: ROOT,
+		});
+		const result = await createWorktree({ branch: "feat-tracked-cfg" }, { git, fs });
+
+		const { configSymlink, notifications } = expectOk(result);
+		expect(configSymlink).toBeNull();
+		expect(notifications.some((n) => n.level === "info" && n.message.includes("tracked by git"))).toBe(true);
+	});
+
+	test("creates configSymlink when config is not tracked by git", async () => {
+		const git = createFakeGit({ root: ROOT, worktrees: [], trackedPaths: new Set() });
+		const fs = createFakeFilesystem({
+			files: { [`${ROOT}/${CONFIG_FILENAME}`]: CONFIG, [`${ROOT}/.env`]: "SECRET=123" },
+			cwd: ROOT,
+		});
+		const result = await createWorktree({ branch: "feat-untracked-cfg" }, { git, fs });
+
+		const { configSymlink } = expectOk(result);
+		expect(configSymlink).not.toBeNull();
+		expect(configSymlink?.target).toBe(`${ROOT}/${CONFIG_FILENAME}`);
+	});
+
+	test("returns null configSymlink when config not found", async () => {
+		const git = createFakeGit({ root: ROOT, worktrees: [] });
+		const fs = createFakeFilesystem({ cwd: ROOT });
+		const result = await createWorktree({ branch: "feat-no-cfg-sym" }, { git, fs });
+
+		const { configSymlink } = expectOk(result);
+		expect(configSymlink).toBeNull();
 	});
 
 	test("negation without matching positive is a no-op", async () => {

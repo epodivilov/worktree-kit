@@ -83,10 +83,13 @@ export function createCommand(container: Container) {
 
 			if (dryRun) {
 				spinner.stop("Preview");
-				const { worktree, filesToCopy, symlinksToCreate, hookCommands } = createResult.data;
+				const { worktree, filesToCopy, symlinksToCreate, hookCommands, configSymlink } = createResult.data;
 				ui.info(`Would create worktree at ${worktree.path}`);
 				const branchStatus = isNewBranch ? "new" : "existing";
 				ui.info(`Branch: ${branch} (${branchStatus}${baseBranch ? `, from ${baseBranch}` : ""})`);
+				if (configSymlink) {
+					ui.info(`Would symlink config: ${configSymlink.linkPath} -> ${configSymlink.target}`);
+				}
 				if (filesToCopy.length > 0) {
 					ui.info(`Would copy ${filesToCopy.length} file(s):`);
 					for (const { dest, isDirectory } of filesToCopy) {
@@ -110,6 +113,16 @@ export function createCommand(container: Container) {
 				renderNotifications(ui, createResult.data.notifications);
 				ui.outro("Dry run — no changes made");
 				return;
+			}
+
+			// Symlink root config into worktree
+			const { configSymlink } = createResult.data;
+			if (configSymlink) {
+				spinner.message("Linking config...");
+				const symlinkResult = await fs.createSymlink(configSymlink.target, configSymlink.linkPath);
+				if (!symlinkResult.success) {
+					ui.warn(`Failed to symlink config: ${symlinkResult.error.message}`);
+				}
 			}
 
 			// Copy files and directories with spinner updates

@@ -131,7 +131,7 @@ wt create feature/my-feature --base develop
 2. `create.base` config option
 3. `defaultBase` config behavior: `"current"` uses current branch, `"default"` uses main/master, `"ask"` shows interactive prompt
 
-After creation, files from the `copy` config are copied, `symlinks` are created, and `post-create` hooks are executed.
+After creation, a symlink to `.worktreekit.jsonc` is created in the worktree (if the config is not tracked by git), files from the `copy` config are copied, `symlinks` are created, and `post-create` hooks are executed.
 
 ### `wt list`
 

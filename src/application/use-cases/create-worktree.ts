@@ -1,5 +1,5 @@
 import { join, relative, resolve } from "node:path";
-import { INIT_ROOT_DIR } from "../../domain/constants.ts";
+import { CONFIG_FILENAME, INIT_ROOT_DIR } from "../../domain/constants.ts";
 import type { WorktreeConfig } from "../../domain/entities/config.ts";
 import type { Worktree } from "../../domain/entities/worktree.ts";
 import type { FilesystemPort } from "../../domain/ports/filesystem-port.ts";
@@ -68,6 +68,7 @@ export interface SymlinkToCreate {
 export interface CreateWorktreeOutput {
 	worktree: Worktree;
 	notifications: Notification[];
+	configSymlink: SymlinkToCreate | null;
 	filesToCopy: FileToCopy[];
 	symlinksToCreate: SymlinkToCreate[];
 	hookContext: HookContext | null;
@@ -94,9 +95,17 @@ export async function createWorktree(
 
 	const configResult = await loadConfig({ git, fs });
 	let config: WorktreeConfig;
+	let configSymlinkTarget: string | null = null;
 
 	if (configResult.success) {
 		config = configResult.data.config;
+		if (configResult.data.isLegacyConfig) {
+			notifications.push(
+				N.warn("Legacy config detected. Run 'wt init --migrate' to enable config symlink in worktrees."),
+			);
+		} else {
+			configSymlinkTarget = configResult.data.configPath;
+		}
 	} else {
 		config = {
 			rootDir: INIT_ROOT_DIR,
@@ -219,9 +228,20 @@ export async function createWorktree(
 				}
 			: null;
 
+	let configSymlink: SymlinkToCreate | null = null;
+	if (configSymlinkTarget) {
+		const trackedResult = await git.isPathTracked(repoRoot, CONFIG_FILENAME);
+		if (trackedResult.success && trackedResult.data) {
+			notifications.push(N.info("Config is tracked by git — already available in worktree, symlink skipped."));
+		} else {
+			configSymlink = { target: configSymlinkTarget, linkPath: join(worktreePath, CONFIG_FILENAME) };
+		}
+	}
+
 	return R.ok({
 		worktree,
 		notifications,
+		configSymlink,
 		filesToCopy,
 		symlinksToCreate,
 		hookContext,
