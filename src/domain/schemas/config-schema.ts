@@ -4,6 +4,7 @@ const HooksInputSchema = v.object({
 	"post-create": v.optional(v.array(v.string())),
 	"pre-remove": v.optional(v.array(v.string())),
 	"post-update": v.optional(v.array(v.string())),
+	"on-conflict": v.optional(v.array(v.string())),
 });
 
 const CreateCommandConfigSchema = v.optional(
@@ -38,6 +39,7 @@ export const WorktreeConfigSchema = v.pipe(
 			"post-create": input.hooks?.["post-create"] ?? [],
 			"pre-remove": input.hooks?.["pre-remove"] ?? [],
 			"post-update": input.hooks?.["post-update"] ?? [],
+			"on-conflict": input.hooks?.["on-conflict"] ?? [],
 		},
 		defaultBase: input.defaultBase ?? "ask",
 		create: {

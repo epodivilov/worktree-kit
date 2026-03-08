@@ -14,6 +14,7 @@ export interface FakeGitOptions {
 	defaultBranch?: string;
 	dirtyWorktrees?: Set<string>;
 	rebaseConflicts?: Set<string>;
+	onConflictResolved?: Set<string>;
 	fetchFails?: boolean;
 	mergeFFOnlyFails?: boolean;
 	mergeBaseMap?: Map<string, string>;
@@ -176,6 +177,13 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 
 		async rebaseAbort(_worktreePath: string): Promise<Result<void, GitError>> {
 			return Result.ok(undefined);
+		},
+
+		async isRebaseInProgress(worktreePath: string): Promise<boolean> {
+			if (rebaseConflicts?.has(worktreePath) && options.onConflictResolved?.has(worktreePath)) {
+				return false;
+			}
+			return rebaseConflicts?.has(worktreePath) ?? false;
 		},
 
 		async isDirty(worktreePath: string): Promise<Result<boolean, GitError>> {

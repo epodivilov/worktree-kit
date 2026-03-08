@@ -33,9 +33,10 @@ export function updateCommand(container: Container) {
 
 			const configResult = await loadConfig({ git, fs });
 			const postUpdateHooks = configResult.success ? configResult.data.config.hooks["post-update"] : [];
+			const onConflictHooks = configResult.success ? configResult.data.config.hooks["on-conflict"] : [];
 
 			let repoRoot = "";
-			if (postUpdateHooks.length > 0) {
+			if (postUpdateHooks.length > 0 || onConflictHooks.length > 0) {
 				const rootResult = await git.getRepositoryRoot();
 				if (rootResult.success) {
 					repoRoot = rootResult.data;
@@ -45,9 +46,10 @@ export function updateCommand(container: Container) {
 			const spinner = ui.createSpinner();
 			spinner.start("Fetching and updating worktrees...");
 
+			const needsShell = postUpdateHooks.length > 0 || onConflictHooks.length > 0;
 			const result = await updateWorktrees(
-				{ dryRun, branch, postUpdateHooks, repoRoot },
-				{ git, shell: postUpdateHooks.length > 0 ? shell : undefined },
+				{ dryRun, branch, postUpdateHooks, onConflictHooks, repoRoot },
+				{ git, shell: needsShell ? shell : undefined },
 			);
 
 			if (Result.isErr(result)) {

@@ -9,6 +9,7 @@ export interface UpdateWorktreesInput {
 	dryRun: boolean;
 	branch?: string;
 	postUpdateHooks?: readonly string[];
+	onConflictHooks?: readonly string[];
 	repoRoot?: string;
 }
 
@@ -298,18 +299,71 @@ export async function updateWorktrees(
 				hookNotifications,
 			});
 		} else {
-			await git.rebaseAbort(wt.path);
-			if (isDirty) {
-				await git.resetLastCommit(wt.path);
+			let conflictResolved = false;
+
+			if (input.onConflictHooks?.length && deps.shell) {
+				await runHooks(
+					{
+						commands: input.onConflictHooks,
+						context: {
+							worktreePath: wt.path,
+							branch: wt.branch,
+							repoRoot: input.repoRoot ?? "",
+							baseBranch: parent,
+						},
+					},
+					{ shell: deps.shell },
+				);
+
+				const stillRebasing = await git.isRebaseInProgress(wt.path);
+				conflictResolved = !stillRebasing;
 			}
-			reports.push({
-				branch: wt.branch,
-				path: wt.path,
-				parent,
-				result: { status: "rebase-conflict", message: rebaseResult.error.message },
-				hookNotifications: [],
-			});
-			failedBranches.add(wt.branch);
+
+			if (conflictResolved) {
+				if (isDirty) {
+					await git.resetLastCommit(wt.path);
+				}
+
+				let hookNotifications: Notification[] = [];
+				if (input.postUpdateHooks?.length && deps.shell) {
+					const hookResult = await runHooks(
+						{
+							commands: input.postUpdateHooks,
+							context: {
+								worktreePath: wt.path,
+								branch: wt.branch,
+								repoRoot: input.repoRoot ?? "",
+								baseBranch: parent,
+							},
+						},
+						{ shell: deps.shell },
+					);
+					if (hookResult.success) {
+						hookNotifications = hookResult.data.notifications;
+					}
+				}
+
+				reports.push({
+					branch: wt.branch,
+					path: wt.path,
+					parent,
+					result: { status: isDirty ? "rebased-dirty" : "rebased" },
+					hookNotifications,
+				});
+			} else {
+				await git.rebaseAbort(wt.path);
+				if (isDirty) {
+					await git.resetLastCommit(wt.path);
+				}
+				reports.push({
+					branch: wt.branch,
+					path: wt.path,
+					parent,
+					result: { status: "rebase-conflict", message: rebaseResult.error.message },
+					hookNotifications: [],
+				});
+				failedBranches.add(wt.branch);
+			}
 		}
 	}
 

@@ -18,7 +18,7 @@ worktree-kit fills these gaps with a single CLI.
 - Interactive branch selection with local and remote branch support
 - Automatic file and directory copying with glob patterns
 - Symlinks from root repo for sharing gitignored content across worktrees
-- Post-create, pre-remove, and post-update hooks with environment variables
+- Post-create, pre-remove, post-update, and on-conflict hooks with environment variables
 - Smart update: fetch, fast-forward default branch, rebase feature branches in correct order
 - Parent branch detection via merge-base for proper rebase ordering
 - Automatic cleanup of worktrees with deleted remote branches
@@ -215,7 +215,7 @@ wt update --dry-run
 3. Detects parent branches via merge-base
 4. Rebases feature branches in correct order — parents before children
 
-If a worktree has uncommitted changes, a temporary WIP commit is created before rebase and reset afterwards. On rebase conflict, the rebase is aborted and the issue is reported.
+If a worktree has uncommitted changes, a temporary WIP commit is created before rebase and reset afterwards. On rebase conflict, the rebase is aborted and the issue is reported — unless `on-conflict` hooks are configured (see below).
 
 After each successful rebase, `post-update` hooks are executed for that branch. This is useful for auto-pushing rebased branches:
 
@@ -223,6 +223,16 @@ After each successful rebase, `post-update` hooks are executed for that branch. 
 {
   "hooks": {
     "post-update": ["git push --force-with-lease"]
+  }
+}
+```
+
+**Automatic conflict resolution** — if `on-conflict` hooks are configured, they run instead of aborting the rebase. The hook is expected to resolve conflicts and complete the rebase (e.g. via `git rebase --continue`). If the rebase is no longer in progress after the hook, the branch is treated as successfully rebased and `post-update` hooks run as usual. If the rebase is still in progress, it is aborted.
+
+```jsonc
+{
+  "hooks": {
+    "on-conflict": ["my-conflict-resolver"]
   }
 }
 ```
@@ -290,7 +300,8 @@ Create a `.worktreekit.jsonc` file in the project root (or use `wt init`). JSONC
     "pre-remove": [],
     "post-update": [
       "git push --force-with-lease"
-    ]
+    ],
+    "on-conflict": []
   }
 }
 ```
@@ -309,6 +320,7 @@ Create a `.worktreekit.jsonc` file in the project root (or use `wt init`). JSONC
 | `hooks.post-create` | `string[]` | `[]` | Commands to run after creating a worktree |
 | `hooks.pre-remove` | `string[]` | `[]` | Commands to run before removing a worktree |
 | `hooks.post-update` | `string[]` | `[]` | Commands to run after each branch is successfully rebased |
+| `hooks.on-conflict` | `string[]` | `[]` | Commands to run when rebase hits a conflict. Expected to resolve and complete the rebase |
 
 ### Copy vs Symlinks
 
@@ -343,7 +355,7 @@ All hooks receive the following environment variables:
 | `WORKTREE_PATH` | Absolute path to the worktree | all |
 | `WORKTREE_BRANCH` | Branch name | all |
 | `REPO_ROOT` | Repository root path | all |
-| `BASE_BRANCH` | Base branch (create: `--base` value; update: parent branch) | `post-create`, `post-update` |
+| `BASE_BRANCH` | Base branch (create: `--base` value; update: parent branch) | `post-create`, `post-update`, `on-conflict` |
 
 ## Migration from `.worktreekitrc`
 

@@ -513,6 +513,106 @@ describe("updateWorktrees — post-update hooks", () => {
 		expect(shell.calls[1]?.options.env).toMatchObject({ BASE_BRANCH: "feat-a" });
 	});
 
+	test("on-conflict hook resolves conflict — branch treated as rebased", async () => {
+		const worktrees = [mainWt, featureA];
+		const git = createFakeGit({
+			worktrees,
+			rebaseConflicts: new Set(["/repo-a"]),
+			onConflictResolved: new Set(["/repo-a"]),
+			...flatBranchesConfig(worktrees),
+		});
+		const shell = createFakeShell();
+
+		const result = await updateWorktrees(
+			{ dryRun: false, onConflictHooks: ["resolve-conflicts.sh"], repoRoot: "/repo" },
+			{ git, shell },
+		);
+
+		const output = expectOk(result);
+		const report = output.reports.find((r) => r.branch === "feature-a");
+		expect(report?.result).toMatchObject({ status: "rebased" });
+		expect(shell.calls).toHaveLength(1);
+		expect(shell.calls[0]?.command).toBe("resolve-conflicts.sh");
+		expect(shell.calls[0]?.options.env).toMatchObject({
+			WORKTREE_PATH: "/repo-a",
+			WORKTREE_BRANCH: "feature-a",
+			BASE_BRANCH: "main",
+		});
+	});
+
+	test("on-conflict hook fails to resolve — branch marked as conflict", async () => {
+		const worktrees = [mainWt, featureA];
+		const git = createFakeGit({
+			worktrees,
+			rebaseConflicts: new Set(["/repo-a"]),
+			...flatBranchesConfig(worktrees),
+		});
+		const shell = createFakeShell();
+
+		const result = await updateWorktrees(
+			{ dryRun: false, onConflictHooks: ["resolve-conflicts.sh"], repoRoot: "/repo" },
+			{ git, shell },
+		);
+
+		const output = expectOk(result);
+		const report = output.reports.find((r) => r.branch === "feature-a");
+		expect(report?.result.status).toBe("rebase-conflict");
+		expect(shell.calls).toHaveLength(1);
+	});
+
+	test("conflict without on-conflict hooks — aborts as before", async () => {
+		const worktrees = [mainWt, featureA];
+		const git = createFakeGit({
+			worktrees,
+			rebaseConflicts: new Set(["/repo-a"]),
+			...flatBranchesConfig(worktrees),
+		});
+		const shell = createFakeShell();
+
+		const result = await updateWorktrees(
+			{ dryRun: false, postUpdateHooks: ["echo done"], repoRoot: "/repo" },
+			{ git, shell },
+		);
+
+		const output = expectOk(result);
+		const report = output.reports.find((r) => r.branch === "feature-a");
+		expect(report?.result.status).toBe("rebase-conflict");
+		expect(shell.calls).toHaveLength(0);
+	});
+
+	test("does not run post-update hooks for conflict resolved by on-conflict hook", async () => {
+		const worktrees = [mainWt, featureA, featureB];
+		const git = createFakeGit({
+			worktrees,
+			rebaseConflicts: new Set(["/repo-a"]),
+			onConflictResolved: new Set(["/repo-a"]),
+			...flatBranchesConfig(worktrees),
+		});
+		const shell = createFakeShell();
+
+		const result = await updateWorktrees(
+			{
+				dryRun: false,
+				onConflictHooks: ["resolve-conflicts.sh"],
+				postUpdateHooks: ["git push --force-with-lease"],
+				repoRoot: "/repo",
+			},
+			{ git, shell },
+		);
+
+		const output = expectOk(result);
+		const reportA = output.reports.find((r) => r.branch === "feature-a");
+		expect(reportA?.result).toMatchObject({ status: "rebased" });
+		// on-conflict hook + post-update hook for feature-a, post-update hook for feature-b
+		expect(shell.calls).toHaveLength(3);
+		expect(shell.calls[0]?.command).toBe("resolve-conflicts.sh");
+		expect(shell.calls[0]?.options.cwd).toBe("/repo-a");
+		expect(shell.calls[1]?.command).toBe("git push --force-with-lease");
+		expect(shell.calls[1]?.options.cwd).toBe("/repo-a");
+		expect(shell.calls[2]?.command).toBe("git push --force-with-lease");
+		expect(shell.calls[2]?.options.cwd).toBe("/repo-b");
+	});
+
 	test("continues after hook failure", async () => {
 		const worktrees = [mainWt, featureA, featureB];
 		const git = createFakeGit({ worktrees, ...flatBranchesConfig(worktrees) });

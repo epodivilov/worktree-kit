@@ -111,7 +111,7 @@ export async function createWorktree(
 			rootDir: INIT_ROOT_DIR,
 			copy: [],
 			symlinks: [],
-			hooks: { "post-create": [], "pre-remove": [], "post-update": [] },
+			hooks: { "post-create": [], "pre-remove": [], "post-update": [], "on-conflict": [] },
 			defaultBase: "ask",
 			create: {},
 			remove: {},

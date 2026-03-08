@@ -382,6 +382,15 @@ export function createBunGitAdapter(logger: LoggerPort): GitPort {
 			}
 		},
 
+		async isRebaseInProgress(worktreePath: string): Promise<boolean> {
+			const { stdout } = await runGit(["-C", worktreePath, "rev-parse", "--git-dir"]);
+			const gitDir = stdout.startsWith("/") ? stdout : `${worktreePath}/${stdout}`;
+			const rebaseMerge = await Bun.file(`${gitDir}/rebase-merge`).exists();
+			if (rebaseMerge) return true;
+			const rebaseApply = await Bun.file(`${gitDir}/rebase-apply`).exists();
+			return rebaseApply;
+		},
+
 		async isDirty(worktreePath: string): Promise<Result<boolean, GitError>> {
 			try {
 				const { exitCode, stdout } = await runGit(["-C", worktreePath, "status", "--porcelain"]);
