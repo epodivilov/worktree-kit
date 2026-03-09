@@ -54,3 +54,16 @@ export const WorktreeConfigSchema = v.pipe(
 
 export type WorktreeConfigInput = v.InferInput<typeof WorktreeConfigSchema>;
 export type WorktreeConfigOutput = v.InferOutput<typeof WorktreeConfigSchema>;
+
+export const PartialWorktreeConfigSchema = v.object({
+	$schema: v.optional(v.string()),
+	rootDir: v.optional(v.string()),
+	copy: v.optional(v.array(v.string())),
+	symlinks: v.optional(v.array(v.string())),
+	hooks: v.optional(HooksInputSchema),
+	defaultBase: v.optional(v.picklist(["current", "default", "ask"])),
+	create: CreateCommandConfigSchema,
+	remove: RemoveCommandConfigSchema,
+});
+
+export type PartialWorktreeConfigInput = v.InferInput<typeof PartialWorktreeConfigSchema>;

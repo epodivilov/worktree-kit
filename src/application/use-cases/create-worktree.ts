@@ -1,5 +1,5 @@
 import { join, relative, resolve } from "node:path";
-import { CONFIG_FILENAME, INIT_ROOT_DIR } from "../../domain/constants.ts";
+import { CONFIG_FILENAME, INIT_ROOT_DIR, LOCAL_CONFIG_FILENAME } from "../../domain/constants.ts";
 import type { WorktreeConfig } from "../../domain/entities/config.ts";
 import type { Worktree } from "../../domain/entities/worktree.ts";
 import type { FilesystemPort } from "../../domain/ports/filesystem-port.ts";
@@ -69,6 +69,7 @@ export interface CreateWorktreeOutput {
 	worktree: Worktree;
 	notifications: Notification[];
 	configSymlink: SymlinkToCreate | null;
+	localConfigSymlink: SymlinkToCreate | null;
 	filesToCopy: FileToCopy[];
 	symlinksToCreate: SymlinkToCreate[];
 	hookContext: HookContext | null;
@@ -238,10 +239,19 @@ export async function createWorktree(
 		}
 	}
 
+	let localConfigSymlink: SymlinkToCreate | null = null;
+	if (configResult.success && configResult.data.localConfigPath) {
+		localConfigSymlink = {
+			target: configResult.data.localConfigPath,
+			linkPath: join(worktreePath, LOCAL_CONFIG_FILENAME),
+		};
+	}
+
 	return R.ok({
 		worktree,
 		notifications,
 		configSymlink,
+		localConfigSymlink,
 		filesToCopy,
 		symlinksToCreate,
 		hookContext,

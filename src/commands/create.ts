@@ -83,12 +83,16 @@ export function createCommand(container: Container) {
 
 			if (dryRun) {
 				spinner.stop("Preview");
-				const { worktree, filesToCopy, symlinksToCreate, hookCommands, configSymlink } = createResult.data;
+				const { worktree, filesToCopy, symlinksToCreate, hookCommands, configSymlink, localConfigSymlink } =
+					createResult.data;
 				ui.info(`Would create worktree at ${worktree.path}`);
 				const branchStatus = isNewBranch ? "new" : "existing";
 				ui.info(`Branch: ${branch} (${branchStatus}${baseBranch ? `, from ${baseBranch}` : ""})`);
 				if (configSymlink) {
 					ui.info(`Would symlink config: ${configSymlink.linkPath} -> ${configSymlink.target}`);
+				}
+				if (localConfigSymlink) {
+					ui.info(`Would symlink local config: ${localConfigSymlink.linkPath} -> ${localConfigSymlink.target}`);
 				}
 				if (filesToCopy.length > 0) {
 					ui.info(`Would copy ${filesToCopy.length} file(s):`);
@@ -116,12 +120,19 @@ export function createCommand(container: Container) {
 			}
 
 			// Symlink root config into worktree
-			const { configSymlink } = createResult.data;
+			const { configSymlink, localConfigSymlink } = createResult.data;
 			if (configSymlink) {
 				spinner.message("Linking config...");
 				const symlinkResult = await fs.createSymlink(configSymlink.target, configSymlink.linkPath);
 				if (!symlinkResult.success) {
 					ui.warn(`Failed to symlink config: ${symlinkResult.error.message}`);
+				}
+			}
+			if (localConfigSymlink) {
+				spinner.message("Linking local config...");
+				const symlinkResult = await fs.createSymlink(localConfigSymlink.target, localConfigSymlink.linkPath);
+				if (!symlinkResult.success) {
+					ui.warn(`Failed to symlink local config: ${symlinkResult.error.message}`);
 				}
 			}
 
