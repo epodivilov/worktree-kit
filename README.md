@@ -322,6 +322,25 @@ Create a `.worktreekit.jsonc` file in the project root (or use `wt init`). JSONC
 | `hooks.post-update` | `string[]` | `[]` | Commands to run after each branch is successfully rebased |
 | `hooks.on-conflict` | `string[]` | `[]` | Commands to run when rebase hits a conflict. Expected to resolve and complete the rebase |
 
+### Local Config Overrides
+
+Create a `.worktreekit.local.jsonc` file alongside the shared config to override settings per-developer. This file should be gitignored and uses the same schema (all fields optional).
+
+- Objects are deep-merged (local values override shared ones)
+- Arrays (`hooks`, `copy`, `symlinks`) are replaced entirely — local array wins
+- `wt create` symlinks both configs into worktrees
+
+Example — override hooks locally without modifying the shared config:
+
+```jsonc
+{
+  "hooks": {
+    "post-create": ["bun install"],
+    "post-update": []
+  }
+}
+```
+
 ### Copy vs Symlinks
 
 Both `copy` and `symlinks` support exact paths, glob patterns, and `!` negation patterns. The difference is how files end up in the worktree:
