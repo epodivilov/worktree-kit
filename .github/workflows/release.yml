@@ -21,7 +21,7 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -30,7 +30,7 @@ jobs:
         with:
           bun-version: latest
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v5
         with:
           version: 10
 
@@ -42,16 +42,26 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
+      - name: Determine version (auto)
+        if: inputs.version == 'auto'
+        id: cliff-bump
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --bumped-version
+
       - name: Determine version
         id: version
         run: |
           if [ "${{ inputs.version }}" = "auto" ]; then
-            # git-cliff determines version from conventional commits
-            VERSION=$(git-cliff --bumped-version | sed 's/^v//')
+            VERSION=$(echo "${{ steps.cliff-bump.outputs.content }}" | sed 's/^v//')
           else
             CURRENT=$(node -p "require('./package.json').version")
-            # semver bump
             VERSION=$(npx semver -i ${{ inputs.version }} $CURRENT)
+          fi
+          if [ -z "$VERSION" ]; then
+            echo "::error::Failed to determine version"
+            exit 1
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
