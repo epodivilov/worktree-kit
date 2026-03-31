@@ -5,6 +5,7 @@ import { createCommand } from "./commands/create.ts";
 import { initCommand } from "./commands/init.ts";
 import { listCommand } from "./commands/list.ts";
 import { removeCommand } from "./commands/remove.ts";
+import { selfUpdateCommand } from "./commands/self-update.ts";
 import { updateCommand } from "./commands/update.ts";
 import { createContainer } from "./infrastructure/container.ts";
 
@@ -24,6 +25,7 @@ const main = defineCommand({
 		list: listCommand(container),
 		remove: removeCommand(container),
 		update: updateCommand(container),
+		"self-update": selfUpdateCommand(container),
 		init: initCommand(container),
 		cleanup: cleanupCommand(container),
 	},
