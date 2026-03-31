@@ -3,6 +3,29 @@
 
 ## Bug Fixes
 
+- fix empty version in release workflow
+
+## Documentation
+
+- document local config overrides
+
+## Features
+
+- symlink root config into new worktrees
+- add on-conflict hook for automatic rebase conflict resolution
+- support .worktreekit.local.jsonc for per-user config overrides
+- add self-update command
+
+## Miscellaneous
+
+- add .worktreekit.jsonc to .gitignore
+
+## Style
+
+- format update-worktrees with biome
+
+## Bug Fixes
+
 - render hook failures inline with worktree branch line
 
 ## Bug Fixes
