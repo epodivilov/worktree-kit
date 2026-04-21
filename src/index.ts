@@ -1,5 +1,6 @@
 import { defineCommand, runMain } from "citty";
 import pkg from "../package.json";
+import { runUpdateNotifier } from "./cli/update-notifier.ts";
 import { cleanupCommand } from "./commands/cleanup.ts";
 import { createCommand } from "./commands/create.ts";
 import { initCommand } from "./commands/init.ts";
@@ -30,5 +31,7 @@ const main = defineCommand({
 		cleanup: cleanupCommand(container),
 	},
 });
+
+await runUpdateNotifier(container, pkg.version);
 
 runMain(main);

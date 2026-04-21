@@ -2,6 +2,7 @@ import { defineCommand } from "citty";
 import pc from "picocolors";
 import pkg from "../../package.json";
 import type { Container } from "../infrastructure/container.ts";
+import { fetchLatestVersion, type LatestRelease } from "../infrastructure/github-releases.ts";
 
 const REPO = "epodivilov/worktree-kit";
 
@@ -17,22 +18,6 @@ function detectBinaryName(): string {
 	}
 
 	return `wt-${os}-${cpu}`;
-}
-
-async function fetchLatestVersion(): Promise<{ tag: string; version: string }> {
-	const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
-		headers: { Accept: "application/vnd.github+json" },
-	});
-
-	if (!res.ok) {
-		throw new Error(`GitHub API error: ${res.status} ${res.statusText}`);
-	}
-
-	const data = (await res.json()) as { tag_name: string };
-	const tag = data.tag_name;
-	const version = tag.startsWith("v") ? tag.slice(1) : tag;
-
-	return { tag, version };
 }
 
 async function downloadBinary(tag: string, binaryName: string, targetPath: string): Promise<void> {
@@ -76,7 +61,7 @@ export function selfUpdateCommand(container: Container) {
 
 			spinner.start("Checking for updates...");
 
-			let latest: { tag: string; version: string };
+			let latest: LatestRelease;
 			try {
 				latest = await fetchLatestVersion();
 			} catch (err) {
