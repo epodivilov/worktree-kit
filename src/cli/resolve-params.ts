@@ -23,11 +23,29 @@ export async function resolveBranch(
 	flag: string | undefined,
 	deps: { ui: UiPort; git: GitPort },
 ): Promise<ResolveBranchResult> {
+	const { ui, git } = deps;
+
 	if (flag) {
+		const branchExistsResult = await git.branchExists(flag);
+		if (Result.isErr(branchExistsResult)) {
+			ui.error(branchExistsResult.error.message);
+			process.exit(1);
+		}
+		if (branchExistsResult.data) {
+			return { branch: flag, isNewBranch: false, isRemoteBranch: false };
+		}
+
+		const remoteBranchesResult = await git.listRemoteBranches();
+		if (Result.isErr(remoteBranchesResult)) {
+			ui.error(remoteBranchesResult.error.message);
+			process.exit(1);
+		}
+		if (remoteBranchesResult.data.includes(flag)) {
+			return { branch: flag, isNewBranch: false, isRemoteBranch: true };
+		}
+
 		return { branch: flag, isNewBranch: true, isRemoteBranch: false };
 	}
-
-	const { ui, git } = deps;
 
 	if (ui.nonInteractive) {
 		ui.error("Branch name is required in non-interactive mode");
