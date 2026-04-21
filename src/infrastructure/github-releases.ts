@@ -6,9 +6,18 @@ export interface LatestRelease {
 }
 
 export async function fetchLatestVersion(): Promise<LatestRelease> {
-	const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
-		headers: { Accept: "application/vnd.github+json" },
-	});
+	let res: Response;
+	try {
+		res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
+			headers: { Accept: "application/vnd.github+json" },
+			signal: AbortSignal.timeout(15_000),
+		});
+	} catch (err) {
+		if (err instanceof Error && err.name === "TimeoutError") {
+			throw new Error("GitHub API timeout");
+		}
+		throw err;
+	}
 
 	if (!res.ok) {
 		throw new Error(`GitHub API error: ${res.status} ${res.statusText}`);

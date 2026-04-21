@@ -20,17 +20,59 @@ function detectBinaryName(): string {
 	return `wt-${os}-${cpu}`;
 }
 
-async function downloadBinary(tag: string, binaryName: string, targetPath: string): Promise<void> {
+function formatMb(bytes: number): string {
+	return (bytes / 1024 / 1024).toFixed(1);
+}
+
+async function downloadBinary(
+	tag: string,
+	binaryName: string,
+	targetPath: string,
+	onProgress?: (downloaded: number, total: number) => void,
+): Promise<void> {
 	const url = `https://github.com/${REPO}/releases/download/${tag}/${binaryName}`;
-	const res = await fetch(url, { redirect: "follow" });
+
+	let res: Response;
+	try {
+		res = await fetch(url, {
+			redirect: "follow",
+			signal: AbortSignal.timeout(120_000),
+		});
+	} catch (err) {
+		if (err instanceof Error && err.name === "TimeoutError") {
+			throw new Error("Download timed out");
+		}
+		throw err;
+	}
 
 	if (!res.ok) {
 		throw new Error(`Download failed: ${res.status} ${res.statusText}`);
 	}
 
-	const tmpPath = `${targetPath}.tmp`;
+	if (!res.body) {
+		throw new Error("Download failed: empty response body");
+	}
 
-	await Bun.write(tmpPath, res);
+	const total = Number(res.headers.get("content-length") ?? 0);
+	const tmpPath = `${targetPath}.tmp`;
+	const writer = Bun.file(tmpPath).writer();
+
+	let downloaded = 0;
+	try {
+		for await (const chunk of res.body as AsyncIterable<Uint8Array>) {
+			writer.write(chunk);
+			downloaded += chunk.byteLength;
+			onProgress?.(downloaded, total);
+		}
+		await writer.end();
+	} catch (err) {
+		try {
+			await writer.end();
+		} catch {
+			// ignore cleanup error
+		}
+		throw err;
+	}
 
 	const { rename, chmod } = await import("node:fs/promises");
 	await chmod(tmpPath, 0o755);
@@ -91,7 +133,18 @@ export function selfUpdateCommand(container: Container) {
 			const execPath = process.execPath;
 
 			try {
-				await downloadBinary(latest.tag, binaryName, execPath);
+				let lastRender = 0;
+				await downloadBinary(latest.tag, binaryName, execPath, (downloaded, total) => {
+					const now = Date.now();
+					if (now - lastRender < 200) return;
+					lastRender = now;
+					const current = formatMb(downloaded);
+					const message =
+						total > 0
+							? `Downloading ${latest.tag}... ${current}/${formatMb(total)} MB`
+							: `Downloading ${latest.tag}... ${current} MB`;
+					spinner.message(message);
+				});
 			} catch (err) {
 				spinner.stop(pc.red("Failed"));
 				ui.error(err instanceof Error ? err.message : "Download failed");
