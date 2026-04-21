@@ -3,6 +3,14 @@
 
 ## Bug Fixes
 
+- detect existing local and remote branches from -b flag
+
+## Features
+
+- notify on CLI startup when a newer version is available
+
+## Bug Fixes
+
 - fix empty version in release workflow
 
 ## Documentation
