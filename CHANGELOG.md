@@ -3,6 +3,10 @@
 
 ## Bug Fixes
 
+- prevent self-update hang and surface download progress
+
+## Bug Fixes
+
 - detect existing local and remote branches from -b flag
 
 ## Features
