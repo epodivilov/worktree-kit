@@ -7,7 +7,7 @@ import { CommandError } from "./run-command.ts";
 function unwrapOrCancel<T>(ui: UiPort, value: T | symbol): T {
 	if (ui.isCancel(value)) {
 		ui.cancel();
-		process.exit(0);
+		process.exit(130);
 	}
 	return value;
 }

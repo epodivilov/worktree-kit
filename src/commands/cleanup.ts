@@ -75,7 +75,12 @@ export function cleanupCommand(container: Container) {
 						initialValue: false,
 					});
 
-					if (ui.isCancel(confirmed) || !confirmed) {
+					if (ui.isCancel(confirmed)) {
+						ui.cancel("Cleanup cancelled");
+						process.exit(130);
+					}
+
+					if (!confirmed) {
 						ui.cancel("Cleanup cancelled");
 						process.exit(0);
 					}
