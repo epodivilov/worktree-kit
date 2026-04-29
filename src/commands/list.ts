@@ -12,9 +12,37 @@ export function listCommand(container: Container) {
 			name: "list",
 			description: "List all worktrees",
 		},
-		args: {},
-		async run() {
+		args: {
+			json: {
+				type: "boolean",
+				default: false,
+				description: "Output as JSON array",
+			},
+		},
+		async run({ args }) {
 			const { ui, git } = container;
+
+			if (args.json) {
+				const result = await listWorktrees({ git });
+
+				if (Result.isErr(result)) {
+					process.stderr.write(`${JSON.stringify({ error: result.error.message })}\n`);
+					process.exit(EXIT_FAILURE);
+				}
+
+				const currentRootResult = await git.getRepositoryRoot();
+				const currentPath = Result.isOk(currentRootResult) ? currentRootResult.data : null;
+
+				const items = result.data.worktrees.map((wt) => ({
+					branch: wt.branch,
+					path: wt.path,
+					isMain: wt.isMain,
+					isCurrent: currentPath ? wt.path === currentPath : false,
+				}));
+
+				process.stdout.write(`${JSON.stringify(items)}\n`);
+				return;
+			}
 
 			ui.intro("worktree-kit list");
 
