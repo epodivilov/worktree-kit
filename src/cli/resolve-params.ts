@@ -2,6 +2,7 @@ import type { DefaultBase } from "../domain/entities/config.ts";
 import type { GitPort } from "../domain/ports/git-port.ts";
 import type { UiPort } from "../domain/ports/ui-port.ts";
 import { Result } from "../shared/result.ts";
+import { CommandError } from "./run-command.ts";
 
 function unwrapOrCancel<T>(ui: UiPort, value: T | symbol): T {
 	if (ui.isCancel(value)) {
@@ -28,8 +29,7 @@ export async function resolveBranch(
 	if (flag) {
 		const branchExistsResult = await git.branchExists(flag);
 		if (Result.isErr(branchExistsResult)) {
-			ui.error(branchExistsResult.error.message);
-			process.exit(1);
+			throw new CommandError(branchExistsResult.error.message);
 		}
 		if (branchExistsResult.data) {
 			return { branch: flag, isNewBranch: false, isRemoteBranch: false };
@@ -37,8 +37,7 @@ export async function resolveBranch(
 
 		const remoteBranchesResult = await git.listRemoteBranches();
 		if (Result.isErr(remoteBranchesResult)) {
-			ui.error(remoteBranchesResult.error.message);
-			process.exit(1);
+			throw new CommandError(remoteBranchesResult.error.message);
 		}
 		if (remoteBranchesResult.data.includes(flag)) {
 			return { branch: flag, isNewBranch: false, isRemoteBranch: true };
@@ -48,26 +47,22 @@ export async function resolveBranch(
 	}
 
 	if (ui.nonInteractive) {
-		ui.error("Branch name is required in non-interactive mode");
-		process.exit(1);
+		throw new CommandError("Branch name is required in non-interactive mode");
 	}
 
 	const branchesResult = await git.listBranches();
 	if (Result.isErr(branchesResult)) {
-		ui.error(branchesResult.error.message);
-		process.exit(1);
+		throw new CommandError(branchesResult.error.message);
 	}
 
 	const remoteBranchesResult = await git.listRemoteBranches();
 	if (Result.isErr(remoteBranchesResult)) {
-		ui.error(remoteBranchesResult.error.message);
-		process.exit(1);
+		throw new CommandError(remoteBranchesResult.error.message);
 	}
 
 	const worktreesResult = await git.listWorktrees();
 	if (Result.isErr(worktreesResult)) {
-		ui.error(worktreesResult.error.message);
-		process.exit(1);
+		throw new CommandError(worktreesResult.error.message);
 	}
 
 	const usedBranches = new Set(worktreesResult.data.map((w) => w.branch));
@@ -194,14 +189,12 @@ export async function resolveBranchesToRemove(
 	const { ui, git } = deps;
 
 	if (ui.nonInteractive) {
-		ui.error("Branch name is required in non-interactive mode");
-		process.exit(1);
+		throw new CommandError("Branch name is required in non-interactive mode");
 	}
 
 	const worktreesResult = await git.listWorktrees();
 	if (Result.isErr(worktreesResult)) {
-		ui.error(worktreesResult.error.message);
-		process.exit(1);
+		throw new CommandError(worktreesResult.error.message);
 	}
 
 	const removable = worktreesResult.data.filter((w) => !w.isMain);

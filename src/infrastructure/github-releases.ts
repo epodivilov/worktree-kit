@@ -1,3 +1,5 @@
+import { Result as R, type Result } from "../shared/result.ts";
+
 const REPO = "epodivilov/worktree-kit";
 
 export interface LatestRelease {
@@ -5,7 +7,7 @@ export interface LatestRelease {
 	version: string;
 }
 
-export async function fetchLatestVersion(): Promise<LatestRelease> {
+export async function fetchLatestVersion(): Promise<Result<LatestRelease>> {
 	let res: Response;
 	try {
 		res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
@@ -14,18 +16,23 @@ export async function fetchLatestVersion(): Promise<LatestRelease> {
 		});
 	} catch (err) {
 		if (err instanceof Error && err.name === "TimeoutError") {
-			throw new Error("GitHub API timeout");
+			return R.err(new Error("GitHub API timeout"));
 		}
-		throw err;
+		return R.err(err instanceof Error ? err : new Error(String(err)));
 	}
 
 	if (!res.ok) {
-		throw new Error(`GitHub API error: ${res.status} ${res.statusText}`);
+		return R.err(new Error(`GitHub API error: ${res.status} ${res.statusText}`));
 	}
 
-	const data = (await res.json()) as { tag_name: string };
+	let data: { tag_name: string };
+	try {
+		data = (await res.json()) as { tag_name: string };
+	} catch {
+		return R.err(new Error("Failed to parse GitHub API response"));
+	}
 	const tag = data.tag_name;
 	const version = tag.startsWith("v") ? tag.slice(1) : tag;
 
-	return { tag, version };
+	return R.ok({ tag, version });
 }

@@ -2,6 +2,7 @@ import { defineCommand } from "citty";
 import pc from "picocolors";
 import { loadConfig } from "../application/use-cases/load-config.ts";
 import { updateWorktrees } from "../application/use-cases/update-worktrees.ts";
+import { CommandError, runCommand } from "../cli/run-command.ts";
 import type { Container } from "../infrastructure/container.ts";
 import { Result } from "../shared/result.ts";
 
@@ -31,76 +32,77 @@ export function updateCommand(container: Container) {
 
 			ui.intro("worktree-kit update");
 
-			const configResult = await loadConfig({ git, fs });
-			const postUpdateHooks = configResult.success ? configResult.data.config.hooks["post-update"] : [];
-			const onConflictHooks = configResult.success ? configResult.data.config.hooks["on-conflict"] : [];
+			await runCommand(async () => {
+				const configResult = await loadConfig({ git, fs });
+				const postUpdateHooks = configResult.success ? configResult.data.config.hooks["post-update"] : [];
+				const onConflictHooks = configResult.success ? configResult.data.config.hooks["on-conflict"] : [];
 
-			let repoRoot = "";
-			if (postUpdateHooks.length > 0 || onConflictHooks.length > 0) {
-				const rootResult = await git.getRepositoryRoot();
-				if (rootResult.success) {
-					repoRoot = rootResult.data;
+				let repoRoot = "";
+				if (postUpdateHooks.length > 0 || onConflictHooks.length > 0) {
+					const rootResult = await git.getRepositoryRoot();
+					if (rootResult.success) {
+						repoRoot = rootResult.data;
+					}
 				}
-			}
 
-			const spinner = ui.createSpinner();
-			spinner.start("Fetching and updating worktrees...");
+				const spinner = ui.createSpinner();
+				spinner.start("Fetching and updating worktrees...");
 
-			const needsShell = postUpdateHooks.length > 0 || onConflictHooks.length > 0;
-			const result = await updateWorktrees(
-				{ dryRun, branch, postUpdateHooks, onConflictHooks, repoRoot },
-				{ git, shell: needsShell ? shell : undefined },
-			);
+				const needsShell = postUpdateHooks.length > 0 || onConflictHooks.length > 0;
+				const result = await updateWorktrees(
+					{ dryRun, branch, postUpdateHooks, onConflictHooks, repoRoot },
+					{ git, shell: needsShell ? shell : undefined },
+				);
 
-			if (Result.isErr(result)) {
-				spinner.stop(pc.red("Failed"));
-				ui.error(result.error.message);
-				process.exit(1);
-			}
+				if (Result.isErr(result)) {
+					spinner.stop(pc.red("Failed"));
+					throw new CommandError(result.error.message);
+				}
 
-			spinner.stop(pc.green("Done"));
+				spinner.stop(pc.green("Done"));
 
-			const { defaultBranch, defaultBranchUpdate, reports } = result.data;
+				const { defaultBranch, defaultBranchUpdate, reports } = result.data;
 
-			if (defaultBranchUpdate === "ff-updated") {
-				ui.success(`${defaultBranch} fast-forwarded`);
-			} else {
-				ui.success(`${defaultBranch} ref updated`);
-			}
+				if (defaultBranchUpdate === "ff-updated") {
+					ui.success(`${defaultBranch} fast-forwarded`);
+				} else {
+					ui.success(`${defaultBranch} ref updated`);
+				}
 
-			for (const report of reports) {
-				const onto = report.parent ?? defaultBranch;
-				const hookFailures = report.hookNotifications.filter((n) => n.level === "warn");
+				for (const report of reports) {
+					const onto = report.parent ?? defaultBranch;
+					const hookFailures = report.hookNotifications.filter((n) => n.level === "warn");
 
-				switch (report.result.status) {
-					case "is-default-branch":
-						break;
-					case "rebased":
-					case "rebased-dirty": {
-						const suffix = report.result.status === "rebased-dirty" ? " (via WIP commit)" : "";
-						if (hookFailures.length > 0) {
-							const failMsgs = hookFailures.map((n) => n.message).join("; ");
-							ui.warn(`${report.branch} rebased onto ${onto}${suffix} — ${failMsgs}`);
-						} else {
-							ui.success(`${report.branch} rebased onto ${onto}${suffix}`);
+					switch (report.result.status) {
+						case "is-default-branch":
+							break;
+						case "rebased":
+						case "rebased-dirty": {
+							const suffix = report.result.status === "rebased-dirty" ? " (via WIP commit)" : "";
+							if (hookFailures.length > 0) {
+								const failMsgs = hookFailures.map((n) => n.message).join("; ");
+								ui.warn(`${report.branch} rebased onto ${onto}${suffix} — ${failMsgs}`);
+							} else {
+								ui.success(`${report.branch} rebased onto ${onto}${suffix}`);
+							}
+							break;
 						}
-						break;
+						case "rebase-conflict":
+							ui.warn(`${report.branch} has conflicts, rebase aborted`);
+							break;
+						case "dry-run": {
+							const suffix = report.result.dirty ? " (dirty, via WIP commit)" : "";
+							ui.info(`${report.branch} would be rebased onto ${onto}${suffix}`);
+							break;
+						}
+						case "skipped":
+							ui.warn(`${report.branch} skipped: ${report.result.reason}`);
+							break;
 					}
-					case "rebase-conflict":
-						ui.warn(`${report.branch} has conflicts, rebase aborted`);
-						break;
-					case "dry-run": {
-						const suffix = report.result.dirty ? " (dirty, via WIP commit)" : "";
-						ui.info(`${report.branch} would be rebased onto ${onto}${suffix}`);
-						break;
-					}
-					case "skipped":
-						ui.warn(`${report.branch} skipped: ${report.result.reason}`);
-						break;
 				}
-			}
 
-			ui.outro(dryRun ? "Dry run — no changes made" : "Done!");
+				ui.outro(dryRun ? "Dry run — no changes made" : "Done!");
+			}, ui);
 		},
 	});
 }

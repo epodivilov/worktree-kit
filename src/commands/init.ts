@@ -1,5 +1,6 @@
 import { defineCommand } from "citty";
 import { initConfig } from "../application/use-cases/init-config.ts";
+import { CommandError, runCommand } from "../cli/run-command.ts";
 import type { Container } from "../infrastructure/container.ts";
 import { Result } from "../shared/result.ts";
 
@@ -28,16 +29,17 @@ export function initCommand(container: Container) {
 
 			ui.intro("worktree-kit init");
 
-			const result = await initConfig({ force: args.force, migrate: args.migrate }, { fs, git });
+			await runCommand(async () => {
+				const result = await initConfig({ force: args.force, migrate: args.migrate }, { fs, git });
 
-			if (Result.isErr(result)) {
-				ui.error(result.error.message);
-				process.exit(1);
-			}
+				if (Result.isErr(result)) {
+					throw new CommandError(result.error.message);
+				}
 
-			const action = args.migrate ? "Migrated config to" : "Created config at";
-			ui.success(`${action}: ${result.data.configPath}`);
-			ui.outro("Done!");
+				const action = args.migrate ? "Migrated config to" : "Created config at";
+				ui.success(`${action}: ${result.data.configPath}`);
+				ui.outro("Done!");
+			}, ui);
 		},
 	});
 }

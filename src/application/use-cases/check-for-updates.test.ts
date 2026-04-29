@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { Result } from "../../shared/result.ts";
 import { createFakeFilesystem } from "../../test-utils/fake-filesystem.ts";
 import {
 	checkForUpdates,
@@ -110,7 +111,7 @@ describe("refreshUpdateCache", () => {
 		await refreshUpdateCache({
 			fs,
 			cachePath: CACHE_PATH,
-			fetchLatest: async () => ({ version: "2.0.0" }),
+			fetchLatest: async () => Result.ok({ version: "2.0.0" }),
 			now: () => NOW,
 		});
 
@@ -126,9 +127,7 @@ describe("refreshUpdateCache", () => {
 		await refreshUpdateCache({
 			fs,
 			cachePath: CACHE_PATH,
-			fetchLatest: async () => {
-				throw new Error("network down");
-			},
+			fetchLatest: async () => Result.err(new Error("network down")),
 			now: () => NOW,
 		});
 

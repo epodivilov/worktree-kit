@@ -1,12 +1,14 @@
 import { defineCommand } from "citty";
 import pc from "picocolors";
 import pkg from "../../package.json";
+import { CommandError, runCommand } from "../cli/run-command.ts";
 import type { Container } from "../infrastructure/container.ts";
-import { fetchLatestVersion, type LatestRelease } from "../infrastructure/github-releases.ts";
+import { fetchLatestVersion } from "../infrastructure/github-releases.ts";
+import { Result as R, type Result } from "../shared/result.ts";
 
 const REPO = "epodivilov/worktree-kit";
 
-function detectBinaryName(): string {
+function detectBinaryName(): Result<string> {
 	const platform = process.platform;
 	const arch = process.arch;
 
@@ -14,10 +16,10 @@ function detectBinaryName(): string {
 	const cpu = arch === "arm64" ? "arm64" : arch === "x64" ? "x64" : null;
 
 	if (!os || !cpu) {
-		throw new Error(`Unsupported platform: ${platform}/${arch}`);
+		return R.err(new Error(`Unsupported platform: ${platform}/${arch}`));
 	}
 
-	return `wt-${os}-${cpu}`;
+	return R.ok(`wt-${os}-${cpu}`);
 }
 
 function formatMb(bytes: number): string {
@@ -29,7 +31,7 @@ async function downloadBinary(
 	binaryName: string,
 	targetPath: string,
 	onProgress?: (downloaded: number, total: number) => void,
-): Promise<void> {
+): Promise<Result<void>> {
 	const url = `https://github.com/${REPO}/releases/download/${tag}/${binaryName}`;
 
 	let res: Response;
@@ -40,17 +42,17 @@ async function downloadBinary(
 		});
 	} catch (err) {
 		if (err instanceof Error && err.name === "TimeoutError") {
-			throw new Error("Download timed out");
+			return R.err(new Error("Download timed out"));
 		}
-		throw err;
+		return R.err(err instanceof Error ? err : new Error(String(err)));
 	}
 
 	if (!res.ok) {
-		throw new Error(`Download failed: ${res.status} ${res.statusText}`);
+		return R.err(new Error(`Download failed: ${res.status} ${res.statusText}`));
 	}
 
 	if (!res.body) {
-		throw new Error("Download failed: empty response body");
+		return R.err(new Error("Download failed: empty response body"));
 	}
 
 	const total = Number(res.headers.get("content-length") ?? 0);
@@ -71,20 +73,26 @@ async function downloadBinary(
 		} catch {
 			// ignore cleanup error
 		}
-		throw err;
+		return R.err(err instanceof Error ? err : new Error(String(err)));
 	}
 
-	const { rename, chmod } = await import("node:fs/promises");
-	await chmod(tmpPath, 0o755);
-	await rename(tmpPath, targetPath);
+	try {
+		const { rename, chmod } = await import("node:fs/promises");
+		await chmod(tmpPath, 0o755);
+		await rename(tmpPath, targetPath);
 
-	if (process.platform === "darwin") {
-		try {
-			Bun.spawnSync(["xattr", "-d", "com.apple.quarantine", targetPath]);
-		} catch {
-			// ignore — quarantine attribute may not exist
+		if (process.platform === "darwin") {
+			try {
+				Bun.spawnSync(["xattr", "-d", "com.apple.quarantine", targetPath]);
+			} catch {
+				// ignore — quarantine attribute may not exist
+			}
 		}
+	} catch (err) {
+		return R.err(new Error(`Post-download setup failed: ${err instanceof Error ? err.message : String(err)}`));
 	}
+
+	return R.ok(undefined);
 }
 
 export function selfUpdateCommand(container: Container) {
@@ -98,43 +106,39 @@ export function selfUpdateCommand(container: Container) {
 
 			ui.intro("worktree-kit self-update");
 
-			const currentVersion = pkg.version;
-			const spinner = ui.createSpinner();
+			await runCommand(async () => {
+				const currentVersion = pkg.version;
+				const spinner = ui.createSpinner();
 
-			spinner.start("Checking for updates...");
+				spinner.start("Checking for updates...");
 
-			let latest: LatestRelease;
-			try {
-				latest = await fetchLatestVersion();
-			} catch (err) {
-				spinner.stop(pc.red("Failed"));
-				ui.error(err instanceof Error ? err.message : "Failed to check for updates");
-				process.exit(1);
-			}
+				const latestResult = await fetchLatestVersion();
+				if (R.isErr(latestResult)) {
+					spinner.stop(pc.red("Failed"));
+					throw new CommandError(latestResult.error.message);
+				}
+				const latest = latestResult.data;
 
-			if (latest.version === currentVersion) {
-				spinner.stop(pc.green("Up to date"));
-				ui.success(`Already on the latest version (${currentVersion})`);
-				ui.outro("Nothing to do");
-				return;
-			}
+				if (latest.version === currentVersion) {
+					spinner.stop(pc.green("Up to date"));
+					ui.success(`Already on the latest version (${currentVersion})`);
+					ui.outro("Nothing to do");
+					return;
+				}
 
-			spinner.message(`Downloading ${latest.tag}...`);
+				spinner.message(`Downloading ${latest.tag}...`);
 
-			let binaryName: string;
-			try {
-				binaryName = detectBinaryName();
-			} catch (err) {
-				spinner.stop(pc.red("Failed"));
-				ui.error(err instanceof Error ? err.message : "Unsupported platform");
-				process.exit(1);
-			}
+				const binaryResult = detectBinaryName();
+				if (R.isErr(binaryResult)) {
+					spinner.stop(pc.red("Failed"));
+					throw new CommandError(binaryResult.error.message);
+				}
+				const binaryName = binaryResult.data;
 
-			const execPath = process.execPath;
+				const execPath = process.execPath;
 
-			try {
 				let lastRender = 0;
-				await downloadBinary(latest.tag, binaryName, execPath, (downloaded, total) => {
+				const downloadResult = await downloadBinary(latest.tag, binaryName, execPath, (downloaded, total) => {
 					const now = Date.now();
 					if (now - lastRender < 200) return;
 					lastRender = now;
@@ -145,15 +149,15 @@ export function selfUpdateCommand(container: Container) {
 							: `Downloading ${latest.tag}... ${current} MB`;
 					spinner.message(message);
 				});
-			} catch (err) {
-				spinner.stop(pc.red("Failed"));
-				ui.error(err instanceof Error ? err.message : "Download failed");
-				process.exit(1);
-			}
+				if (R.isErr(downloadResult)) {
+					spinner.stop(pc.red("Failed"));
+					throw new CommandError(downloadResult.error.message);
+				}
 
-			spinner.stop(pc.green("Updated"));
-			ui.success(`${currentVersion} → ${latest.version}`);
-			ui.outro("Done!");
+				spinner.stop(pc.green("Updated"));
+				ui.success(`${currentVersion} → ${latest.version}`);
+				ui.outro("Done!");
+			}, ui);
 		},
 	});
 }

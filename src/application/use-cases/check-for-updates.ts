@@ -1,4 +1,5 @@
 import type { FilesystemPort } from "../../domain/ports/filesystem-port.ts";
+import { Result as R, type Result } from "../../shared/result.ts";
 import { isNewer } from "../../shared/semver-compare.ts";
 
 export const UPDATE_CHECK_TTL_MS = 24 * 60 * 60 * 1000;
@@ -55,18 +56,16 @@ export async function checkForUpdates(deps: CheckForUpdatesDeps): Promise<CheckF
 export interface RefreshUpdateCacheDeps {
 	fs: FilesystemPort;
 	cachePath: string;
-	fetchLatest: () => Promise<{ version: string }>;
+	fetchLatest: () => Promise<Result<{ version: string }>>;
 	now?: () => number;
 }
 
 export async function refreshUpdateCache(deps: RefreshUpdateCacheDeps): Promise<void> {
 	const { fs, cachePath, fetchLatest, now = Date.now } = deps;
 
-	try {
-		const { version } = await fetchLatest();
-		const cache: UpdateCheckCache = { checkedAt: now(), latestVersion: version };
-		await fs.writeFile(cachePath, JSON.stringify(cache));
-	} catch {
-		// Swallow network/write errors — AC#5: no output, no crash.
-	}
+	const result = await fetchLatest();
+	if (R.isErr(result)) return;
+
+	const cache: UpdateCheckCache = { checkedAt: now(), latestVersion: result.data.version };
+	await fs.writeFile(cachePath, JSON.stringify(cache));
 }
