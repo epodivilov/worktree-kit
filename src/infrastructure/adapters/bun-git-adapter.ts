@@ -506,6 +506,18 @@ export function createBunGitAdapter(logger: LoggerPort): GitPort {
 			}
 		},
 
+		async getLastCommitMessage(worktreePath: string): Promise<Result<string, GitError>> {
+			try {
+				const { exitCode, stdout, stderr } = await runGit(["-C", worktreePath, "log", "-1", "--format=%s"]);
+				if (exitCode !== 0) {
+					return Result.err({ code: "UNKNOWN", message: stderr || "Failed to get last commit message" });
+				}
+				return Result.ok(stdout);
+			} catch {
+				return Result.err({ code: "UNKNOWN", message: "Failed to get last commit message" });
+			}
+		},
+
 		async isPathTracked(repoRoot: string, relativePath: string): Promise<Result<boolean, GitError>> {
 			try {
 				const { exitCode } = await runGit(["-C", repoRoot, "ls-files", "--error-unmatch", relativePath]);

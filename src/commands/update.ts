@@ -2,6 +2,7 @@ import { defineCommand } from "citty";
 import pc from "picocolors";
 import { loadConfig } from "../application/use-cases/load-config.ts";
 import { updateWorktrees } from "../application/use-cases/update-worktrees.ts";
+import { CleanupHandle } from "../cli/cleanup-handle.ts";
 import { EXIT_FAILURE } from "../cli/exit-codes.ts";
 import { CommandError, runCommand } from "../cli/run-command.ts";
 import type { Container } from "../infrastructure/container.ts";
@@ -49,11 +50,28 @@ export function updateCommand(container: Container) {
 				const spinner = ui.createSpinner();
 				spinner.start("Fetching and updating worktrees...");
 
+				const cleanup = new CleanupHandle();
+				cleanup.register(async () => {
+					const worktrees = await git.listWorktrees();
+					if (!worktrees.success) return;
+					for (const wt of worktrees.data) {
+						if (await git.isRebaseInProgress(wt.path)) {
+							await git.rebaseAbort(wt.path);
+							const msg = await git.getLastCommitMessage(wt.path);
+							if (msg.success && msg.data === "WIP") {
+								await git.resetLastCommit(wt.path);
+							}
+						}
+					}
+				});
+
 				const needsShell = postUpdateHooks.length > 0 || onConflictHooks.length > 0;
 				const result = await updateWorktrees(
 					{ dryRun, branch, postUpdateHooks, onConflictHooks, repoRoot },
 					{ git, shell: needsShell ? shell : undefined },
 				);
+
+				cleanup.clear();
 
 				if (Result.isErr(result)) {
 					spinner.stop(pc.red("Failed"));

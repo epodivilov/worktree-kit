@@ -230,6 +230,10 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 			return Result.ok(count);
 		},
 
+		async getLastCommitMessage(_worktreePath: string): Promise<Result<string, GitError>> {
+			return Result.ok("fake message");
+		},
+
 		async isPathTracked(_repoRoot: string, relativePath: string): Promise<Result<boolean, GitError>> {
 			return Result.ok(options.trackedPaths?.has(relativePath) ?? false);
 		},

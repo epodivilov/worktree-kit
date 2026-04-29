@@ -2,6 +2,7 @@ import { defineCommand } from "citty";
 import pc from "picocolors";
 import { createWorktree } from "../application/use-cases/create-worktree.ts";
 import { loadConfig } from "../application/use-cases/load-config.ts";
+import { CleanupHandle } from "../cli/cleanup-handle.ts";
 import { EXIT_FAILURE } from "../cli/exit-codes.ts";
 import { renderNotifications } from "../cli/render-notifications.ts";
 import { resolveBaseBranch, resolveBranch } from "../cli/resolve-params.ts";
@@ -121,6 +122,11 @@ export function createCommand(container: Container) {
 					return;
 				}
 
+				const cleanup = new CleanupHandle();
+				cleanup.register(async () => {
+					await git.removeWorktree(createResult.data.worktree.path, { force: true });
+				});
+
 				// Symlink root config into worktree
 				const { configSymlink, localConfigSymlink } = createResult.data;
 				if (configSymlink) {
@@ -161,6 +167,7 @@ export function createCommand(container: Container) {
 				}
 
 				spinner.stop(pc.green("Worktree created"));
+				cleanup.clear();
 				renderNotifications(ui, createResult.data.notifications);
 
 				// === Stage 2: Run hooks ===
