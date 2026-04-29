@@ -5,16 +5,30 @@
  * - Primitives are replaced by override.
  * - `undefined` values in override are skipped.
  */
-export function deepMerge<T extends object>(base: T, override: Partial<{ [K in keyof T]: unknown }>): T {
+
+type AnyObject = Record<string, unknown>;
+
+export type DeepPartial<T> = {
+	[K in keyof T]?: T[K] extends unknown[] ? T[K] : T[K] extends object ? DeepPartial<T[K]> : T[K];
+};
+
+export function deepMerge<T extends object>(base: T, override: DeepPartial<T>): T {
 	const result = { ...base };
 
-	for (const key of Object.keys(override) as Array<keyof T>) {
-		const overrideVal = override[key];
+	// Safety: base is T extends object, override is Partial<T>, result is a spread of T.
+	// We cast once here to avoid repeated inline casts in the loop below.
+	// The return type is still T, guaranteed by the spread + selective overwrites.
+	const baseObj = base as AnyObject;
+	const overrideObj = override as AnyObject;
+	const resultObj = result as AnyObject;
+
+	for (const key of Object.keys(overrideObj)) {
+		const overrideVal = overrideObj[key];
 		if (overrideVal === undefined) {
 			continue;
 		}
 
-		const baseVal = base[key];
+		const baseVal = baseObj[key];
 
 		if (
 			Array.isArray(overrideVal) ||
@@ -24,12 +38,9 @@ export function deepMerge<T extends object>(base: T, override: Partial<{ [K in k
 			baseVal === null ||
 			typeof baseVal !== "object"
 		) {
-			(result as Record<string, unknown>)[key as string] = overrideVal;
+			resultObj[key] = overrideVal;
 		} else {
-			(result as Record<string, unknown>)[key as string] = deepMerge(
-				baseVal as Record<string, unknown>,
-				overrideVal as Record<string, unknown>,
-			);
+			resultObj[key] = deepMerge(baseVal as AnyObject, overrideVal as AnyObject);
 		}
 	}
 
