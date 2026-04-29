@@ -1,5 +1,6 @@
 import { defineCommand } from "citty";
 import pc from "picocolors";
+import * as v from "valibot";
 import { createWorktree } from "../application/use-cases/create-worktree.ts";
 import { loadConfig } from "../application/use-cases/load-config.ts";
 import { CleanupHandle } from "../cli/cleanup-handle.ts";
@@ -8,6 +9,7 @@ import { renderNotifications } from "../cli/render-notifications.ts";
 import { resolveBaseBranch, resolveBranch } from "../cli/resolve-params.ts";
 import { CommandError, runCommand } from "../cli/run-command.ts";
 import type { CreateCommandConfig, DefaultBase } from "../domain/entities/config.ts";
+import { CreateArgsSchema } from "../domain/schemas/command-args-schema.ts";
 import type { Container } from "../infrastructure/container.ts";
 import { Result } from "../shared/result.ts";
 
@@ -41,7 +43,8 @@ export function createCommand(container: Container) {
 			ui.intro("worktree-kit create");
 
 			await runCommand(async () => {
-				const dryRun = (args["dry-run"] as boolean | undefined) ?? false;
+				const parsed = v.parse(CreateArgsSchema, args);
+				const dryRun = parsed["dry-run"];
 
 				const configResult = await loadConfig({ git, fs });
 				const fallbackConfig: { defaultBase: DefaultBase; create: CreateCommandConfig } = {
@@ -56,7 +59,7 @@ export function createCommand(container: Container) {
 				}
 
 				// === Resolve params ===
-				const { branch, isNewBranch, isRemoteBranch } = await resolveBranch(args.branch as string | undefined, {
+				const { branch, isNewBranch, isRemoteBranch } = await resolveBranch(parsed.branch, {
 					ui,
 					git,
 				});
@@ -64,7 +67,7 @@ export function createCommand(container: Container) {
 				let baseBranch: string | undefined;
 				if (isNewBranch && !isRemoteBranch) {
 					baseBranch = await resolveBaseBranch(
-						args.base as string | undefined,
+						parsed.base,
 						{ base: config.create.base, defaultBase: config.defaultBase },
 						{ ui, git },
 					);

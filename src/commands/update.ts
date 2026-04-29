@@ -1,10 +1,12 @@
 import { defineCommand } from "citty";
 import pc from "picocolors";
+import * as v from "valibot";
 import { loadConfig } from "../application/use-cases/load-config.ts";
 import { updateWorktrees } from "../application/use-cases/update-worktrees.ts";
 import { CleanupHandle } from "../cli/cleanup-handle.ts";
 import { EXIT_FAILURE } from "../cli/exit-codes.ts";
 import { CommandError, runCommand } from "../cli/run-command.ts";
+import { UpdateArgsSchema } from "../domain/schemas/command-args-schema.ts";
 import type { Container } from "../infrastructure/container.ts";
 import { Result } from "../shared/result.ts";
 
@@ -29,12 +31,12 @@ export function updateCommand(container: Container) {
 		async run({ args }) {
 			const { ui, git, fs, shell } = container;
 
-			const branch = args.branch as string | undefined;
-			const dryRun = (args["dry-run"] as boolean | undefined) ?? false;
-
 			ui.intro("worktree-kit update");
 
 			await runCommand(async () => {
+				const parsed = v.parse(UpdateArgsSchema, args);
+				const { branch } = parsed;
+				const dryRun = parsed["dry-run"];
 				const configResult = await loadConfig({ git, fs });
 				const postUpdateHooks = configResult.success ? configResult.data.config.hooks["post-update"] : [];
 				const onConflictHooks = configResult.success ? configResult.data.config.hooks["on-conflict"] : [];

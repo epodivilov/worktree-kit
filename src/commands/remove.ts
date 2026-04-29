@@ -1,12 +1,14 @@
 import { resolve } from "node:path";
 import { defineCommand } from "citty";
 import pc from "picocolors";
+import * as v from "valibot";
 import { listWorktrees } from "../application/use-cases/list-worktrees.ts";
 import { loadConfig } from "../application/use-cases/load-config.ts";
 import { removeWorktree } from "../application/use-cases/remove-worktree.ts";
 import { resolveBranchesToRemove, resolveDeleteBranch, resolveDeleteRemoteBranch } from "../cli/resolve-params.ts";
 import { runCommand } from "../cli/run-command.ts";
 import { INIT_ROOT_DIR } from "../domain/constants.ts";
+import { RemoveArgsSchema } from "../domain/schemas/command-args-schema.ts";
 import type { Container } from "../infrastructure/container.ts";
 import { Result } from "../shared/result.ts";
 
@@ -49,6 +51,10 @@ export function removeCommand(container: Container) {
 			ui.intro("worktree-kit remove");
 
 			await runCommand(async () => {
+				const parsed = v.parse(RemoveArgsSchema, args);
+				const { force } = parsed;
+				const dryRun = parsed["dry-run"];
+
 				const configResult = await loadConfig({ fs, git });
 				const config = configResult.success ? configResult.data.config : null;
 				if (!configResult.success) {
@@ -58,24 +64,21 @@ export function removeCommand(container: Container) {
 				}
 
 				// === Resolve params ===
-				const branchesToRemove = await resolveBranchesToRemove(args.branch as string | undefined, { ui, git });
+				const branchesToRemove = await resolveBranchesToRemove(parsed.branch, { ui, git });
 
 				const shouldDeleteBranches = await resolveDeleteBranch(
-					args["delete-branch"] as boolean | undefined,
+					parsed["delete-branch"],
 					config?.remove.deleteBranch,
 					{ ui },
 					{ branches: branchesToRemove },
 				);
 
 				const shouldDeleteRemoteBranches = await resolveDeleteRemoteBranch(
-					args["delete-remote-branch"] as boolean | undefined,
+					parsed["delete-remote-branch"],
 					config?.remove.deleteRemoteBranch,
 					{ ui },
 					{ branches: branchesToRemove },
 				);
-
-				const force = (args.force as boolean | undefined) ?? false;
-				const dryRun = (args["dry-run"] as boolean | undefined) ?? false;
 
 				if (dryRun) {
 					for (const branch of branchesToRemove) {

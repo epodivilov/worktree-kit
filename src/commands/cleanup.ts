@@ -1,12 +1,14 @@
 import { resolve } from "node:path";
 import { defineCommand } from "citty";
 import pc from "picocolors";
+import * as v from "valibot";
 import { cleanupWorktrees } from "../application/use-cases/cleanup-worktrees.ts";
 import { listWorktrees } from "../application/use-cases/list-worktrees.ts";
 import { loadConfig } from "../application/use-cases/load-config.ts";
 import { EXIT_CANCEL, EXIT_FAILURE, EXIT_PARTIAL, EXIT_SUCCESS } from "../cli/exit-codes.ts";
 import { CommandError, runCommand } from "../cli/run-command.ts";
 import { INIT_ROOT_DIR } from "../domain/constants.ts";
+import { CleanupArgsSchema } from "../domain/schemas/command-args-schema.ts";
 import type { Container } from "../infrastructure/container.ts";
 import { Result } from "../shared/result.ts";
 
@@ -34,8 +36,9 @@ export function cleanupCommand(container: Container) {
 			ui.intro("worktree-kit cleanup");
 
 			await runCommand(async () => {
-				const force = (args.force as boolean | undefined) ?? false;
-				const dryRun = (args["dry-run"] as boolean | undefined) ?? false;
+				const parsed = v.parse(CleanupArgsSchema, args);
+				const { force } = parsed;
+				const dryRun = parsed["dry-run"];
 
 				// Discovery pass
 				const spinner = ui.createSpinner();
