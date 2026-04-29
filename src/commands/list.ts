@@ -1,6 +1,7 @@
 import { defineCommand } from "citty";
 import pc from "picocolors";
 import { listWorktrees } from "../application/use-cases/list-worktrees.ts";
+import { EXIT_FAILURE } from "../cli/exit-codes.ts";
 import { CommandError, runCommand } from "../cli/run-command.ts";
 import type { Container } from "../infrastructure/container.ts";
 import { Result } from "../shared/result.ts";
@@ -21,7 +22,7 @@ export function listCommand(container: Container) {
 				const result = await listWorktrees({ git });
 
 				if (Result.isErr(result)) {
-					throw new CommandError(result.error.message);
+					throw new CommandError(result.error.message, EXIT_FAILURE);
 				}
 
 				if (result.data.worktrees.length === 0) {

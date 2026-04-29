@@ -2,6 +2,7 @@ import { defineCommand } from "citty";
 import pc from "picocolors";
 import { createWorktree } from "../application/use-cases/create-worktree.ts";
 import { loadConfig } from "../application/use-cases/load-config.ts";
+import { EXIT_FAILURE } from "../cli/exit-codes.ts";
 import { renderNotifications } from "../cli/render-notifications.ts";
 import { resolveBaseBranch, resolveBranch } from "../cli/resolve-params.ts";
 import { CommandError, runCommand } from "../cli/run-command.ts";
@@ -79,7 +80,7 @@ export function createCommand(container: Container) {
 
 				if (Result.isErr(createResult)) {
 					spinner.stop(pc.red("Failed"));
-					throw new CommandError(createResult.error.message);
+					throw new CommandError(createResult.error.message, EXIT_FAILURE);
 				}
 
 				if (dryRun) {

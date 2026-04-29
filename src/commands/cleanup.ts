@@ -4,6 +4,7 @@ import pc from "picocolors";
 import { cleanupWorktrees } from "../application/use-cases/cleanup-worktrees.ts";
 import { listWorktrees } from "../application/use-cases/list-worktrees.ts";
 import { loadConfig } from "../application/use-cases/load-config.ts";
+import { EXIT_CANCEL, EXIT_FAILURE, EXIT_PARTIAL, EXIT_SUCCESS } from "../cli/exit-codes.ts";
 import { CommandError, runCommand } from "../cli/run-command.ts";
 import { INIT_ROOT_DIR } from "../domain/constants.ts";
 import type { Container } from "../infrastructure/container.ts";
@@ -44,7 +45,7 @@ export function cleanupCommand(container: Container) {
 
 				if (Result.isErr(discoveryResult)) {
 					spinner.stop(pc.red("Failed"));
-					throw new CommandError(discoveryResult.error.message);
+					throw new CommandError(discoveryResult.error.message, EXIT_FAILURE);
 				}
 
 				const candidates = discoveryResult.data.reports;
@@ -77,12 +78,12 @@ export function cleanupCommand(container: Container) {
 
 					if (ui.isCancel(confirmed)) {
 						ui.cancel("Cleanup cancelled");
-						process.exit(130);
+						process.exit(EXIT_CANCEL);
 					}
 
 					if (!confirmed) {
 						ui.cancel("Cleanup cancelled");
-						process.exit(0);
+						process.exit(EXIT_SUCCESS);
 					}
 				}
 
@@ -94,7 +95,7 @@ export function cleanupCommand(container: Container) {
 
 				if (Result.isErr(execResult)) {
 					execSpinner.stop(pc.red("Failed"));
-					throw new CommandError(execResult.error.message);
+					throw new CommandError(execResult.error.message, EXIT_FAILURE);
 				}
 
 				execSpinner.stop(pc.green("Cleanup complete"));
@@ -117,6 +118,17 @@ export function cleanupCommand(container: Container) {
 							ui.error(`${report.branch} — ${report.result.message}`);
 							break;
 					}
+				}
+
+				const errorCount = execResult.data.reports.filter((r) => r.result.status === "error").length;
+				const totalCount = execResult.data.reports.length;
+
+				if (errorCount > 0 && errorCount < totalCount) {
+					throw new CommandError("Some branches could not be cleaned up", EXIT_PARTIAL);
+				}
+
+				if (errorCount > 0 && errorCount === totalCount) {
+					throw new CommandError("All cleanup operations failed", EXIT_FAILURE);
 				}
 
 				// Clean up empty worktrees directory

@@ -2,12 +2,13 @@ import type { DefaultBase } from "../domain/entities/config.ts";
 import type { GitPort } from "../domain/ports/git-port.ts";
 import type { UiPort } from "../domain/ports/ui-port.ts";
 import { Result } from "../shared/result.ts";
+import { EXIT_CANCEL, EXIT_FAILURE, EXIT_SUCCESS } from "./exit-codes.ts";
 import { CommandError } from "./run-command.ts";
 
 function unwrapOrCancel<T>(ui: UiPort, value: T | symbol): T {
 	if (ui.isCancel(value)) {
 		ui.cancel();
-		process.exit(130);
+		process.exit(EXIT_CANCEL);
 	}
 	return value;
 }
@@ -29,7 +30,7 @@ export async function resolveBranch(
 	if (flag) {
 		const branchExistsResult = await git.branchExists(flag);
 		if (Result.isErr(branchExistsResult)) {
-			throw new CommandError(branchExistsResult.error.message);
+			throw new CommandError(branchExistsResult.error.message, EXIT_FAILURE);
 		}
 		if (branchExistsResult.data) {
 			return { branch: flag, isNewBranch: false, isRemoteBranch: false };
@@ -37,7 +38,7 @@ export async function resolveBranch(
 
 		const remoteBranchesResult = await git.listRemoteBranches();
 		if (Result.isErr(remoteBranchesResult)) {
-			throw new CommandError(remoteBranchesResult.error.message);
+			throw new CommandError(remoteBranchesResult.error.message, EXIT_FAILURE);
 		}
 		if (remoteBranchesResult.data.includes(flag)) {
 			return { branch: flag, isNewBranch: false, isRemoteBranch: true };
@@ -52,17 +53,17 @@ export async function resolveBranch(
 
 	const branchesResult = await git.listBranches();
 	if (Result.isErr(branchesResult)) {
-		throw new CommandError(branchesResult.error.message);
+		throw new CommandError(branchesResult.error.message, EXIT_FAILURE);
 	}
 
 	const remoteBranchesResult = await git.listRemoteBranches();
 	if (Result.isErr(remoteBranchesResult)) {
-		throw new CommandError(remoteBranchesResult.error.message);
+		throw new CommandError(remoteBranchesResult.error.message, EXIT_FAILURE);
 	}
 
 	const worktreesResult = await git.listWorktrees();
 	if (Result.isErr(worktreesResult)) {
-		throw new CommandError(worktreesResult.error.message);
+		throw new CommandError(worktreesResult.error.message, EXIT_FAILURE);
 	}
 
 	const usedBranches = new Set(worktreesResult.data.map((w) => w.branch));
@@ -194,7 +195,7 @@ export async function resolveBranchesToRemove(
 
 	const worktreesResult = await git.listWorktrees();
 	if (Result.isErr(worktreesResult)) {
-		throw new CommandError(worktreesResult.error.message);
+		throw new CommandError(worktreesResult.error.message, EXIT_FAILURE);
 	}
 
 	const removable = worktreesResult.data.filter((w) => !w.isMain);
@@ -202,7 +203,7 @@ export async function resolveBranchesToRemove(
 	if (removable.length === 0) {
 		ui.info("No worktrees to remove");
 		ui.outro("Done!");
-		process.exit(0);
+		process.exit(EXIT_SUCCESS);
 	}
 
 	const options = removable.map((w) => ({

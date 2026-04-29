@@ -1,5 +1,6 @@
 import { defineCommand } from "citty";
 import { initConfig } from "../application/use-cases/init-config.ts";
+import { EXIT_FAILURE } from "../cli/exit-codes.ts";
 import { CommandError, runCommand } from "../cli/run-command.ts";
 import type { Container } from "../infrastructure/container.ts";
 import { Result } from "../shared/result.ts";
@@ -33,7 +34,7 @@ export function initCommand(container: Container) {
 				const result = await initConfig({ force: args.force, migrate: args.migrate }, { fs, git });
 
 				if (Result.isErr(result)) {
-					throw new CommandError(result.error.message);
+					throw new CommandError(result.error.message, EXIT_FAILURE);
 				}
 
 				const action = args.migrate ? "Migrated config to" : "Created config at";

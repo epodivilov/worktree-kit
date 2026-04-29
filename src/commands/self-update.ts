@@ -1,6 +1,7 @@
 import { defineCommand } from "citty";
 import pc from "picocolors";
 import pkg from "../../package.json";
+import { EXIT_FAILURE } from "../cli/exit-codes.ts";
 import { CommandError, runCommand } from "../cli/run-command.ts";
 import type { Container } from "../infrastructure/container.ts";
 import { fetchLatestVersion } from "../infrastructure/github-releases.ts";
@@ -115,7 +116,7 @@ export function selfUpdateCommand(container: Container) {
 				const latestResult = await fetchLatestVersion();
 				if (R.isErr(latestResult)) {
 					spinner.stop(pc.red("Failed"));
-					throw new CommandError(latestResult.error.message);
+					throw new CommandError(latestResult.error.message, EXIT_FAILURE);
 				}
 				const latest = latestResult.data;
 
@@ -131,7 +132,7 @@ export function selfUpdateCommand(container: Container) {
 				const binaryResult = detectBinaryName();
 				if (R.isErr(binaryResult)) {
 					spinner.stop(pc.red("Failed"));
-					throw new CommandError(binaryResult.error.message);
+					throw new CommandError(binaryResult.error.message, EXIT_FAILURE);
 				}
 				const binaryName = binaryResult.data;
 
@@ -151,7 +152,7 @@ export function selfUpdateCommand(container: Container) {
 				});
 				if (R.isErr(downloadResult)) {
 					spinner.stop(pc.red("Failed"));
-					throw new CommandError(downloadResult.error.message);
+					throw new CommandError(downloadResult.error.message, EXIT_FAILURE);
 				}
 
 				spinner.stop(pc.green("Updated"));

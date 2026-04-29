@@ -2,6 +2,7 @@ import { defineCommand } from "citty";
 import pc from "picocolors";
 import { loadConfig } from "../application/use-cases/load-config.ts";
 import { updateWorktrees } from "../application/use-cases/update-worktrees.ts";
+import { EXIT_FAILURE } from "../cli/exit-codes.ts";
 import { CommandError, runCommand } from "../cli/run-command.ts";
 import type { Container } from "../infrastructure/container.ts";
 import { Result } from "../shared/result.ts";
@@ -56,7 +57,7 @@ export function updateCommand(container: Container) {
 
 				if (Result.isErr(result)) {
 					spinner.stop(pc.red("Failed"));
-					throw new CommandError(result.error.message);
+					throw new CommandError(result.error.message, EXIT_FAILURE);
 				}
 
 				spinner.stop(pc.green("Done"));

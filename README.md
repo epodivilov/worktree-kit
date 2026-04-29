@@ -265,6 +265,16 @@ wt cleanup --dry-run
 
 Runs `git fetch --prune`, finds branches with gone remotes, shows candidates, and asks for confirmation. Skips dirty worktrees and unmerged branches unless `--force` is used.
 
+## Exit codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | Success |
+| 1 | Usage or validation error |
+| 2 | Partial failure (some operations succeeded) |
+| 3 | Operational failure |
+| 130 | Cancelled by user (Ctrl+C / Esc) |
+
 ## Configuration
 
 Create a `.worktreekit.jsonc` file in the project root (or use `wt init`). JSONC format supports comments:
