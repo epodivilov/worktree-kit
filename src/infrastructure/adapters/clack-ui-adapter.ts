@@ -53,6 +53,19 @@ export function createClackUiAdapter(options?: { nonInteractive?: boolean }): Ui
 		},
 
 		createMultiSpinner(keys: string[]): MultiSpinnerHandle {
+			if (!process.stdout.isTTY) {
+				return {
+					update(_key: string, _message: string) {},
+					complete(key: string, message: string) {
+						process.stdout.write(`  ✓  ${key}: ${message}\n`);
+					},
+					fail(key: string, message: string) {
+						process.stdout.write(`  ✗  ${key}: ${message}\n`);
+					},
+					stop() {},
+				};
+			}
+
 			const frames = ["◒", "◐", "◓", "◑"];
 			let frameIndex = 0;
 			let rendered = false;
