@@ -1,14 +1,14 @@
 import { defineCommand } from "citty";
 import pc from "picocolors";
 import * as v from "valibot";
-import { loadConfig } from "../application/use-cases/load-config.ts";
-import { updateWorktrees } from "../application/use-cases/update-worktrees.ts";
-import { CleanupHandle } from "../cli/cleanup-handle.ts";
-import { EXIT_FAILURE } from "../cli/exit-codes.ts";
-import { CommandError, runCommand } from "../cli/run-command.ts";
-import { UpdateArgsSchema } from "../domain/schemas/command-args-schema.ts";
-import type { Container } from "../infrastructure/container.ts";
-import { Result } from "../shared/result.ts";
+import { loadConfig } from "../../application/use-cases/load-config.ts";
+import { updateWorktrees } from "../../application/use-cases/update-worktrees.ts";
+import { UpdateArgsSchema } from "../../domain/schemas/command-args-schema.ts";
+import type { Container } from "../../infrastructure/container.ts";
+import { Result } from "../../shared/result.ts";
+import { CleanupHandle } from "../cleanup-handle.ts";
+import { EXIT_FAILURE } from "../exit-codes.ts";
+import { CommandError, runCommand } from "../run-command.ts";
 
 export function updateCommand(container: Container) {
 	return defineCommand({

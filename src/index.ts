@@ -1,13 +1,13 @@
 import { defineCommand, runMain } from "citty";
 import pkg from "../package.json";
+import { cleanupCommand } from "./cli/commands/cleanup.ts";
+import { createCommand } from "./cli/commands/create.ts";
+import { initCommand } from "./cli/commands/init.ts";
+import { listCommand } from "./cli/commands/list.ts";
+import { removeCommand } from "./cli/commands/remove.ts";
+import { selfUpdateCommand } from "./cli/commands/self-update.ts";
+import { updateCommand } from "./cli/commands/update.ts";
 import { runUpdateNotifier } from "./cli/update-notifier.ts";
-import { cleanupCommand } from "./commands/cleanup.ts";
-import { createCommand } from "./commands/create.ts";
-import { initCommand } from "./commands/init.ts";
-import { listCommand } from "./commands/list.ts";
-import { removeCommand } from "./commands/remove.ts";
-import { selfUpdateCommand } from "./commands/self-update.ts";
-import { updateCommand } from "./commands/update.ts";
 import { type Container, createContainer } from "./infrastructure/container.ts";
 
 let container: Container;

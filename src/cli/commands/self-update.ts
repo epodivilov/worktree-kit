@@ -1,11 +1,11 @@
 import { defineCommand } from "citty";
 import pc from "picocolors";
-import pkg from "../../package.json";
-import { EXIT_FAILURE } from "../cli/exit-codes.ts";
-import { CommandError, runCommand } from "../cli/run-command.ts";
-import type { Container } from "../infrastructure/container.ts";
-import { fetchLatestVersion } from "../infrastructure/github-releases.ts";
-import { Result as R, type Result } from "../shared/result.ts";
+import pkg from "../../../package.json";
+import type { Container } from "../../infrastructure/container.ts";
+import { fetchLatestVersion } from "../../infrastructure/github-releases.ts";
+import { Result as R, type Result } from "../../shared/result.ts";
+import { EXIT_FAILURE } from "../exit-codes.ts";
+import { CommandError, runCommand } from "../run-command.ts";
 
 const REPO = "epodivilov/worktree-kit";
 

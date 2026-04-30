@@ -1,10 +1,10 @@
 import { defineCommand } from "citty";
 import pc from "picocolors";
-import { listWorktrees } from "../application/use-cases/list-worktrees.ts";
-import { EXIT_FAILURE } from "../cli/exit-codes.ts";
-import { CommandError, runCommand } from "../cli/run-command.ts";
-import type { Container } from "../infrastructure/container.ts";
-import { Result } from "../shared/result.ts";
+import { listWorktrees } from "../../application/use-cases/list-worktrees.ts";
+import type { Container } from "../../infrastructure/container.ts";
+import { Result } from "../../shared/result.ts";
+import { EXIT_FAILURE } from "../exit-codes.ts";
+import { CommandError, runCommand } from "../run-command.ts";
 
 export function listCommand(container: Container) {
 	return defineCommand({

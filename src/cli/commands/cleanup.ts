@@ -2,15 +2,15 @@ import { resolve } from "node:path";
 import { defineCommand } from "citty";
 import pc from "picocolors";
 import * as v from "valibot";
-import { cleanupWorktrees } from "../application/use-cases/cleanup-worktrees.ts";
-import { listWorktrees } from "../application/use-cases/list-worktrees.ts";
-import { loadConfig } from "../application/use-cases/load-config.ts";
-import { EXIT_CANCEL, EXIT_FAILURE, EXIT_PARTIAL, EXIT_SUCCESS } from "../cli/exit-codes.ts";
-import { CommandError, runCommand } from "../cli/run-command.ts";
-import { INIT_ROOT_DIR } from "../domain/constants.ts";
-import { CleanupArgsSchema } from "../domain/schemas/command-args-schema.ts";
-import type { Container } from "../infrastructure/container.ts";
-import { Result } from "../shared/result.ts";
+import { cleanupWorktrees } from "../../application/use-cases/cleanup-worktrees.ts";
+import { listWorktrees } from "../../application/use-cases/list-worktrees.ts";
+import { loadConfig } from "../../application/use-cases/load-config.ts";
+import { INIT_ROOT_DIR } from "../../domain/constants.ts";
+import { CleanupArgsSchema } from "../../domain/schemas/command-args-schema.ts";
+import type { Container } from "../../infrastructure/container.ts";
+import { Result } from "../../shared/result.ts";
+import { EXIT_CANCEL, EXIT_FAILURE, EXIT_PARTIAL, EXIT_SUCCESS } from "../exit-codes.ts";
+import { CommandError, runCommand } from "../run-command.ts";
 
 export function cleanupCommand(container: Container) {
 	return defineCommand({

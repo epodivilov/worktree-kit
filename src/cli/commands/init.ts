@@ -1,9 +1,9 @@
 import { defineCommand } from "citty";
-import { initConfig } from "../application/use-cases/init-config.ts";
-import { EXIT_FAILURE } from "../cli/exit-codes.ts";
-import { CommandError, runCommand } from "../cli/run-command.ts";
-import type { Container } from "../infrastructure/container.ts";
-import { Result } from "../shared/result.ts";
+import { initConfig } from "../../application/use-cases/init-config.ts";
+import type { Container } from "../../infrastructure/container.ts";
+import { Result } from "../../shared/result.ts";
+import { EXIT_FAILURE } from "../exit-codes.ts";
+import { CommandError, runCommand } from "../run-command.ts";
 
 export function initCommand(container: Container) {
 	return defineCommand({

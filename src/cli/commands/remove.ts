@@ -2,15 +2,15 @@ import { resolve } from "node:path";
 import { defineCommand } from "citty";
 import pc from "picocolors";
 import * as v from "valibot";
-import { listWorktrees } from "../application/use-cases/list-worktrees.ts";
-import { loadConfig } from "../application/use-cases/load-config.ts";
-import { removeWorktree } from "../application/use-cases/remove-worktree.ts";
-import { resolveBranchesToRemove, resolveDeleteBranch, resolveDeleteRemoteBranch } from "../cli/resolve-params.ts";
-import { runCommand } from "../cli/run-command.ts";
-import { INIT_ROOT_DIR } from "../domain/constants.ts";
-import { RemoveArgsSchema } from "../domain/schemas/command-args-schema.ts";
-import type { Container } from "../infrastructure/container.ts";
-import { Result } from "../shared/result.ts";
+import { listWorktrees } from "../../application/use-cases/list-worktrees.ts";
+import { loadConfig } from "../../application/use-cases/load-config.ts";
+import { removeWorktree } from "../../application/use-cases/remove-worktree.ts";
+import { INIT_ROOT_DIR } from "../../domain/constants.ts";
+import { RemoveArgsSchema } from "../../domain/schemas/command-args-schema.ts";
+import type { Container } from "../../infrastructure/container.ts";
+import { Result } from "../../shared/result.ts";
+import { resolveBranchesToRemove, resolveDeleteBranch, resolveDeleteRemoteBranch } from "../resolve-params.ts";
+import { runCommand } from "../run-command.ts";
 
 export function removeCommand(container: Container) {
 	return defineCommand({
