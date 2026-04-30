@@ -7,7 +7,12 @@ import { getCacheDir } from "../shared/xdg-paths.ts";
 
 const UPDATE_CHECK_FILENAME = "update-check.json";
 
+const SKIP_FLAGS = new Set(["--help", "-h", "--version", "-v"]);
+
 export async function runUpdateNotifier(container: Container, currentVersion: string): Promise<void> {
+	if (!process.stdout.isTTY) return;
+	if (process.argv.some((arg) => SKIP_FLAGS.has(arg))) return;
+
 	const cachePath = join(getCacheDir(), UPDATE_CHECK_FILENAME);
 
 	const result = await checkForUpdates({
