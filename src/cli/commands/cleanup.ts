@@ -8,6 +8,7 @@ import { loadConfig } from "../../application/use-cases/load-config.ts";
 import { INIT_ROOT_DIR } from "../../domain/constants.ts";
 import { CleanupArgsSchema } from "../../domain/schemas/command-args-schema.ts";
 import type { Container } from "../../infrastructure/container.ts";
+import { formatDisplayPath } from "../../shared/format-path.ts";
 import { Result } from "../../shared/result.ts";
 import { EXIT_CANCEL, EXIT_FAILURE, EXIT_PARTIAL, EXIT_SUCCESS } from "../exit-codes.ts";
 import { CommandError, runCommand } from "../run-command.ts";
@@ -40,6 +41,10 @@ export function cleanupCommand(container: Container) {
 				const { force } = parsed;
 				const dryRun = parsed["dry-run"];
 
+				const mainRootResult = await git.getMainWorktreeRoot();
+				const repoRoot = Result.isOk(mainRootResult) ? mainRootResult.data : "";
+				const dp = (p: string | null) => (p && repoRoot ? formatDisplayPath(p, repoRoot) : (p ?? "(unknown)"));
+
 				// Discovery pass
 				const spinner = ui.createSpinner();
 				spinner.start("Fetching and pruning remote branches...");
@@ -63,8 +68,18 @@ export function cleanupCommand(container: Container) {
 				spinner.stop(pc.green(`Found ${candidates.length} branch(es) to clean up`));
 
 				for (const report of candidates) {
-					const wtLabel = report.worktreePath ? ` (worktree: ${report.worktreePath})` : "";
-					ui.info(`  ${pc.bold(report.branch)}${wtLabel}`);
+					const name = report.branch || dp(report.worktreePath);
+					const isOrphan = report.result.status === "orphan-dry-run";
+					const isBranchOnly = report.branch && !report.worktreePath && !isOrphan;
+					const suffix =
+						report.branch && report.worktreePath
+							? ` (${dp(report.worktreePath)})`
+							: isOrphan
+								? ` ${pc.yellow("[orphan]")}`
+								: isBranchOnly
+									? ` ${pc.dim("[branch only]")}`
+									: "";
+					ui.info(`  ${pc.bold(name)}${suffix}`);
 				}
 
 				if (dryRun) {
@@ -109,7 +124,7 @@ export function cleanupCommand(container: Container) {
 							ui.success(`${report.branch} — worktree and branch removed`);
 							break;
 						case "branch-only":
-							ui.success(`${report.branch} — branch removed`);
+							ui.success(`${report.branch} — branch removed (no matching worktree found)`);
 							break;
 						case "skipped-unmerged":
 							ui.warn(`${report.branch} — skipped (not fully merged, use --force)`);
@@ -117,6 +132,18 @@ export function cleanupCommand(container: Container) {
 						case "skipped-dirty":
 							ui.warn(`${report.branch} — skipped (worktree has uncommitted changes)`);
 							break;
+						case "orphan-cleaned": {
+							const reason = report.branch ? "branch does not exist" : "detached HEAD";
+							const name = report.branch || dp(report.worktreePath);
+							ui.success(`${name} — orphaned worktree removed (${reason})`);
+							break;
+						}
+						case "orphan-skipped-dirty": {
+							const reason = report.branch ? "branch does not exist" : "detached HEAD";
+							const name = report.branch || dp(report.worktreePath);
+							ui.warn(`${name} — orphaned worktree skipped (${reason}, uncommitted changes, use --force)`);
+							break;
+						}
 						case "error":
 							ui.error(`${report.branch} — ${report.result.message}`);
 							break;

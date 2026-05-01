@@ -12,6 +12,9 @@ export type CleanupBranchStatus =
 	| { status: "skipped-unmerged" }
 	| { status: "skipped-dirty" }
 	| { status: "dry-run" }
+	| { status: "orphan-cleaned" }
+	| { status: "orphan-skipped-dirty" }
+	| { status: "orphan-dry-run" }
 	| { status: "error"; message: string };
 
 export interface CleanupBranchReport {
@@ -45,91 +48,137 @@ export async function cleanupWorktrees(
 	}
 	const goneBranches = goneBranchesResult.data;
 
-	if (goneBranches.length === 0) {
-		return R.ok({ reports: [] });
-	}
-
-	const defaultBranchResult = await git.getDefaultBranch();
-	if (!defaultBranchResult.success) {
-		return R.err(new Error(defaultBranchResult.error.message));
-	}
-	const defaultBranch = defaultBranchResult.data;
-
-	const worktreesResult = await git.listWorktrees();
-	if (!worktreesResult.success) {
-		return R.err(new Error(worktreesResult.error.message));
-	}
-	const worktreeByBranch = new Map(worktreesResult.data.map((w) => [w.branch, w]));
-
 	const reports: CleanupBranchReport[] = [];
 
-	for (const branch of goneBranches) {
-		if (branch === defaultBranch) {
-			continue;
+	if (goneBranches.length > 0) {
+		const defaultBranchResult = await git.getDefaultBranch();
+		if (!defaultBranchResult.success) {
+			return R.err(new Error(defaultBranchResult.error.message));
 		}
+		const defaultBranch = defaultBranchResult.data;
 
-		const worktree = worktreeByBranch.get(branch);
-		const worktreePath = worktree?.path ?? null;
-
-		if (input.dryRun) {
-			reports.push({ branch, worktreePath, result: { status: "dry-run" } });
-			continue;
+		const worktreesResult = await git.listWorktrees();
+		if (!worktreesResult.success) {
+			return R.err(new Error(worktreesResult.error.message));
 		}
+		const worktreeByBranch = new Map(worktreesResult.data.map((w) => [w.branch, w]));
 
-		if (worktree) {
+		for (const branch of goneBranches) {
+			if (branch === defaultBranch) {
+				continue;
+			}
+
+			const worktree = worktreeByBranch.get(branch);
+			const worktreePath = worktree?.path ?? null;
+
+			if (input.dryRun) {
+				reports.push({ branch, worktreePath, result: { status: "dry-run" } });
+				continue;
+			}
+
+			if (worktree) {
+				const dirtyResult = await git.isDirty(worktree.path);
+				if (dirtyResult.success && dirtyResult.data && !input.force) {
+					reports.push({ branch, worktreePath, result: { status: "skipped-dirty" } });
+					continue;
+				}
+
+				const removeResult = await git.removeWorktree(worktree.path, { force: input.force });
+				if (!removeResult.success) {
+					reports.push({
+						branch,
+						worktreePath,
+						result: { status: "error", message: `Failed to remove worktree: ${removeResult.error.message}` },
+					});
+					continue;
+				}
+			}
+
+			const deleteResult = await git.deleteBranch(branch);
+
+			if (!deleteResult.success) {
+				if (deleteResult.error.code === "BRANCH_NOT_MERGED") {
+					const commitsAhead = await git.getCommitCount(defaultBranch, branch);
+					const hasUniqueCommits = !commitsAhead.success || commitsAhead.data > 0;
+
+					if (hasUniqueCommits && !input.force) {
+						reports.push({ branch, worktreePath, result: { status: "skipped-unmerged" } });
+						continue;
+					}
+
+					const forceResult = await git.deleteBranchForce(branch);
+					if (!forceResult.success) {
+						reports.push({
+							branch,
+							worktreePath,
+							result: { status: "error", message: forceResult.error.message },
+						});
+						continue;
+					}
+				} else {
+					reports.push({
+						branch,
+						worktreePath,
+						result: { status: "error", message: deleteResult.error.message },
+					});
+					continue;
+				}
+			}
+
+			reports.push({
+				branch,
+				worktreePath,
+				result: { status: worktree ? "cleaned" : "branch-only" },
+			});
+		}
+	}
+
+	// Second pass: detect orphaned worktrees (branch no longer exists locally)
+	const remainingResult = await git.listWorktrees();
+	if (remainingResult.success) {
+		for (const worktree of remainingResult.data) {
+			if (worktree.isMain) continue;
+
+			if (worktree.branch) {
+				const exists = await git.branchExists(worktree.branch);
+				if (!exists.success || exists.data) continue;
+			}
+
+			if (input.dryRun) {
+				reports.push({
+					branch: worktree.branch,
+					worktreePath: worktree.path,
+					result: { status: "orphan-dry-run" },
+				});
+				continue;
+			}
+
 			const dirtyResult = await git.isDirty(worktree.path);
 			if (dirtyResult.success && dirtyResult.data && !input.force) {
-				reports.push({ branch, worktreePath, result: { status: "skipped-dirty" } });
+				reports.push({
+					branch: worktree.branch,
+					worktreePath: worktree.path,
+					result: { status: "orphan-skipped-dirty" },
+				});
 				continue;
 			}
 
 			const removeResult = await git.removeWorktree(worktree.path, { force: input.force });
 			if (!removeResult.success) {
 				reports.push({
-					branch,
-					worktreePath,
-					result: { status: "error", message: `Failed to remove worktree: ${removeResult.error.message}` },
+					branch: worktree.branch,
+					worktreePath: worktree.path,
+					result: { status: "error", message: `Failed to remove orphaned worktree: ${removeResult.error.message}` },
 				});
 				continue;
 			}
+
+			reports.push({
+				branch: worktree.branch,
+				worktreePath: worktree.path,
+				result: { status: "orphan-cleaned" },
+			});
 		}
-
-		const deleteResult = await git.deleteBranch(branch);
-
-		if (!deleteResult.success) {
-			if (deleteResult.error.code === "BRANCH_NOT_MERGED") {
-				const commitsAhead = await git.getCommitCount(defaultBranch, branch);
-				const hasUniqueCommits = !commitsAhead.success || commitsAhead.data > 0;
-
-				if (hasUniqueCommits && !input.force) {
-					reports.push({ branch, worktreePath, result: { status: "skipped-unmerged" } });
-					continue;
-				}
-
-				const forceResult = await git.deleteBranchForce(branch);
-				if (!forceResult.success) {
-					reports.push({
-						branch,
-						worktreePath,
-						result: { status: "error", message: forceResult.error.message },
-					});
-					continue;
-				}
-			} else {
-				reports.push({
-					branch,
-					worktreePath,
-					result: { status: "error", message: deleteResult.error.message },
-				});
-				continue;
-			}
-		}
-
-		reports.push({
-			branch,
-			worktreePath,
-			result: { status: worktree ? "cleaned" : "branch-only" },
-		});
 	}
 
 	return R.ok({ reports });

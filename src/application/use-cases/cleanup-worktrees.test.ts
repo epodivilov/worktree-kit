@@ -23,11 +23,32 @@ describe("cleanupWorktrees", () => {
 		expect(output.reports[1]).toMatchObject({ branch: "feature-b", result: { status: "cleaned" } });
 	});
 
-	test("no gone branches — empty reports", async () => {
-		const git = createFakeGit({ worktrees: [mainWt, featureA], goneBranches: [] });
+	test("no gone branches and no orphans — empty reports", async () => {
+		const git = createFakeGit({
+			worktrees: [mainWt, featureA],
+			branches: ["main", "feature-a"],
+			goneBranches: [],
+		});
 		const output = expectOk(await cleanupWorktrees({ force: false, dryRun: false }, { git }));
 
 		expect(output.reports).toHaveLength(0);
+	});
+
+	test("no gone branches but orphaned worktree — orphan-cleaned", async () => {
+		const orphanWt: Worktree = { path: "/wt/orphan", branch: "deleted-branch", head: "ddd", isMain: false };
+		const git = createFakeGit({
+			worktrees: [mainWt, orphanWt],
+			branches: ["main"],
+			goneBranches: [],
+		});
+		const output = expectOk(await cleanupWorktrees({ force: false, dryRun: false }, { git }));
+
+		expect(output.reports).toHaveLength(1);
+		expect(output.reports[0]).toMatchObject({
+			branch: "deleted-branch",
+			worktreePath: "/wt/orphan",
+			result: { status: "orphan-cleaned" },
+		});
 	});
 
 	test("unmerged branch without --force — skipped", async () => {
@@ -72,6 +93,7 @@ describe("cleanupWorktrees", () => {
 	test("dirty worktree without --force — skipped", async () => {
 		const git = createFakeGit({
 			worktrees: [mainWt, featureA],
+			branches: ["main", "feature-a"],
 			goneBranches: ["feature-a"],
 			mergedBranches: ["feature-a"],
 			dirtyWorktrees: new Set(["/wt/feature-a"]),
@@ -97,6 +119,7 @@ describe("cleanupWorktrees", () => {
 	test("dry-run — reports candidates without deleting", async () => {
 		const git = createFakeGit({
 			worktrees: [mainWt, featureA],
+			branches: ["main", "feature-a"],
 			goneBranches: ["feature-a"],
 			mergedBranches: ["feature-a"],
 		});
@@ -114,7 +137,12 @@ describe("cleanupWorktrees", () => {
 	});
 
 	test("default branch is never cleaned", async () => {
-		const git = createFakeGit({ worktrees: [mainWt], goneBranches: ["main"], mergedBranches: ["main"] });
+		const git = createFakeGit({
+			worktrees: [mainWt],
+			branches: ["main"],
+			goneBranches: ["main"],
+			mergedBranches: ["main"],
+		});
 		const output = expectOk(await cleanupWorktrees({ force: false, dryRun: false }, { git }));
 
 		expect(output.reports).toHaveLength(0);
@@ -125,5 +153,127 @@ describe("cleanupWorktrees", () => {
 		const error = expectErr(await cleanupWorktrees({ force: false, dryRun: false }, { git }));
 
 		expect(error.message).toContain("Fetch failed");
+	});
+
+	test("orphaned worktree (branch deleted externally) — orphan-cleaned", async () => {
+		const orphanWt: Worktree = { path: "/wt/orphan", branch: "deleted-branch", head: "ddd", isMain: false };
+		const git = createFakeGit({
+			worktrees: [mainWt, featureA, orphanWt],
+			branches: ["main", "feature-a"],
+			goneBranches: ["feature-a"],
+			mergedBranches: ["feature-a"],
+		});
+		const output = expectOk(await cleanupWorktrees({ force: false, dryRun: false }, { git }));
+
+		expect(output.reports).toHaveLength(2);
+		expect(output.reports[0]).toMatchObject({ branch: "feature-a", result: { status: "cleaned" } });
+		expect(output.reports[1]).toMatchObject({
+			branch: "deleted-branch",
+			worktreePath: "/wt/orphan",
+			result: { status: "orphan-cleaned" },
+		});
+	});
+
+	test("dirty orphaned worktree without --force — orphan-skipped-dirty", async () => {
+		const orphanWt: Worktree = { path: "/wt/orphan", branch: "deleted-branch", head: "ddd", isMain: false };
+		const git = createFakeGit({
+			worktrees: [mainWt, orphanWt],
+			branches: ["main", "some-gone"],
+			goneBranches: ["some-gone"],
+			mergedBranches: ["some-gone"],
+			dirtyWorktrees: new Set(["/wt/orphan"]),
+		});
+		const output = expectOk(await cleanupWorktrees({ force: false, dryRun: false }, { git }));
+
+		expect(output.reports[1]).toMatchObject({
+			branch: "deleted-branch",
+			result: { status: "orphan-skipped-dirty" },
+		});
+	});
+
+	test("dirty orphaned worktree with --force — orphan-cleaned", async () => {
+		const orphanWt: Worktree = { path: "/wt/orphan", branch: "deleted-branch", head: "ddd", isMain: false };
+		const git = createFakeGit({
+			worktrees: [mainWt, orphanWt],
+			branches: ["main", "some-gone"],
+			goneBranches: ["some-gone"],
+			mergedBranches: ["some-gone"],
+			dirtyWorktrees: new Set(["/wt/orphan"]),
+		});
+		const output = expectOk(await cleanupWorktrees({ force: true, dryRun: false }, { git }));
+
+		expect(output.reports[1]).toMatchObject({
+			branch: "deleted-branch",
+			result: { status: "orphan-cleaned" },
+		});
+	});
+
+	test("orphaned worktree in dry-run — orphan-dry-run", async () => {
+		const orphanWt: Worktree = { path: "/wt/orphan", branch: "deleted-branch", head: "ddd", isMain: false };
+		const git = createFakeGit({
+			worktrees: [mainWt, featureA, orphanWt],
+			branches: ["main", "feature-a"],
+			goneBranches: ["feature-a"],
+			mergedBranches: ["feature-a"],
+		});
+		const output = expectOk(await cleanupWorktrees({ force: false, dryRun: true }, { git }));
+
+		const orphanReport = output.reports.find((r) => r.result.status === "orphan-dry-run");
+		expect(orphanReport).toMatchObject({
+			branch: "deleted-branch",
+			worktreePath: "/wt/orphan",
+		});
+
+		const remaining = await git.listWorktrees();
+		expect(remaining.success && remaining.data).toHaveLength(3);
+	});
+
+	test("detached HEAD worktree — orphan-cleaned", async () => {
+		const detachedWt: Worktree = { path: "/wt/detached", branch: "", head: "ddd", isMain: false };
+		const git = createFakeGit({
+			worktrees: [mainWt, detachedWt],
+			branches: ["main"],
+			goneBranches: [],
+		});
+		const output = expectOk(await cleanupWorktrees({ force: false, dryRun: false }, { git }));
+
+		expect(output.reports).toHaveLength(1);
+		expect(output.reports[0]).toMatchObject({
+			branch: "",
+			worktreePath: "/wt/detached",
+			result: { status: "orphan-cleaned" },
+		});
+	});
+
+	test("dirty detached HEAD worktree without --force — orphan-skipped-dirty", async () => {
+		const detachedWt: Worktree = { path: "/wt/detached", branch: "", head: "ddd", isMain: false };
+		const git = createFakeGit({
+			worktrees: [mainWt, detachedWt],
+			branches: ["main"],
+			goneBranches: [],
+			dirtyWorktrees: new Set(["/wt/detached"]),
+		});
+		const output = expectOk(await cleanupWorktrees({ force: false, dryRun: false }, { git }));
+
+		expect(output.reports).toHaveLength(1);
+		expect(output.reports[0]).toMatchObject({
+			branch: "",
+			worktreePath: "/wt/detached",
+			result: { status: "orphan-skipped-dirty" },
+		});
+	});
+
+	test("main worktree is never treated as orphan", async () => {
+		const weirdMain: Worktree = { path: "/repo", branch: "weird", head: "aaa", isMain: true };
+		const git = createFakeGit({
+			worktrees: [weirdMain],
+			branches: ["main", "some-branch"],
+			goneBranches: ["some-branch"],
+			mergedBranches: ["some-branch"],
+		});
+		const output = expectOk(await cleanupWorktrees({ force: false, dryRun: false }, { git }));
+
+		expect(output.reports).toHaveLength(1);
+		expect(output.reports[0]).toMatchObject({ branch: "some-branch", result: { status: "branch-only" } });
 	});
 });

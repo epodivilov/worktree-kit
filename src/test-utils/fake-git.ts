@@ -73,7 +73,7 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 			if (!isRepo) {
 				return Result.err({ code: "NOT_A_REPO", message: "Not inside a git repository" });
 			}
-			return Result.ok([...branchStore]);
+			return Result.ok(branchStore.filter((b) => !deletedBranches.has(b)));
 		},
 
 		async listRemoteBranches(): Promise<Result<string[], GitError>> {
@@ -91,7 +91,7 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 		},
 
 		async branchExists(branch: string): Promise<Result<boolean, GitError>> {
-			return Result.ok(store.some((w) => w.branch === branch));
+			return Result.ok(branchStore.includes(branch) && !deletedBranches.has(branch));
 		},
 
 		async createWorktree(branch: string, path: string, _baseBranch?: string): Promise<Result<Worktree, GitError>> {
@@ -122,8 +122,7 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 		},
 
 		async deleteBranch(branch: string): Promise<Result<void, GitError>> {
-			const branchExists = branchStore.includes(branch) || store.some((w) => w.branch === branch);
-			if (!branchExists || deletedBranches.has(branch)) {
+			if (!branchStore.includes(branch) || deletedBranches.has(branch)) {
 				return Result.err({ code: "BRANCH_NOT_FOUND", message: `Branch "${branch}" not found` });
 			}
 			if (!mergedBranchStore.has(branch)) {
@@ -239,8 +238,7 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 		},
 
 		async deleteBranchForce(branch: string): Promise<Result<void, GitError>> {
-			const branchExists = branchStore.includes(branch) || store.some((w) => w.branch === branch);
-			if (!branchExists || deletedBranches.has(branch)) {
+			if (!branchStore.includes(branch) || deletedBranches.has(branch)) {
 				return Result.err({ code: "BRANCH_NOT_FOUND", message: `Branch "${branch}" not found` });
 			}
 			deletedBranches.add(branch);
