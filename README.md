@@ -141,6 +141,10 @@ List all worktrees in the repository.
 wt list
 ```
 
+| Flag | Description |
+|------|-------------|
+| `--json` | Output as JSON array |
+
 Output shows each worktree with its path. Badges: `(main)` for the main worktree, `(current)` for the active one.
 
 ### `wt remove`
@@ -236,6 +240,8 @@ After each successful rebase, `post-update` hooks are executed for that branch. 
   }
 }
 ```
+
+After update completes, if any worktrees have branches that were deleted on the remote, an interactive prompt offers to clean them up.
 
 ### `wt cleanup`
 
