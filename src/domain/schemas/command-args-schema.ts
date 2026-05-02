@@ -21,6 +21,7 @@ export type RemoveArgs = v.InferOutput<typeof RemoveArgsSchema>;
 export const UpdateArgsSchema = v.object({
 	branch: v.optional(v.string()),
 	"dry-run": v.optional(v.boolean(), false),
+	cleanup: v.optional(v.boolean(), false),
 });
 
 export type UpdateArgs = v.InferOutput<typeof UpdateArgsSchema>;

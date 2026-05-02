@@ -147,7 +147,7 @@ export async function updateWorktrees(
 	}
 	const defaultBranch = defaultBranchResult.data;
 
-	const fetchResult = await git.fetchAll();
+	const fetchResult = await git.fetchPrune();
 	if (!fetchResult.success) {
 		return R.err(new Error(`Fetch failed: ${fetchResult.error.message}`));
 	}

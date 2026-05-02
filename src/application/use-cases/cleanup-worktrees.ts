@@ -4,6 +4,8 @@ import { Result as R, type Result } from "../../shared/result.ts";
 export interface CleanupWorktreesInput {
 	force: boolean;
 	dryRun: boolean;
+	skipFetch?: boolean;
+	skipOrphans?: boolean;
 }
 
 export type CleanupBranchStatus =
@@ -37,9 +39,11 @@ export async function cleanupWorktrees(
 ): Promise<Result<CleanupWorktreesOutput, Error>> {
 	const { git } = deps;
 
-	const fetchResult = await git.fetchPrune();
-	if (!fetchResult.success) {
-		return R.err(new Error(`Fetch failed: ${fetchResult.error.message}`));
+	if (!input.skipFetch) {
+		const fetchResult = await git.fetchPrune();
+		if (!fetchResult.success) {
+			return R.err(new Error(`Fetch failed: ${fetchResult.error.message}`));
+		}
 	}
 
 	const goneBranchesResult = await git.listGoneBranches();
@@ -134,8 +138,8 @@ export async function cleanupWorktrees(
 	}
 
 	// Second pass: detect orphaned worktrees (branch no longer exists locally)
-	const remainingResult = await git.listWorktrees();
-	if (remainingResult.success) {
+	const remainingResult = input.skipOrphans ? null : await git.listWorktrees();
+	if (remainingResult?.success) {
 		for (const worktree of remainingResult.data) {
 			if (worktree.isMain) continue;
 
