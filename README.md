@@ -351,6 +351,23 @@ Example — override hooks locally without modifying the shared config:
 }
 ```
 
+### Global Config
+
+Create `~/.config/worktree-kit/config.jsonc` to set defaults shared across all your repositories. Uses the same schema as repo config (all fields optional).
+
+```jsonc
+{
+  "defaultBase": "current",
+  "hooks": {
+    "post-create": ["bun install"]
+  }
+}
+```
+
+Respects `$XDG_CONFIG_HOME` — if set, loads from `$XDG_CONFIG_HOME/worktree-kit/config.jsonc` instead.
+
+**Merge order:** global → repo (`.worktreekit.jsonc`) → local (`.worktreekit.local.jsonc`). Each layer overrides the previous one. Objects are deep-merged, arrays are replaced entirely. Missing global config is silently ignored.
+
 ### Copy vs Symlinks
 
 Both `copy` and `symlinks` support exact paths, glob patterns, and `!` negation patterns. The difference is how files end up in the worktree:
