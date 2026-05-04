@@ -168,6 +168,40 @@ describe("loadConfig", () => {
 		expect(config.copy).toEqual([".env.repo"]);
 	});
 
+	test("returns raw per-layer overrides", async () => {
+		const global = JSON.stringify({ defaultBase: "default", copy: [".env.global"] });
+		const repo = JSON.stringify({ rootDir: "../wt", copy: [".env.repo"] });
+		const local = JSON.stringify({ defaultBase: "current" });
+		const fs = createFakeFilesystem({
+			files: {
+				[GLOBAL_CONFIG_PATH]: global,
+				[CONFIG_PATH]: repo,
+				[LOCAL_CONFIG_PATH]: local,
+			},
+		});
+		const git = createFakeGit({ root: ROOT });
+
+		const result = await loadConfig({ fs, git, globalConfigPath: GLOBAL_CONFIG_PATH });
+		const { globalOverrides, repoOverrides, localOverrides } = expectOk(result);
+
+		expect(globalOverrides).toEqual({ defaultBase: "default", copy: [".env.global"] });
+		expect(repoOverrides).toEqual({ rootDir: "../wt", copy: [".env.repo"] });
+		expect(localOverrides).toEqual({ defaultBase: "current" });
+	});
+
+	test("returns null overrides when global and local configs are absent", async () => {
+		const repo = JSON.stringify({ rootDir: "../wt" });
+		const fs = createFakeFilesystem({ files: { [CONFIG_PATH]: repo } });
+		const git = createFakeGit({ root: ROOT });
+
+		const result = await loadConfig({ fs, git, globalConfigPath: GLOBAL_CONFIG_PATH });
+		const { globalOverrides, repoOverrides, localOverrides } = expectOk(result);
+
+		expect(globalOverrides).toBeNull();
+		expect(repoOverrides).toEqual({ rootDir: "../wt" });
+		expect(localOverrides).toBeNull();
+	});
+
 	test("merges global, repo, and local in correct order", async () => {
 		const global = JSON.stringify({
 			defaultBase: "default",

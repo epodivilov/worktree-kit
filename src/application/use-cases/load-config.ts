@@ -16,12 +16,17 @@ import { Result as R } from "../../shared/result.ts";
 import { stripTrailingCommas } from "../../shared/strip-trailing-commas.ts";
 import { resolveGlobalConfigPath } from "../../shared/xdg-paths.ts";
 
+export type PartialOverrides = Omit<PartialWorktreeConfigInput, "$schema">;
+
 export interface LoadConfigOutput {
 	config: WorktreeConfig;
 	configPath: string;
 	localConfigPath: string | null;
 	globalConfigPath: string | null;
 	isLegacyConfig: boolean;
+	globalOverrides: PartialOverrides | null;
+	repoOverrides: PartialOverrides;
+	localOverrides: PartialOverrides | null;
 }
 
 export interface LoadConfigDeps {
@@ -29,8 +34,6 @@ export interface LoadConfigDeps {
 	git: GitPort;
 	globalConfigPath?: string;
 }
-
-type PartialOverrides = Omit<PartialWorktreeConfigInput, "$schema">;
 
 function parsePartialConfig(content: string, path: string, label: string): Result<PartialOverrides, Error> {
 	let raw: unknown;
@@ -113,6 +116,12 @@ export async function loadConfig(deps: LoadConfigDeps): Promise<Result<LoadConfi
 		return R.err(new Error(`Invalid JSONC in ${actualPath}`));
 	}
 
+	const repoOverridesResult = parsePartialConfig(readResult.data, actualPath, "repo");
+	if (!repoOverridesResult.success) {
+		return R.err(repoOverridesResult.error);
+	}
+	const repoOverrides = repoOverridesResult.data;
+
 	let mergedRaw: unknown = raw;
 	if (globalOverrides && raw !== null && typeof raw === "object" && !Array.isArray(raw)) {
 		mergedRaw = deepMerge(globalOverrides as Record<string, unknown>, raw as Record<string, unknown>);
@@ -126,6 +135,7 @@ export async function loadConfig(deps: LoadConfigDeps): Promise<Result<LoadConfi
 
 	let config: WorktreeConfig = parseResult.output;
 	let localConfigPath: string | null = null;
+	let localOverrides: PartialOverrides | null = null;
 
 	const localPath = join(rootResult.data, LOCAL_CONFIG_FILENAME);
 	if (await fs.exists(localPath)) {
@@ -135,7 +145,17 @@ export async function loadConfig(deps: LoadConfigDeps): Promise<Result<LoadConfi
 		}
 		config = deepMerge(config, localResult.data);
 		localConfigPath = localPath;
+		localOverrides = localResult.data;
 	}
 
-	return R.ok({ config, configPath: actualPath, localConfigPath, globalConfigPath, isLegacyConfig });
+	return R.ok({
+		config,
+		configPath: actualPath,
+		localConfigPath,
+		globalConfigPath,
+		isLegacyConfig,
+		globalOverrides,
+		repoOverrides,
+		localOverrides,
+	});
 }

@@ -271,6 +271,20 @@ wt cleanup --dry-run
 
 Runs `git fetch --prune`, finds branches with gone remotes, shows candidates, and asks for confirmation. Skips dirty worktrees and unmerged branches unless `--force` is used.
 
+### `wt config show`
+
+Print the effective configuration after merging all layers, with the source of each field.
+
+```bash
+wt config show [options]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--json` | Output as JSON (for scripts and AI agents) |
+
+Each field shows its origin: `global`, `repo`, `local`, or `default`. The sources header lists all config file paths (or hints where to create missing ones).
+
 ## Exit codes
 
 | Code | Meaning |

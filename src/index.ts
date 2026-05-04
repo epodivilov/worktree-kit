@@ -1,6 +1,7 @@
 import { defineCommand, runMain } from "citty";
 import pkg from "../package.json";
 import { cleanupCommand } from "./cli/commands/cleanup.ts";
+import { configCommand } from "./cli/commands/config.ts";
 import { createCommand } from "./cli/commands/create.ts";
 import { initCommand } from "./cli/commands/init.ts";
 import { listCommand } from "./cli/commands/list.ts";
@@ -45,6 +46,7 @@ const main = defineCommand({
 		"self-update": selfUpdateCommand(container),
 		init: initCommand(container),
 		cleanup: cleanupCommand(container),
+		config: configCommand(container),
 	}),
 });
 
