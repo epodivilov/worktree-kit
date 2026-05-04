@@ -1,4 +1,5 @@
 import type { DefaultBase } from "../domain/entities/config.ts";
+import type { Worktree } from "../domain/entities/worktree.ts";
 import type { GitPort } from "../domain/ports/git-port.ts";
 import type { UiPort } from "../domain/ports/ui-port.ts";
 import { Result } from "../shared/result.ts";
@@ -181,21 +182,30 @@ export async function resolveBaseBranch(
 
 // --- remove command ---
 
-export async function resolveBranchesToRemove(
+export async function resolveWorktreesToRemove(
 	flag: string | undefined,
 	deps: { ui: UiPort; git: GitPort },
-): Promise<string[]> {
-	if (flag) return [flag];
-
+): Promise<Worktree[]> {
 	const { ui, git } = deps;
-
-	if (ui.nonInteractive) {
-		throw new CommandError("Branch name is required in non-interactive mode");
-	}
 
 	const worktreesResult = await git.listWorktrees();
 	if (Result.isErr(worktreesResult)) {
 		throw new CommandError(worktreesResult.error.message, EXIT_FAILURE);
+	}
+
+	if (flag) {
+		const match = worktreesResult.data.find((w) => w.branch === flag || w.path === flag);
+		if (!match) {
+			throw new CommandError(`Worktree "${flag}" not found`, EXIT_FAILURE);
+		}
+		if (match.isMain) {
+			throw new CommandError("Cannot remove the main worktree", EXIT_FAILURE);
+		}
+		return [match];
+	}
+
+	if (ui.nonInteractive) {
+		throw new CommandError("Branch name is required in non-interactive mode");
 	}
 
 	const removable = worktreesResult.data.filter((w) => !w.isMain);
@@ -206,13 +216,18 @@ export async function resolveBranchesToRemove(
 		process.exit(EXIT_SUCCESS);
 	}
 
-	const options = removable.map((w) => ({
-		value: w.branch,
-		label: w.branch,
-		hint: w.path,
-	}));
+	const options = removable.map((w) => {
+		const label = w.branch ? w.branch : `<detached> (${w.path})`;
+		const hintParts = [w.path];
+		if (w.isPrunable) hintParts.push("(missing)");
+		return {
+			value: w.path,
+			label,
+			hint: hintParts.join(" "),
+		};
+	});
 
-	const selected = unwrapOrCancel(
+	const selectedPaths = unwrapOrCancel(
 		ui,
 		await ui.multiselect<string>({
 			message: "Select worktrees to remove",
@@ -221,7 +236,11 @@ export async function resolveBranchesToRemove(
 		}),
 	);
 
-	return selected;
+	return selectedPaths.map((path) => {
+		const wt = removable.find((w) => w.path === path);
+		if (!wt) throw new CommandError(`Worktree "${path}" not found`, EXIT_FAILURE);
+		return wt;
+	});
 }
 
 export async function resolveDeleteRemoteBranch(

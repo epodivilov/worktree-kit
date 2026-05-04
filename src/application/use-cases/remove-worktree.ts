@@ -1,14 +1,16 @@
+import type { Worktree } from "../../domain/entities/worktree.ts";
 import type { GitPort } from "../../domain/ports/git-port.ts";
 import type { Result } from "../../shared/result.ts";
 import { Result as R } from "../../shared/result.ts";
 
 export interface RemoveWorktreeInput {
-	branch: string;
+	worktree: Worktree;
 	force?: boolean;
 }
 
 export interface RemoveWorktreeOutput {
 	removedPath: string;
+	pruned: boolean;
 }
 
 export interface RemoveWorktreeDeps {
@@ -20,19 +22,18 @@ export async function removeWorktree(
 	deps: RemoveWorktreeDeps,
 ): Promise<Result<RemoveWorktreeOutput, Error>> {
 	const { git } = deps;
-
-	const listResult = await git.listWorktrees();
-	if (!listResult.success) {
-		return R.err(new Error(`Failed to list worktrees: ${listResult.error.message}`));
-	}
-
-	const worktree = listResult.data.find((w) => w.branch === input.branch);
-	if (!worktree) {
-		return R.err(new Error(`Worktree for branch "${input.branch}" not found`));
-	}
+	const { worktree } = input;
 
 	if (worktree.isMain) {
 		return R.err(new Error("Cannot remove the main worktree"));
+	}
+
+	if (worktree.isPrunable) {
+		const pruneResult = await git.pruneWorktree(worktree.path);
+		if (!pruneResult.success) {
+			return R.err(new Error(`Failed to prune worktree: ${pruneResult.error.message}`));
+		}
+		return R.ok({ removedPath: worktree.path, pruned: true });
 	}
 
 	const removeResult = await git.removeWorktree(worktree.path, { force: input.force });
@@ -40,5 +41,5 @@ export async function removeWorktree(
 		return R.err(new Error(`Failed to remove worktree: ${removeResult.error.message}`));
 	}
 
-	return R.ok({ removedPath: worktree.path });
+	return R.ok({ removedPath: worktree.path, pruned: false });
 }

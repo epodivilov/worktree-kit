@@ -118,6 +118,126 @@ describe("BunGitAdapter", () => {
 				const detached = worktrees.find((w) => !w.isMain && w.branch === "");
 				expect(detached).toBeDefined();
 				expect(detached?.head).toMatch(/^[a-f0-9]{40}$/);
+				expect(detached?.isPrunable).toBe(false);
+			} finally {
+				process.chdir(originalCwd);
+			}
+		});
+
+		test("flags worktree whose directory was deleted as prunable", async () => {
+			await using tmp = await createTempDir();
+			const repoPath = await initTestRepo(tmp.path);
+			const wtPath = join(tmp.path, "orphan-wt");
+			await Bun.$`git -C ${repoPath} worktree add ${wtPath} -b orphan`.quiet();
+			await Bun.$`rm -rf ${wtPath}`.quiet();
+
+			const originalCwd = process.cwd();
+			process.chdir(repoPath);
+			try {
+				const worktrees = expectOk(await git.listWorktrees());
+				const orphan = worktrees.find((w) => w.branch === "orphan");
+				expect(orphan).toBeDefined();
+				expect(orphan?.isPrunable).toBe(true);
+				expect(orphan?.prunableReason).toBeDefined();
+			} finally {
+				process.chdir(originalCwd);
+			}
+		});
+	});
+
+	describe("pruneWorktree", () => {
+		test("removes admin record of the targeted prunable worktree", async () => {
+			await using tmp = await createTempDir();
+			const repoPath = await initTestRepo(tmp.path);
+			const wtPath = join(tmp.path, "to-prune");
+			await Bun.$`git -C ${repoPath} worktree add ${wtPath} -b prunable-branch`.quiet();
+			await Bun.$`rm -rf ${wtPath}`.quiet();
+
+			const originalCwd = process.cwd();
+			process.chdir(repoPath);
+			try {
+				expectOk(await git.pruneWorktree(wtPath));
+				const worktrees = expectOk(await git.listWorktrees());
+				expect(worktrees.find((w) => w.branch === "prunable-branch")).toBeUndefined();
+				expect(worktrees).toHaveLength(1);
+			} finally {
+				process.chdir(originalCwd);
+			}
+		});
+
+		test("does not affect other prunable worktrees", async () => {
+			await using tmp = await createTempDir();
+			const repoPath = await initTestRepo(tmp.path);
+			const wtPathA = join(tmp.path, "orphan-a");
+			const wtPathB = join(tmp.path, "orphan-b");
+			await Bun.$`git -C ${repoPath} worktree add ${wtPathA} -b orphan-a`.quiet();
+			await Bun.$`git -C ${repoPath} worktree add ${wtPathB} -b orphan-b`.quiet();
+			await Bun.$`rm -rf ${wtPathA}`.quiet();
+			await Bun.$`rm -rf ${wtPathB}`.quiet();
+
+			const originalCwd = process.cwd();
+			process.chdir(repoPath);
+			try {
+				expectOk(await git.pruneWorktree(wtPathA));
+				const worktrees = expectOk(await git.listWorktrees());
+				expect(worktrees.find((w) => w.branch === "orphan-a")).toBeUndefined();
+				const orphanB = worktrees.find((w) => w.branch === "orphan-b");
+				expect(orphanB).toBeDefined();
+				expect(orphanB?.isPrunable).toBe(true);
+			} finally {
+				process.chdir(originalCwd);
+			}
+		});
+
+		test("works when invoked from inside a linked worktree", async () => {
+			await using tmp = await createTempDir();
+			const repoPath = await initTestRepo(tmp.path);
+			const linkedPath = join(tmp.path, "linked");
+			const orphanPath = join(tmp.path, "orphan");
+			await Bun.$`git -C ${repoPath} worktree add ${linkedPath} -b linked`.quiet();
+			await Bun.$`git -C ${repoPath} worktree add ${orphanPath} -b orphan`.quiet();
+			await Bun.$`rm -rf ${orphanPath}`.quiet();
+
+			const originalCwd = process.cwd();
+			process.chdir(linkedPath);
+			try {
+				expectOk(await git.pruneWorktree(orphanPath));
+				const worktrees = expectOk(await git.listWorktrees());
+				expect(worktrees.find((w) => w.branch === "orphan")).toBeUndefined();
+				expect(worktrees.find((w) => w.branch === "linked")).toBeDefined();
+			} finally {
+				process.chdir(originalCwd);
+			}
+		});
+
+		test("returns error for unknown path", async () => {
+			await using tmp = await createTempDir();
+			const repoPath = await initTestRepo(tmp.path);
+
+			const originalCwd = process.cwd();
+			process.chdir(repoPath);
+			try {
+				const error = expectErr(await git.pruneWorktree("/nonexistent/orphan"));
+				expect(error.code).toBe("UNKNOWN");
+			} finally {
+				process.chdir(originalCwd);
+			}
+		});
+
+		test("refuses to prune when working tree directory still exists", async () => {
+			await using tmp = await createTempDir();
+			const repoPath = await initTestRepo(tmp.path);
+			const wtPath = join(tmp.path, "healthy");
+			await Bun.$`git -C ${repoPath} worktree add ${wtPath} -b healthy`.quiet();
+
+			const originalCwd = process.cwd();
+			process.chdir(repoPath);
+			try {
+				const error = expectErr(await git.pruneWorktree(wtPath));
+				expect(error.code).toBe("UNKNOWN");
+				expect(error.message).toContain("still exists");
+				const worktrees = expectOk(await git.listWorktrees());
+				expect(worktrees.find((w) => w.branch === "healthy")).toBeDefined();
 			} finally {
 				process.chdir(originalCwd);
 			}

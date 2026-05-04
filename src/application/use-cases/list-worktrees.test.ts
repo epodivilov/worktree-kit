@@ -15,8 +15,8 @@ describe("listWorktrees", () => {
 
 	test("returns all worktrees from git port", async () => {
 		const existing: Worktree[] = [
-			{ path: "/repo", branch: "main", head: "abc", isMain: true },
-			{ path: "/repo-feature", branch: "feature", head: "def", isMain: false },
+			{ path: "/repo", branch: "main", head: "abc", isMain: true, isPrunable: false },
+			{ path: "/repo-feature", branch: "feature", head: "def", isMain: false, isPrunable: false },
 		];
 		const git = createFakeGit({ worktrees: existing });
 		const result = await listWorktrees({ git });

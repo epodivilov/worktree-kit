@@ -5,37 +5,92 @@ import { createFakeGit } from "../../test-utils/fake-git.ts";
 import { removeWorktree } from "./remove-worktree.ts";
 
 describe("removeWorktree", () => {
-	const worktrees: Worktree[] = [
-		{ path: "/repo", branch: "main", head: "abc", isMain: true },
-		{ path: "/repo-feature", branch: "feature", head: "def", isMain: false },
-	];
+	const main: Worktree = { path: "/repo", branch: "main", head: "abc", isMain: true, isPrunable: false };
+	const feature: Worktree = {
+		path: "/repo-feature",
+		branch: "feature",
+		head: "def",
+		isMain: false,
+		isPrunable: false,
+	};
 
-	test("removes worktree by branch name and returns removed path", async () => {
-		const git = createFakeGit({ worktrees: [...worktrees] });
-		const result = await removeWorktree({ branch: "feature" }, { git });
+	test("removes healthy worktree by path and returns removed path", async () => {
+		const git = createFakeGit({ worktrees: [main, feature] });
+		const result = await removeWorktree({ worktree: feature }, { git });
 
-		const { removedPath } = expectOk(result);
-		expect(removedPath).toBe("/repo-feature");
-	});
+		const output = expectOk(result);
+		expect(output.removedPath).toBe("/repo-feature");
+		expect(output.pruned).toBe(false);
 
-	test("returns error when branch not found", async () => {
-		const git = createFakeGit({ worktrees: [...worktrees] });
-		const result = await removeWorktree({ branch: "nonexistent" }, { git });
-
-		expectErr(result);
+		const remaining = expectOk(await git.listWorktrees());
+		expect(remaining.find((w) => w.path === "/repo-feature")).toBeUndefined();
 	});
 
 	test("returns error when trying to remove main worktree", async () => {
-		const git = createFakeGit({ worktrees: [...worktrees] });
-		const result = await removeWorktree({ branch: "main" }, { git });
+		const git = createFakeGit({ worktrees: [main, feature] });
+		const result = await removeWorktree({ worktree: main }, { git });
 
 		expectErr(result);
 	});
 
-	test("returns error when not in a git repository", async () => {
-		const git = createFakeGit({ isRepo: false });
-		const result = await removeWorktree({ branch: "feature" }, { git });
+	test("prunes orphaned worktree with branch", async () => {
+		const orphan: Worktree = {
+			path: "/repo-orphan",
+			branch: "orphan-branch",
+			head: "ddd",
+			isMain: false,
+			isPrunable: true,
+			prunableReason: "gitdir file points to non-existent location",
+		};
+		const git = createFakeGit({ worktrees: [main, orphan] });
 
-		expectErr(result);
+		const result = await removeWorktree({ worktree: orphan }, { git });
+		const output = expectOk(result);
+		expect(output.removedPath).toBe("/repo-orphan");
+		expect(output.pruned).toBe(true);
+
+		const remaining = expectOk(await git.listWorktrees());
+		expect(remaining.find((w) => w.path === "/repo-orphan")).toBeUndefined();
+	});
+
+	test("prunes orphaned detached-HEAD worktree (empty branch)", async () => {
+		const orphan: Worktree = {
+			path: "/repo-detached",
+			branch: "",
+			head: "eee",
+			isMain: false,
+			isPrunable: true,
+		};
+		const git = createFakeGit({ worktrees: [main, orphan] });
+
+		const result = await removeWorktree({ worktree: orphan }, { git });
+		const output = expectOk(result);
+		expect(output.removedPath).toBe("/repo-detached");
+		expect(output.pruned).toBe(true);
+	});
+
+	test("pruning one orphan does not affect other orphans", async () => {
+		const orphanA: Worktree = {
+			path: "/repo-orphan-a",
+			branch: "orphan-a",
+			head: "aaa",
+			isMain: false,
+			isPrunable: true,
+		};
+		const orphanB: Worktree = {
+			path: "/repo-orphan-b",
+			branch: "orphan-b",
+			head: "bbb",
+			isMain: false,
+			isPrunable: true,
+		};
+		const git = createFakeGit({ worktrees: [main, orphanA, orphanB] });
+
+		const result = await removeWorktree({ worktree: orphanA }, { git });
+		expectOk(result);
+
+		const remaining = expectOk(await git.listWorktrees());
+		expect(remaining.find((w) => w.path === "/repo-orphan-a")).toBeUndefined();
+		expect(remaining.find((w) => w.path === "/repo-orphan-b")).toBeDefined();
 	});
 });

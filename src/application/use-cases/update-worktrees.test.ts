@@ -5,9 +5,9 @@ import { createFakeGit } from "../../test-utils/fake-git.ts";
 import { createFakeShell } from "../../test-utils/fake-shell.ts";
 import { updateWorktrees } from "./update-worktrees.ts";
 
-const mainWt: Worktree = { path: "/repo", branch: "main", head: "aaa", isMain: true };
-const featureA: Worktree = { path: "/repo-a", branch: "feature-a", head: "bbb", isMain: false };
-const featureB: Worktree = { path: "/repo-b", branch: "feature-b", head: "ccc", isMain: false };
+const mainWt: Worktree = { path: "/repo", branch: "main", head: "aaa", isMain: true, isPrunable: false };
+const featureA: Worktree = { path: "/repo-a", branch: "feature-a", head: "bbb", isMain: false, isPrunable: false };
+const featureB: Worktree = { path: "/repo-b", branch: "feature-b", head: "ccc", isMain: false, isPrunable: false };
 
 function flatBranchesConfig(worktrees: Worktree[]) {
 	const nonDefault = worktrees.filter((w) => w.branch && w.branch !== "main");
@@ -137,7 +137,7 @@ describe("updateWorktrees", () => {
 	});
 
 	test("detached HEAD worktree — silently skipped", async () => {
-		const detached: Worktree = { path: "/repo-detached", branch: "", head: "ddd", isMain: false };
+		const detached: Worktree = { path: "/repo-detached", branch: "", head: "ddd", isMain: false, isPrunable: false };
 		const git = createFakeGit({ worktrees: [mainWt, detached, featureA] });
 		const result = await updateWorktrees({ dryRun: false }, { git });
 
@@ -153,9 +153,9 @@ describe("updateWorktrees — parent detection", () => {
 	// feat-a:        C — D — E
 	// feat-sub:              E — F — G
 	function chainConfig() {
-		const main: Worktree = { path: "/repo", branch: "main", head: "aaa", isMain: true };
-		const featA: Worktree = { path: "/repo-a", branch: "feat-a", head: "eee", isMain: false };
-		const featSub: Worktree = { path: "/repo-sub", branch: "feat-sub", head: "ggg", isMain: false };
+		const main: Worktree = { path: "/repo", branch: "main", head: "aaa", isMain: true, isPrunable: false };
+		const featA: Worktree = { path: "/repo-a", branch: "feat-a", head: "eee", isMain: false, isPrunable: false };
+		const featSub: Worktree = { path: "/repo-sub", branch: "feat-sub", head: "ggg", isMain: false, isPrunable: false };
 
 		const mergeBaseMap = new Map([
 			["feat-a:main", "aaa"],
@@ -257,9 +257,9 @@ describe("updateWorktrees — parent detection", () => {
 
 describe("updateWorktrees — fresh branch (zero commits from default)", () => {
 	test("fresh branch with no own commits — parent is defaultBranch, not another worktree", async () => {
-		const main: Worktree = { path: "/repo", branch: "main", head: "aaa", isMain: true };
-		const featA: Worktree = { path: "/repo-a", branch: "feat-a", head: "ddd", isMain: false };
-		const fresh: Worktree = { path: "/repo-fresh", branch: "fresh", head: "aaa", isMain: false };
+		const main: Worktree = { path: "/repo", branch: "main", head: "aaa", isMain: true, isPrunable: false };
+		const featA: Worktree = { path: "/repo-a", branch: "feat-a", head: "ddd", isMain: false, isPrunable: false };
+		const fresh: Worktree = { path: "/repo-fresh", branch: "fresh", head: "aaa", isMain: false, isPrunable: false };
 
 		const mergeBaseMap = new Map([
 			["fresh:main", "aaa"],
@@ -300,8 +300,8 @@ describe("updateWorktrees — no main worktree", () => {
 	});
 
 	test("chain without main worktree — correct parent detection", async () => {
-		const featA: Worktree = { path: "/repo-a", branch: "feat-a", head: "eee", isMain: false };
-		const featSub: Worktree = { path: "/repo-sub", branch: "feat-sub", head: "ggg", isMain: false };
+		const featA: Worktree = { path: "/repo-a", branch: "feat-a", head: "eee", isMain: false, isPrunable: false };
+		const featSub: Worktree = { path: "/repo-sub", branch: "feat-sub", head: "ggg", isMain: false, isPrunable: false };
 
 		const mergeBaseMap = new Map([
 			["feat-a:main", "aaa"],
@@ -332,10 +332,10 @@ describe("updateWorktrees — no main worktree", () => {
 
 describe("updateWorktrees — branch filter", () => {
 	function chainWithSiblingConfig() {
-		const main: Worktree = { path: "/repo", branch: "main", head: "aaa", isMain: true };
-		const featA: Worktree = { path: "/repo-a", branch: "feat-a", head: "eee", isMain: false };
-		const featSub: Worktree = { path: "/repo-sub", branch: "feat-sub", head: "ggg", isMain: false };
-		const featB: Worktree = { path: "/repo-b", branch: "feat-b", head: "hhh", isMain: false };
+		const main: Worktree = { path: "/repo", branch: "main", head: "aaa", isMain: true, isPrunable: false };
+		const featA: Worktree = { path: "/repo-a", branch: "feat-a", head: "eee", isMain: false, isPrunable: false };
+		const featSub: Worktree = { path: "/repo-sub", branch: "feat-sub", head: "ggg", isMain: false, isPrunable: false };
+		const featB: Worktree = { path: "/repo-b", branch: "feat-b", head: "hhh", isMain: false, isPrunable: false };
 
 		const mergeBaseMap = new Map([
 			["feat-a:main", "aaa"],
@@ -484,9 +484,9 @@ describe("updateWorktrees — post-update hooks", () => {
 	});
 
 	test("passes baseBranch (parent) in hook context", async () => {
-		const main: Worktree = { path: "/repo", branch: "main", head: "aaa", isMain: true };
-		const featA: Worktree = { path: "/repo-a", branch: "feat-a", head: "eee", isMain: false };
-		const featSub: Worktree = { path: "/repo-sub", branch: "feat-sub", head: "ggg", isMain: false };
+		const main: Worktree = { path: "/repo", branch: "main", head: "aaa", isMain: true, isPrunable: false };
+		const featA: Worktree = { path: "/repo-a", branch: "feat-a", head: "eee", isMain: false, isPrunable: false };
+		const featSub: Worktree = { path: "/repo-sub", branch: "feat-sub", head: "ggg", isMain: false, isPrunable: false };
 
 		const mergeBaseMap = new Map([
 			["feat-a:main", "aaa"],

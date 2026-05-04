@@ -10,8 +10,14 @@ const ROOT = "/fake/project";
 const CONFIG_PATH = `${ROOT}/${CONFIG_FILENAME}`;
 const ROOT_DIR = "/fake/worktrees";
 
-const mainWt: Worktree = { path: ROOT, branch: "main", head: "aaa", isMain: true };
-const featureWt: Worktree = { path: `${ROOT_DIR}/feature`, branch: "feature", head: "bbb", isMain: false };
+const mainWt: Worktree = { path: ROOT, branch: "main", head: "aaa", isMain: true, isPrunable: false };
+const featureWt: Worktree = {
+	path: `${ROOT_DIR}/feature`,
+	branch: "feature",
+	head: "bbb",
+	isMain: false,
+	isPrunable: false,
+};
 
 function configFile(overrides: Record<string, unknown> = {}): string {
 	return JSON.stringify({ rootDir: ROOT_DIR, ...overrides });
@@ -52,7 +58,13 @@ describe("runHealthCheck", () => {
 	test("active prefix dir with worktree inside — NOT flagged", async () => {
 		const prefixDir = `${ROOT_DIR}/feat`;
 		const nestedWtPath = `${prefixDir}/my-feature`;
-		const nestedWt: Worktree = { path: nestedWtPath, branch: "feat/my-feature", head: "ccc", isMain: false };
+		const nestedWt: Worktree = {
+			path: nestedWtPath,
+			branch: "feat/my-feature",
+			head: "ccc",
+			isMain: false,
+			isPrunable: false,
+		};
 		const fs = createFakeFilesystem({
 			files: { [CONFIG_PATH]: configFile() },
 			directories: [ROOT, ROOT_DIR, prefixDir, nestedWtPath],

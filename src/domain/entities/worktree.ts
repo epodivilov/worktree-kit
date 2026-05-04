@@ -3,4 +3,6 @@ export interface Worktree {
 	readonly branch: string;
 	readonly head: string;
 	readonly isMain: boolean;
+	readonly isPrunable: boolean;
+	readonly prunableReason?: string;
 }

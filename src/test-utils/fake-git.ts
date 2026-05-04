@@ -99,7 +99,7 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 			if (store.some((w) => w.branch === branch)) {
 				return Result.err({ code: "BRANCH_EXISTS", message: `Branch ${branch} already exists` });
 			}
-			const wt: Worktree = { path, branch, head: "abc1234", isMain: false };
+			const wt: Worktree = { path, branch, head: "abc1234", isMain: false, isPrunable: false };
 			store.push(wt);
 			return Result.ok(wt);
 		},
@@ -108,7 +108,7 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 			if (store.some((w) => w.branch === branch)) {
 				return Result.err({ code: "BRANCH_EXISTS", message: `Branch ${branch} already exists` });
 			}
-			const wt: Worktree = { path, branch, head: "abc1234", isMain: false };
+			const wt: Worktree = { path, branch, head: "abc1234", isMain: false, isPrunable: false };
 			store.push(wt);
 			return Result.ok(wt);
 		},
@@ -117,6 +117,22 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 			const idx = store.findIndex((w) => w.path === path);
 			if (idx === -1) {
 				return Result.err({ code: "UNKNOWN", message: `Worktree not found at ${path}` });
+			}
+			store.splice(idx, 1);
+			return Result.ok(undefined);
+		},
+
+		async pruneWorktree(path: string): Promise<Result<void, GitError>> {
+			const idx = store.findIndex((w) => w.path === path);
+			if (idx === -1) {
+				return Result.err({ code: "UNKNOWN", message: `No worktree found at "${path}"` });
+			}
+			const target = store[idx] as Worktree;
+			if (!target.isPrunable) {
+				return Result.err({
+					code: "UNKNOWN",
+					message: `Worktree at "${path}" is not prunable`,
+				});
 			}
 			store.splice(idx, 1);
 			return Result.ok(undefined);

@@ -185,6 +185,8 @@ wt remove --dry-run
 
 **Branch deletion** — when not specified via flags, behavior is controlled by `remove.deleteBranch` / `remove.deleteRemoteBranch` config options. If those are also not set, prompts interactively. Unmerged branches require `--force` or interactive confirmation.
 
+**Orphans and detached HEAD** — `wt remove` cleans up orphaned worktrees whose directory was deleted out from under git (via `git worktree prune`) and handles detached-HEAD worktrees without prompting for branch deletion. Orphaned entries are marked `(missing)` in the interactive selection prompt.
+
 Runs `pre-remove` hooks before removal. Automatically removes empty `rootDir` after the last worktree is deleted.
 
 ### `wt update`

@@ -60,7 +60,7 @@ describe("createWorktree", () => {
 	test("returns error when branch already exists", async () => {
 		const git = createFakeGit({
 			root: ROOT,
-			worktrees: [{ path: "/other", branch: "existing", head: "abc", isMain: false }],
+			worktrees: [{ path: "/other", branch: "existing", head: "abc", isMain: false, isPrunable: false }],
 		});
 		const fs = createFakeFilesystem({ files: { [`${ROOT}/${CONFIG_FILENAME}`]: CONFIG }, cwd: ROOT });
 		const result = await createWorktree({ branch: "existing" }, { git, fs });

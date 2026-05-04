@@ -124,7 +124,7 @@ export async function createWorktree(
 
 	let worktree: Worktree;
 	if (input.dryRun) {
-		worktree = { path: worktreePath, branch: input.branch, head: "", isMain: false };
+		worktree = { path: worktreePath, branch: input.branch, head: "", isMain: false, isPrunable: false };
 	} else {
 		const createResult = input.fromRemote
 			? await git.createWorktreeFromRemote(input.branch, worktreePath, input.fromRemote)

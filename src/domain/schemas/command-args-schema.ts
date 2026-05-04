@@ -9,7 +9,7 @@ export const CreateArgsSchema = v.object({
 export type CreateArgs = v.InferOutput<typeof CreateArgsSchema>;
 
 export const RemoveArgsSchema = v.object({
-	branch: v.optional(v.string()),
+	branch: v.optional(v.pipe(v.string(), v.nonEmpty("Branch name cannot be empty"))),
 	"delete-branch": v.optional(v.boolean()),
 	"delete-remote-branch": v.optional(v.boolean()),
 	force: v.optional(v.boolean(), false),

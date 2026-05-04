@@ -1,5 +1,5 @@
-import { stat } from "node:fs/promises";
-import { dirname } from "node:path";
+import { readdir, readFile, realpath, rm, stat } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import type { Worktree } from "../../domain/entities/worktree.ts";
 import type { GitError, GitPort } from "../../domain/ports/git-port.ts";
 import type { LoggerPort } from "../../domain/ports/logger-port.ts";
@@ -211,7 +211,7 @@ export function createBunGitAdapter(logger: LoggerPort): GitPort {
 				const headResult = await runGit(["-C", path, "rev-parse", "HEAD"]);
 				const head = headResult.stdout;
 
-				return Result.ok({ path, branch, head, isMain: false });
+				return Result.ok({ path, branch, head, isMain: false, isPrunable: false });
 			} catch {
 				return Result.err({
 					code: "UNKNOWN",
@@ -233,7 +233,7 @@ export function createBunGitAdapter(logger: LoggerPort): GitPort {
 				const headResult = await runGit(["-C", path, "rev-parse", "HEAD"]);
 				const head = headResult.stdout;
 
-				return Result.ok({ path, branch, head, isMain: false });
+				return Result.ok({ path, branch, head, isMain: false, isPrunable: false });
 			} catch {
 				return Result.err({
 					code: "UNKNOWN",
@@ -259,6 +259,77 @@ export function createBunGitAdapter(logger: LoggerPort): GitPort {
 				return Result.err({
 					code: "UNKNOWN",
 					message: "Failed to remove worktree",
+				});
+			}
+		},
+
+		async pruneWorktree(path: string): Promise<Result<void, GitError>> {
+			try {
+				const { exitCode, stdout: gitCommonDir } = await runGit(["rev-parse", "--git-common-dir"]);
+				if (exitCode !== 0) {
+					return Result.err({
+						code: "NOT_A_REPO",
+						message: "Not inside a git repository",
+					});
+				}
+
+				const commonDir = isAbsolute(gitCommonDir) ? gitCommonDir : resolve(gitCommonDir);
+				const worktreesDir = join(commonDir, "worktrees");
+
+				let entries: string[];
+				try {
+					entries = await readdir(worktreesDir);
+				} catch {
+					return Result.err({
+						code: "UNKNOWN",
+						message: `No prunable worktree admin record found for "${path}"`,
+					});
+				}
+
+				const targetPath = await canonicalizePath(resolve(path));
+				const gitSuffix = "/.git";
+
+				for (const name of entries) {
+					const adminDir = join(worktreesDir, name);
+					const gitdirFile = join(adminDir, "gitdir");
+					let gitdirContent: string;
+					try {
+						gitdirContent = (await readFile(gitdirFile, "utf8")).trim();
+					} catch {
+						continue;
+					}
+
+					let candidatePath = gitdirContent;
+					if (candidatePath.endsWith(gitSuffix)) {
+						candidatePath = candidatePath.slice(0, -gitSuffix.length);
+					}
+					if (!isAbsolute(candidatePath)) {
+						candidatePath = resolve(adminDir, candidatePath);
+					}
+
+					if ((await canonicalizePath(candidatePath)) === targetPath) {
+						try {
+							await stat(candidatePath);
+							return Result.err({
+								code: "UNKNOWN",
+								message: `Refusing to prune "${path}": working tree directory still exists`,
+							});
+						} catch {
+							// directory absent — safe to prune
+						}
+						await rm(adminDir, { recursive: true, force: true });
+						return Result.ok(undefined);
+					}
+				}
+
+				return Result.err({
+					code: "UNKNOWN",
+					message: `No prunable worktree admin record found for "${path}"`,
+				});
+			} catch {
+				return Result.err({
+					code: "UNKNOWN",
+					message: `Failed to prune worktree at "${path}"`,
 				});
 			}
 		},
@@ -578,6 +649,8 @@ function parseWorktreesPorcelain(output: string): Worktree[] {
 		let path = "";
 		let head = "";
 		let branch = "";
+		let isPrunable = false;
+		let prunableReason: string | undefined;
 
 		for (const line of lines) {
 			if (line.startsWith("worktree ")) {
@@ -586,11 +659,28 @@ function parseWorktreesPorcelain(output: string): Worktree[] {
 				head = line.slice("HEAD ".length);
 			} else if (line.startsWith("branch ")) {
 				branch = line.slice("branch ".length).replace("refs/heads/", "");
+			} else if (line === "prunable" || line.startsWith("prunable ")) {
+				isPrunable = true;
+				const rest = line.slice("prunable".length).trim();
+				if (rest) prunableReason = rest;
 			}
 		}
 
-		return { path, branch, head, isMain: index === 0 };
+		return { path, branch, head, isMain: index === 0, isPrunable, prunableReason };
 	});
+}
+
+async function canonicalizePath(p: string): Promise<string> {
+	try {
+		return await realpath(p);
+	} catch {
+		try {
+			const parent = await realpath(dirname(p));
+			return join(parent, basename(p));
+		} catch {
+			return p;
+		}
+	}
 }
 
 function mapCreateError(stderr: string): GitError {

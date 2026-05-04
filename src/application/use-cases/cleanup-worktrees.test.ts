@@ -4,9 +4,21 @@ import { expectErr, expectOk } from "../../test-utils/assertions.ts";
 import { createFakeGit } from "../../test-utils/fake-git.ts";
 import { cleanupWorktrees } from "./cleanup-worktrees.ts";
 
-const mainWt: Worktree = { path: "/repo", branch: "main", head: "aaa", isMain: true };
-const featureA: Worktree = { path: "/wt/feature-a", branch: "feature-a", head: "bbb", isMain: false };
-const featureB: Worktree = { path: "/wt/feature-b", branch: "feature-b", head: "ccc", isMain: false };
+const mainWt: Worktree = { path: "/repo", branch: "main", head: "aaa", isMain: true, isPrunable: false };
+const featureA: Worktree = {
+	path: "/wt/feature-a",
+	branch: "feature-a",
+	head: "bbb",
+	isMain: false,
+	isPrunable: false,
+};
+const featureB: Worktree = {
+	path: "/wt/feature-b",
+	branch: "feature-b",
+	head: "ccc",
+	isMain: false,
+	isPrunable: false,
+};
 
 describe("cleanupWorktrees", () => {
 	test("gone merged branches with worktrees — cleaned", async () => {
@@ -35,7 +47,13 @@ describe("cleanupWorktrees", () => {
 	});
 
 	test("no gone branches but orphaned worktree — orphan-cleaned", async () => {
-		const orphanWt: Worktree = { path: "/wt/orphan", branch: "deleted-branch", head: "ddd", isMain: false };
+		const orphanWt: Worktree = {
+			path: "/wt/orphan",
+			branch: "deleted-branch",
+			head: "ddd",
+			isMain: false,
+			isPrunable: false,
+		};
 		const git = createFakeGit({
 			worktrees: [mainWt, orphanWt],
 			branches: ["main"],
@@ -156,7 +174,13 @@ describe("cleanupWorktrees", () => {
 	});
 
 	test("orphaned worktree (branch deleted externally) — orphan-cleaned", async () => {
-		const orphanWt: Worktree = { path: "/wt/orphan", branch: "deleted-branch", head: "ddd", isMain: false };
+		const orphanWt: Worktree = {
+			path: "/wt/orphan",
+			branch: "deleted-branch",
+			head: "ddd",
+			isMain: false,
+			isPrunable: false,
+		};
 		const git = createFakeGit({
 			worktrees: [mainWt, featureA, orphanWt],
 			branches: ["main", "feature-a"],
@@ -175,7 +199,13 @@ describe("cleanupWorktrees", () => {
 	});
 
 	test("dirty orphaned worktree without --force — orphan-skipped-dirty", async () => {
-		const orphanWt: Worktree = { path: "/wt/orphan", branch: "deleted-branch", head: "ddd", isMain: false };
+		const orphanWt: Worktree = {
+			path: "/wt/orphan",
+			branch: "deleted-branch",
+			head: "ddd",
+			isMain: false,
+			isPrunable: false,
+		};
 		const git = createFakeGit({
 			worktrees: [mainWt, orphanWt],
 			branches: ["main", "some-gone"],
@@ -192,7 +222,13 @@ describe("cleanupWorktrees", () => {
 	});
 
 	test("dirty orphaned worktree with --force — orphan-cleaned", async () => {
-		const orphanWt: Worktree = { path: "/wt/orphan", branch: "deleted-branch", head: "ddd", isMain: false };
+		const orphanWt: Worktree = {
+			path: "/wt/orphan",
+			branch: "deleted-branch",
+			head: "ddd",
+			isMain: false,
+			isPrunable: false,
+		};
 		const git = createFakeGit({
 			worktrees: [mainWt, orphanWt],
 			branches: ["main", "some-gone"],
@@ -209,7 +245,13 @@ describe("cleanupWorktrees", () => {
 	});
 
 	test("orphaned worktree in dry-run — orphan-dry-run", async () => {
-		const orphanWt: Worktree = { path: "/wt/orphan", branch: "deleted-branch", head: "ddd", isMain: false };
+		const orphanWt: Worktree = {
+			path: "/wt/orphan",
+			branch: "deleted-branch",
+			head: "ddd",
+			isMain: false,
+			isPrunable: false,
+		};
 		const git = createFakeGit({
 			worktrees: [mainWt, featureA, orphanWt],
 			branches: ["main", "feature-a"],
@@ -229,7 +271,7 @@ describe("cleanupWorktrees", () => {
 	});
 
 	test("detached HEAD worktree — orphan-cleaned", async () => {
-		const detachedWt: Worktree = { path: "/wt/detached", branch: "", head: "ddd", isMain: false };
+		const detachedWt: Worktree = { path: "/wt/detached", branch: "", head: "ddd", isMain: false, isPrunable: false };
 		const git = createFakeGit({
 			worktrees: [mainWt, detachedWt],
 			branches: ["main"],
@@ -246,7 +288,7 @@ describe("cleanupWorktrees", () => {
 	});
 
 	test("dirty detached HEAD worktree without --force — orphan-skipped-dirty", async () => {
-		const detachedWt: Worktree = { path: "/wt/detached", branch: "", head: "ddd", isMain: false };
+		const detachedWt: Worktree = { path: "/wt/detached", branch: "", head: "ddd", isMain: false, isPrunable: false };
 		const git = createFakeGit({
 			worktrees: [mainWt, detachedWt],
 			branches: ["main"],
@@ -264,7 +306,7 @@ describe("cleanupWorktrees", () => {
 	});
 
 	test("main worktree is never treated as orphan", async () => {
-		const weirdMain: Worktree = { path: "/repo", branch: "weird", head: "aaa", isMain: true };
+		const weirdMain: Worktree = { path: "/repo", branch: "weird", head: "aaa", isMain: true, isPrunable: false };
 		const git = createFakeGit({
 			worktrees: [weirdMain],
 			branches: ["main", "some-branch"],
