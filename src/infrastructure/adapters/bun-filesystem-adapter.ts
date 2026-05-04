@@ -1,5 +1,5 @@
-import { cp, mkdir, readdir, rename, rmdir, stat, symlink } from "node:fs/promises";
-import { dirname, relative } from "node:path";
+import { cp, lstat, mkdir, readdir, rename, rmdir, stat, symlink } from "node:fs/promises";
+import { dirname, join, relative } from "node:path";
 import type { FilesystemError, FilesystemPort } from "../../domain/ports/filesystem-port.ts";
 import type { LoggerPort } from "../../domain/ports/logger-port.ts";
 import { Result } from "../../shared/result.ts";
@@ -7,9 +7,14 @@ import { Result } from "../../shared/result.ts";
 export function createBunFilesystemAdapter(logger: LoggerPort): FilesystemPort {
 	return {
 		async exists(path: string): Promise<boolean> {
-			const exists = await Bun.file(path).exists();
-			logger.debug("fs", `exists ${path} -> ${exists}`);
-			return exists;
+			try {
+				await stat(path);
+				logger.debug("fs", `exists ${path} -> true`);
+				return true;
+			} catch {
+				logger.debug("fs", `exists ${path} -> false`);
+				return false;
+			}
 		},
 
 		async isDirectory(path: string): Promise<boolean> {
@@ -21,6 +26,41 @@ export function createBunFilesystemAdapter(logger: LoggerPort): FilesystemPort {
 				return result;
 			} catch {
 				logger.debug("fs", "-> false (stat failed)");
+				return false;
+			}
+		},
+
+		async isSymlink(path: string): Promise<boolean> {
+			logger.debug("fs", `isSymlink ${path}`);
+			try {
+				const s = await lstat(path);
+				const result = s.isSymbolicLink();
+				logger.debug("fs", `-> ${result}`);
+				return result;
+			} catch {
+				logger.debug("fs", "-> false (lstat failed)");
+				return false;
+			}
+		},
+
+		async isSymlinkBroken(path: string): Promise<boolean> {
+			logger.debug("fs", `isSymlinkBroken ${path}`);
+			try {
+				const ls = await lstat(path);
+				if (!ls.isSymbolicLink()) {
+					logger.debug("fs", "-> false (not a symlink)");
+					return false;
+				}
+				try {
+					await stat(path);
+					logger.debug("fs", "-> false (target exists)");
+					return false;
+				} catch {
+					logger.debug("fs", "-> true (target missing)");
+					return true;
+				}
+			} catch {
+				logger.debug("fs", "-> false (lstat failed)");
 				return false;
 			}
 		},
@@ -164,6 +204,19 @@ export function createBunFilesystemAdapter(logger: LoggerPort): FilesystemPort {
 				return matches;
 			} catch {
 				logger.debug("fs", "-> ERROR");
+				return [];
+			}
+		},
+
+		async listDirectory(path: string): Promise<string[]> {
+			logger.debug("fs", `listDirectory ${path}`);
+			try {
+				const entries = await readdir(path);
+				const absolute = entries.map((entry) => join(path, entry)).sort();
+				logger.debug("fs", `-> ${absolute.length} entries`);
+				return absolute;
+			} catch {
+				logger.debug("fs", "-> [] (readdir failed)");
 				return [];
 			}
 		},

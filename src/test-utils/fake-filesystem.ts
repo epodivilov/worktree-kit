@@ -4,22 +4,46 @@ import { Result } from "../shared/result.ts";
 export interface FakeFilesystemOptions {
 	files?: Record<string, string>;
 	directories?: string[];
+	symlinks?: Record<string, string>;
+	brokenSymlinks?: string[];
 	cwd?: string;
 	overrides?: Partial<FilesystemPort>;
 }
 
 export function createFakeFilesystem(options: FakeFilesystemOptions = {}): FilesystemPort {
-	const { files = {}, directories = [], cwd = "/fake/project", overrides = {} } = options;
+	const {
+		files = {},
+		directories = [],
+		symlinks = {},
+		brokenSymlinks = [],
+		cwd = "/fake/project",
+		overrides = {},
+	} = options;
 	const store = new Map<string, string>(Object.entries(files));
 	const dirs = new Set<string>(directories);
+	const symlinkStore = new Map<string, string>(Object.entries(symlinks));
+	const brokenSymlinkSet = new Set<string>(brokenSymlinks);
+	for (const broken of brokenSymlinkSet) {
+		if (!symlinkStore.has(broken)) {
+			symlinkStore.set(broken, "<missing>");
+		}
+	}
 
 	const base: FilesystemPort = {
 		async exists(path: string): Promise<boolean> {
-			return store.has(path) || dirs.has(path);
+			return store.has(path) || dirs.has(path) || (symlinkStore.has(path) && !brokenSymlinkSet.has(path));
 		},
 
 		async isDirectory(path: string): Promise<boolean> {
 			return dirs.has(path);
+		},
+
+		async isSymlink(path: string): Promise<boolean> {
+			return symlinkStore.has(path);
+		},
+
+		async isSymlinkBroken(path: string): Promise<boolean> {
+			return brokenSymlinkSet.has(path);
 		},
 
 		async readFile(path: string): Promise<Result<string, FilesystemError>> {
@@ -103,6 +127,33 @@ export function createFakeFilesystem(options: FakeFilesystemOptions = {}): Files
 				}
 			}
 			return matches.sort();
+		},
+
+		async listDirectory(path: string): Promise<string[]> {
+			const prefix = `${path}/`;
+			const entries = new Set<string>();
+			for (const key of store.keys()) {
+				if (key.startsWith(prefix)) {
+					const rest = key.slice(prefix.length);
+					const head = rest.split("/")[0];
+					if (head) entries.add(`${path}/${head}`);
+				}
+			}
+			for (const dir of dirs) {
+				if (dir.startsWith(prefix)) {
+					const rest = dir.slice(prefix.length);
+					const head = rest.split("/")[0];
+					if (head) entries.add(`${path}/${head}`);
+				}
+			}
+			for (const link of symlinkStore.keys()) {
+				if (link.startsWith(prefix)) {
+					const rest = link.slice(prefix.length);
+					const head = rest.split("/")[0];
+					if (head) entries.add(`${path}/${head}`);
+				}
+			}
+			return [...entries].sort();
 		},
 
 		getCwd(): string {

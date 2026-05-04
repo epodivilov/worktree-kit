@@ -3,6 +3,7 @@ import pkg from "../package.json";
 import { cleanupCommand } from "./cli/commands/cleanup.ts";
 import { configCommand } from "./cli/commands/config.ts";
 import { createCommand } from "./cli/commands/create.ts";
+import { doctorCommand } from "./cli/commands/doctor.ts";
 import { initCommand } from "./cli/commands/init.ts";
 import { listCommand } from "./cli/commands/list.ts";
 import { removeCommand } from "./cli/commands/remove.ts";
@@ -47,6 +48,7 @@ const main = defineCommand({
 		init: initCommand(container),
 		cleanup: cleanupCommand(container),
 		config: configCommand(container),
+		doctor: doctorCommand(container),
 	}),
 });
 

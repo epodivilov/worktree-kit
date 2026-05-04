@@ -1,3 +1,4 @@
+import { stat } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { Worktree } from "../../domain/entities/worktree.ts";
 import type { GitError, GitPort } from "../../domain/ports/git-port.ts";
@@ -385,10 +386,22 @@ export function createBunGitAdapter(logger: LoggerPort): GitPort {
 		async isRebaseInProgress(worktreePath: string): Promise<boolean> {
 			const { stdout } = await runGit(["-C", worktreePath, "rev-parse", "--git-dir"]);
 			const gitDir = stdout.startsWith("/") ? stdout : `${worktreePath}/${stdout}`;
-			const rebaseMerge = await Bun.file(`${gitDir}/rebase-merge`).exists();
-			if (rebaseMerge) return true;
-			const rebaseApply = await Bun.file(`${gitDir}/rebase-apply`).exists();
-			return rebaseApply;
+			const dirExists = async (path: string): Promise<boolean> => {
+				try {
+					const s = await stat(path);
+					return s.isDirectory();
+				} catch {
+					return false;
+				}
+			};
+			if (await dirExists(`${gitDir}/rebase-merge`)) return true;
+			return dirExists(`${gitDir}/rebase-apply`);
+		},
+
+		async isMergeInProgress(worktreePath: string): Promise<boolean> {
+			const { stdout } = await runGit(["-C", worktreePath, "rev-parse", "--git-dir"]);
+			const gitDir = stdout.startsWith("/") ? stdout : `${worktreePath}/${stdout}`;
+			return Bun.file(`${gitDir}/MERGE_HEAD`).exists();
 		},
 
 		async isDirty(worktreePath: string): Promise<Result<boolean, GitError>> {
