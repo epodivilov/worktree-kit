@@ -3,6 +3,44 @@
 
 ## Bug Fixes
 
+- exit 130 on prompt cancellation instead of 0
+- gate raw ANSI escapes in multiSpinner behind TTY check
+- stub fresh update cache to prevent fire-and-forget refresh leak
+
+## Documentation
+
+- document wt list --json flag and wt update stale branch cleanup
+
+## Features
+
+- formalize exit code semantics (0/1/2/3/130)
+- handle SIGINT with per-operation cleanup
+- register --verbose and --non-interactive as citty global options
+- add --json output mode to wt list
+- detect and remove orphaned worktrees
+- offer stale branch cleanup after wt update
+- support ~/.config/worktree-kit/config.jsonc global defaults
+- add wt config show command with field provenance
+- add wt doctor health-check command
+- handle orphaned and detached-HEAD worktrees
+- offer prune for missing-worktree-directory issues
+- split --yes from --non-interactive for destructive ops
+- add wt sync command to apply config changes to existing worktrees
+- skip already-merged commit prefix to avoid spurious conflicts
+
+## Performance
+
+- skip update check on --help, --version, and non-TTY
+
+## Refactoring
+
+- extract runCommand wrapper for unified error handling
+- validate command args with valibot schemas
+- remove scattered Record casts from deep-merge
+- move command files under src/cli/commands/
+
+## Bug Fixes
+
 - prevent self-update hang and surface download progress
 
 ## Bug Fixes
