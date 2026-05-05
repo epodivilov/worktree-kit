@@ -77,7 +77,8 @@ describe("runUpdateNotifier", () => {
 		const container = makeBombContainer();
 		container.fs.readFile = async () => {
 			readFileCalled = true;
-			return { success: false as const, error: { code: "NOT_FOUND" as const, message: "", path: "" } };
+			const fresh = JSON.stringify({ checkedAt: Date.now(), latestVersion: "1.0.0" });
+			return { success: true as const, data: fresh };
 		};
 
 		await runUpdateNotifier(container, "1.0.0");
