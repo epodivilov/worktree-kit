@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdir } from "node:fs/promises";
+import { mkdir, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { expectErr, expectOk } from "../../test-utils/assertions.ts";
 import { createNoopLogger } from "../../test-utils/noop-logger.ts";
@@ -80,5 +80,34 @@ describe("BunFilesystemAdapter", () => {
 
 		const error = expectErr(await fs.copyDirectory(join(tmp.path, "nope"), join(tmp.path, "dst")));
 		expect(error.code).toBe("NOT_FOUND");
+	});
+
+	test("removeSymlink deletes an existing symlink", async () => {
+		await using tmp = await createTempDir();
+		const target = join(tmp.path, "target.txt");
+		const linkPath = join(tmp.path, "link.txt");
+
+		await fs.writeFile(target, "data");
+		await symlink(target, linkPath);
+
+		expectOk(await fs.removeSymlink(linkPath));
+		expect(await fs.isSymlink(linkPath)).toBe(false);
+		expect(await fs.exists(target)).toBe(true);
+	});
+
+	test("removeSymlink returns NOT_FOUND for missing path", async () => {
+		await using tmp = await createTempDir();
+
+		const error = expectErr(await fs.removeSymlink(join(tmp.path, "missing")));
+		expect(error.code).toBe("NOT_FOUND");
+	});
+
+	test("removeSymlink removes broken symlinks", async () => {
+		await using tmp = await createTempDir();
+		const linkPath = join(tmp.path, "broken.txt");
+		await symlink(join(tmp.path, "missing-target"), linkPath);
+
+		expectOk(await fs.removeSymlink(linkPath));
+		expect(await fs.isSymlink(linkPath)).toBe(false);
 	});
 });

@@ -16,6 +16,7 @@ export interface FilesystemPort {
 	copyFile(source: string, destination: string): Promise<Result<void, FilesystemError>>;
 	copyDirectory(source: string, destination: string): Promise<Result<void, FilesystemError>>;
 	createSymlink(target: string, linkPath: string): Promise<Result<void, FilesystemError>>;
+	removeSymlink(path: string): Promise<Result<void, FilesystemError>>;
 	glob(pattern: string, options?: { cwd?: string }): Promise<string[]>;
 	listDirectory(path: string): Promise<string[]>;
 	getCwd(): string;

@@ -3,6 +3,7 @@ export interface HooksConfig {
 	readonly "pre-remove": readonly string[];
 	readonly "post-update": readonly string[];
 	readonly "on-conflict": readonly string[];
+	readonly "post-sync": readonly string[];
 }
 
 export type DefaultBase = "current" | "default" | "ask";

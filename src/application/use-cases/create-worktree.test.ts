@@ -401,6 +401,7 @@ describe("createWorktree", () => {
 		const git = createFakeGit({ root: ROOT, worktrees: [], trackedPaths: new Set([".env"]) });
 		const fs = createFakeFilesystem({
 			files: { [`${ROOT}/${CONFIG_FILENAME}`]: config, [`${ROOT}/.env`]: "SECRET=123" },
+			directories: [`${ROOT}/node_modules`],
 			cwd: ROOT,
 		});
 		const result = await createWorktree({ branch: "feat-tracked" }, { git, fs });
@@ -417,6 +418,7 @@ describe("createWorktree", () => {
 		const git = createFakeGit({ root: ROOT, worktrees: [], trackedPaths: new Set() });
 		const fs = createFakeFilesystem({
 			files: { [`${ROOT}/${CONFIG_FILENAME}`]: config },
+			directories: [`${ROOT}/node_modules`, `${ROOT}/.cache`],
 			cwd: ROOT,
 		});
 		const result = await createWorktree({ branch: "feat-untracked" }, { git, fs });

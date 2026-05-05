@@ -15,6 +15,7 @@ describe("WorktreeConfigSchema", () => {
 				"pre-remove": [],
 				"post-update": [],
 				"on-conflict": [],
+				"post-sync": [],
 			});
 		}
 	});
@@ -50,6 +51,7 @@ describe("WorktreeConfigSchema", () => {
 				"pre-remove": [],
 				"post-update": [],
 				"on-conflict": [],
+				"post-sync": [],
 			});
 		}
 	});
@@ -63,6 +65,7 @@ describe("WorktreeConfigSchema", () => {
 				"pre-remove": [],
 				"post-update": [],
 				"on-conflict": [],
+				"post-sync": [],
 			});
 		}
 	});

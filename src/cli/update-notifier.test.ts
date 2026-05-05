@@ -17,6 +17,7 @@ function makeBombContainer(): Container {
 			copyFile: bomb,
 			copyDirectory: bomb,
 			createSymlink: bomb,
+			removeSymlink: bomb,
 			glob: bomb,
 			listDirectory: bomb,
 			getCwd: bomb,

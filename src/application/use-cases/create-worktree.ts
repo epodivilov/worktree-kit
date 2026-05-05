@@ -1,5 +1,5 @@
-import { join, relative, resolve } from "node:path";
-import { CONFIG_FILENAME, INIT_ROOT_DIR, LOCAL_CONFIG_FILENAME } from "../../domain/constants.ts";
+import { resolve } from "node:path";
+import { INIT_ROOT_DIR } from "../../domain/constants.ts";
 import type { WorktreeConfig } from "../../domain/entities/config.ts";
 import type { Worktree } from "../../domain/entities/worktree.ts";
 import type { FilesystemPort } from "../../domain/ports/filesystem-port.ts";
@@ -7,62 +7,17 @@ import type { GitPort } from "../../domain/ports/git-port.ts";
 import { Notification as N, type Notification } from "../../shared/notification.ts";
 import type { Result } from "../../shared/result.ts";
 import { Result as R } from "../../shared/result.ts";
-import { uniqueBy } from "../../shared/unique-by.ts";
 import { loadConfig } from "./load-config.ts";
+import { type FileToCopy, resolveWorktreePlan, type SymlinkToCreate } from "./resolve-worktree-plan.ts";
 import type { HookContext } from "./run-hooks.ts";
 
-function isGlobPattern(str: string): boolean {
-	return /[*?[\]{}]/.test(str);
-}
-
-function splitPatterns(entries: readonly string[]): { positive: string[]; negative: string[] } {
-	const positive: string[] = [];
-	const negative: string[] = [];
-	for (const entry of entries) {
-		if (entry.startsWith("!")) {
-			negative.push(entry.slice(1));
-		} else {
-			positive.push(entry);
-		}
-	}
-	return { positive, negative };
-}
-
-async function resolveExclusions(
-	negativePatterns: string[],
-	repoRoot: string,
-	fs: FilesystemPort,
-): Promise<Set<string>> {
-	const excluded = new Set<string>();
-	for (const pattern of negativePatterns) {
-		if (isGlobPattern(pattern)) {
-			const matches = await fs.glob(pattern, { cwd: repoRoot });
-			for (const match of matches) {
-				excluded.add(match);
-			}
-		} else {
-			excluded.add(join(repoRoot, pattern));
-		}
-	}
-	return excluded;
-}
+export type { FileToCopy, SymlinkToCreate };
 
 export interface CreateWorktreeInput {
 	branch: string;
 	baseBranch?: string;
 	fromRemote?: string;
 	dryRun?: boolean;
-}
-
-export interface FileToCopy {
-	src: string;
-	dest: string;
-	isDirectory: boolean;
-}
-
-export interface SymlinkToCreate {
-	target: string;
-	linkPath: string;
 }
 
 export interface CreateWorktreeOutput {
@@ -96,7 +51,6 @@ export async function createWorktree(
 
 	const configResult = await loadConfig({ git, fs });
 	let config: WorktreeConfig;
-	let configSymlinkTarget: string | null = null;
 
 	if (configResult.success) {
 		config = configResult.data.config;
@@ -104,15 +58,13 @@ export async function createWorktree(
 			notifications.push(
 				N.warn("Legacy config detected. Run 'wt init --migrate' to enable config symlink in worktrees."),
 			);
-		} else {
-			configSymlinkTarget = configResult.data.configPath;
 		}
 	} else {
 		config = {
 			rootDir: INIT_ROOT_DIR,
 			copy: [],
 			symlinks: [],
-			hooks: { "post-create": [], "pre-remove": [], "post-update": [], "on-conflict": [] },
+			hooks: { "post-create": [], "pre-remove": [], "post-update": [], "on-conflict": [], "post-sync": [] },
 			defaultBase: "ask",
 			create: {},
 			remove: {},
@@ -135,88 +87,9 @@ export async function createWorktree(
 		worktree = createResult.data;
 	}
 
-	const { positive: copyPositive, negative: copyNegative } = splitPatterns(config.copy);
-	const copyExclusions = await resolveExclusions(copyNegative, repoRoot, fs);
+	const plan = await resolveWorktreePlan({ repoRoot, worktreePath, config, configResult }, { fs, git });
 
-	const rawFiles: FileToCopy[] = [];
-
-	for (const entry of copyPositive) {
-		if (isGlobPattern(entry)) {
-			const matches = await fs.glob(entry, { cwd: repoRoot });
-			if (matches.length === 0) {
-				notifications.push(N.warn(`No files matched pattern: ${entry}`));
-				continue;
-			}
-			for (const matchedPath of matches) {
-				const relativePath = matchedPath.slice(repoRoot.length + 1);
-				rawFiles.push({
-					src: matchedPath,
-					dest: join(worktreePath, relativePath),
-					isDirectory: await fs.isDirectory(matchedPath),
-				});
-			}
-		} else {
-			const src = join(repoRoot, entry);
-			rawFiles.push({
-				src,
-				dest: join(worktreePath, entry),
-				isDirectory: await fs.isDirectory(src),
-			});
-		}
-	}
-
-	const filesToCopy = uniqueBy(
-		rawFiles.filter((f) => !copyExclusions.has(f.src)),
-		(f) => f.src,
-	);
-
-	const { positive: symlinkPositive, negative: symlinkNegative } = splitPatterns(config.symlinks);
-	const symlinkExclusions = await resolveExclusions(symlinkNegative, repoRoot, fs);
-
-	const rawSymlinks: SymlinkToCreate[] = [];
-
-	for (const entry of symlinkPositive) {
-		if (isGlobPattern(entry)) {
-			const matches = await fs.glob(entry, { cwd: repoRoot });
-			if (matches.length === 0) {
-				notifications.push(N.warn(`No files matched symlink pattern: ${entry}`));
-				continue;
-			}
-			for (const matchedPath of matches) {
-				const relativePath = matchedPath.slice(repoRoot.length + 1);
-				rawSymlinks.push({
-					target: matchedPath,
-					linkPath: join(worktreePath, relativePath),
-				});
-			}
-		} else {
-			const target = join(repoRoot, entry);
-			rawSymlinks.push({
-				target,
-				linkPath: join(worktreePath, entry),
-			});
-		}
-	}
-
-	const dedupedSymlinks = uniqueBy(
-		rawSymlinks.filter((s) => !symlinkExclusions.has(s.target)),
-		(s) => s.target,
-	);
-
-	const symlinksToCreate: SymlinkToCreate[] = [];
-	for (const s of dedupedSymlinks) {
-		const rel = relative(repoRoot, s.target);
-		const trackedResult = await git.isPathTracked(repoRoot, rel);
-		if (trackedResult.success && trackedResult.data) {
-			notifications.push(
-				N.warn(
-					`Symlink target "${rel}" is tracked by git and will be skipped. Git checkout replaces symlinks with tracked content. Consider using "copy" instead.`,
-				),
-			);
-			continue;
-		}
-		symlinksToCreate.push(s);
-	}
+	notifications.push(...plan.notifications);
 
 	const hookCommands = config.hooks["post-create"];
 	const hookContext: HookContext | null =
@@ -229,31 +102,13 @@ export async function createWorktree(
 				}
 			: null;
 
-	let configSymlink: SymlinkToCreate | null = null;
-	if (configSymlinkTarget) {
-		const trackedResult = await git.isPathTracked(repoRoot, CONFIG_FILENAME);
-		if (trackedResult.success && trackedResult.data) {
-			notifications.push(N.info("Config is tracked by git — already available in worktree, symlink skipped."));
-		} else {
-			configSymlink = { target: configSymlinkTarget, linkPath: join(worktreePath, CONFIG_FILENAME) };
-		}
-	}
-
-	let localConfigSymlink: SymlinkToCreate | null = null;
-	if (configResult.success && configResult.data.localConfigPath) {
-		localConfigSymlink = {
-			target: configResult.data.localConfigPath,
-			linkPath: join(worktreePath, LOCAL_CONFIG_FILENAME),
-		};
-	}
-
 	return R.ok({
 		worktree,
 		notifications,
-		configSymlink,
-		localConfigSymlink,
-		filesToCopy,
-		symlinksToCreate,
+		configSymlink: plan.configSymlink,
+		localConfigSymlink: plan.localConfigSymlink,
+		filesToCopy: plan.filesToCopy,
+		symlinksToCreate: plan.symlinksToCreate,
 		hookContext,
 		hookCommands,
 	});

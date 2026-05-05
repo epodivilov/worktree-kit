@@ -8,6 +8,7 @@ import { initCommand } from "./cli/commands/init.ts";
 import { listCommand } from "./cli/commands/list.ts";
 import { removeCommand } from "./cli/commands/remove.ts";
 import { selfUpdateCommand } from "./cli/commands/self-update.ts";
+import { syncCommand } from "./cli/commands/sync.ts";
 import { updateCommand } from "./cli/commands/update.ts";
 import { runUpdateNotifier } from "./cli/update-notifier.ts";
 import { type Container, createContainer } from "./infrastructure/container.ts";
@@ -49,6 +50,7 @@ const main = defineCommand({
 		cleanup: cleanupCommand(container),
 		config: configCommand(container),
 		doctor: doctorCommand(container),
+		sync: syncCommand(container),
 	}),
 });
 

@@ -55,6 +55,12 @@
 					"items": { "type": "string" },
 					"default": [],
 					"description": "Commands to run when rebase hits a conflict. If the hook resolves the conflict and completes the rebase, the branch is treated as successfully rebased"
+				},
+				"post-sync": {
+					"type": "array",
+					"items": { "type": "string" },
+					"default": [],
+					"description": "Commands to run after a worktree is synced via 'wt sync'"
 				}
 			}
 		},

@@ -95,6 +95,17 @@ export function createFakeFilesystem(options: FakeFilesystemOptions = {}): Files
 				return Result.err({ code: "NOT_FOUND", message: "Target not found", path: target });
 			}
 			store.set(linkPath, `symlink:${target}`);
+			symlinkStore.set(linkPath, target);
+			return Result.ok(undefined);
+		},
+
+		async removeSymlink(path: string): Promise<Result<void, FilesystemError>> {
+			if (!symlinkStore.has(path)) {
+				return Result.err({ code: "NOT_FOUND", message: "Symlink not found", path });
+			}
+			symlinkStore.delete(path);
+			brokenSymlinkSet.delete(path);
+			store.delete(path);
 			return Result.ok(undefined);
 		},
 

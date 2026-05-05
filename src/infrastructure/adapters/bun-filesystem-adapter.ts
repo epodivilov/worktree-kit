@@ -1,4 +1,4 @@
-import { cp, lstat, mkdir, readdir, rename, rmdir, stat, symlink } from "node:fs/promises";
+import { cp, lstat, mkdir, readdir, rename, rmdir, stat, symlink, unlink } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 import type { FilesystemError, FilesystemPort } from "../../domain/ports/filesystem-port.ts";
 import type { LoggerPort } from "../../domain/ports/logger-port.ts";
@@ -186,6 +186,39 @@ export function createBunFilesystemAdapter(logger: LoggerPort): FilesystemPort {
 					code: "UNKNOWN",
 					message: "Failed to create symlink",
 					path: linkPath,
+				});
+			}
+		},
+
+		async removeSymlink(path: string): Promise<Result<void, FilesystemError>> {
+			logger.debug("fs", `removeSymlink ${path}`);
+			try {
+				const ls = await lstat(path);
+				if (!ls.isSymbolicLink()) {
+					logger.debug("fs", "-> ERROR (not a symlink)");
+					return Result.err({
+						code: "UNKNOWN",
+						message: "Path is not a symlink",
+						path,
+					});
+				}
+				await unlink(path);
+				logger.debug("fs", "-> OK");
+				return Result.ok(undefined);
+			} catch (error) {
+				logger.debug("fs", "-> ERROR");
+				const code = (error as NodeJS.ErrnoException).code;
+				if (code === "ENOENT") {
+					return Result.err({
+						code: "NOT_FOUND",
+						message: "Symlink not found",
+						path,
+					});
+				}
+				return Result.err({
+					code: "UNKNOWN",
+					message: "Failed to remove symlink",
+					path,
 				});
 			}
 		},

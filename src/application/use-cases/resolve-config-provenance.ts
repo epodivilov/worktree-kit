@@ -27,6 +27,7 @@ const LEAF_PATHS: readonly string[] = [
 	"hooks.pre-remove",
 	"hooks.post-update",
 	"hooks.on-conflict",
+	"hooks.post-sync",
 	"defaultBase",
 	"create.base",
 	"remove.deleteBranch",

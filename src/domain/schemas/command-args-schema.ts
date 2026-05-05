@@ -34,3 +34,11 @@ export const CleanupArgsSchema = v.object({
 });
 
 export type CleanupArgs = v.InferOutput<typeof CleanupArgsSchema>;
+
+export const SyncArgsSchema = v.object({
+	branch: v.optional(v.string()),
+	"dry-run": v.optional(v.boolean(), false),
+	force: v.optional(v.boolean(), false),
+});
+
+export type SyncArgs = v.InferOutput<typeof SyncArgsSchema>;
