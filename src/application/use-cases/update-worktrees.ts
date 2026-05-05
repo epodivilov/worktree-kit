@@ -3,6 +3,8 @@ import type { GitPort } from "../../domain/ports/git-port.ts";
 import type { ShellPort } from "../../domain/ports/shell-port.ts";
 import type { Notification } from "../../shared/notification.ts";
 import { Result as R, type Result } from "../../shared/result.ts";
+import { findCherryPickedPrefix } from "./find-cherry-picked-prefix.ts";
+import { findSquashMergedPrefix } from "./find-squash-merged-prefix.ts";
 import { runHooks } from "./run-hooks.ts";
 
 export interface UpdateWorktreesInput {
@@ -266,7 +268,15 @@ export async function updateWorktrees(
 			}
 		}
 
-		const rebaseResult = await git.rebase(wt.path, parent);
+		const cherryPickPrefix = await findCherryPickedPrefix({ git }, { base: parent, feature: wt.branch });
+		const squashPrefix = cherryPickPrefix
+			? null
+			: await findSquashMergedPrefix({ git }, { base: parent, feature: wt.branch });
+		const prefix = cherryPickPrefix ?? squashPrefix;
+
+		const rebaseResult = prefix
+			? await git.rebase(wt.path, parent, { upstream: prefix.lastSkippedCommit, branch: wt.branch })
+			: await git.rebase(wt.path, parent);
 		if (rebaseResult.success) {
 			if (isDirty) {
 				await git.resetLastCommit(wt.path);

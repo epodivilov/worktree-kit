@@ -430,15 +430,105 @@ export function createBunGitAdapter(logger: LoggerPort): GitPort {
 			}
 		},
 
-		async rebase(worktreePath: string, onto: string): Promise<Result<void, GitError>> {
+		async rebase(
+			worktreePath: string,
+			onto: string,
+			opts?: { upstream: string; branch: string },
+		): Promise<Result<void, GitError>> {
 			try {
-				const { exitCode, stderr } = await runGit(["-C", worktreePath, "rebase", onto]);
+				const args = opts
+					? ["-C", worktreePath, "rebase", "--onto", onto, opts.upstream, opts.branch]
+					: ["-C", worktreePath, "rebase", onto];
+				const { exitCode, stderr } = await runGit(args);
 				if (exitCode !== 0) {
 					return Result.err({ code: "REBASE_CONFLICT", message: stderr || `Rebase onto ${onto} failed` });
 				}
 				return Result.ok(undefined);
 			} catch {
 				return Result.err({ code: "UNKNOWN", message: `Failed to rebase onto ${onto}` });
+			}
+		},
+
+		async revList({ range }: { range: string }): Promise<Result<string[], GitError>> {
+			try {
+				const { exitCode, stdout, stderr } = await runGit(["rev-list", range]);
+				if (exitCode !== 0) {
+					return Result.err({ code: "UNKNOWN", message: stderr || `Failed to rev-list ${range}` });
+				}
+				return Result.ok(stdout.split("\n").filter(Boolean));
+			} catch {
+				return Result.err({ code: "UNKNOWN", message: `Failed to rev-list ${range}` });
+			}
+		},
+
+		async revListCherryPick({ base, feature }: { base: string; feature: string }): Promise<Result<string[], GitError>> {
+			try {
+				const { exitCode, stdout, stderr } = await runGit([
+					"rev-list",
+					"--cherry-pick",
+					"--right-only",
+					`${base}...${feature}`,
+				]);
+				if (exitCode !== 0) {
+					return Result.err({
+						code: "UNKNOWN",
+						message: stderr || `Failed to cherry-pick rev-list ${base}...${feature}`,
+					});
+				}
+				return Result.ok(stdout.split("\n").filter(Boolean));
+			} catch {
+				return Result.err({ code: "UNKNOWN", message: `Failed to cherry-pick rev-list ${base}...${feature}` });
+			}
+		},
+
+		async logSubjects(range: string, limit?: number): Promise<Result<{ sha: string; subject: string }[], GitError>> {
+			try {
+				const args = ["log", "--format=%H %s"];
+				if (limit !== undefined) args.push(`-${limit}`);
+				args.push(range);
+				const { exitCode, stdout, stderr } = await runGit(args);
+				if (exitCode !== 0) {
+					return Result.err({ code: "UNKNOWN", message: stderr || `Failed to log ${range}` });
+				}
+				const entries = stdout
+					.split("\n")
+					.filter(Boolean)
+					.map((line) => {
+						const idx = line.indexOf(" ");
+						if (idx === -1) return { sha: line, subject: "" };
+						return { sha: line.slice(0, idx), subject: line.slice(idx + 1) };
+					});
+				return Result.ok(entries);
+			} catch {
+				return Result.err({ code: "UNKNOWN", message: `Failed to log ${range}` });
+			}
+		},
+
+		async diffTreeFiles(sha: string): Promise<Result<string[], GitError>> {
+			try {
+				const { exitCode, stdout, stderr } = await runGit(["diff-tree", "--no-commit-id", "--name-only", "-r", sha]);
+				if (exitCode !== 0) {
+					return Result.err({ code: "UNKNOWN", message: stderr || `Failed to diff-tree ${sha}` });
+				}
+				return Result.ok(stdout.split("\n").filter(Boolean));
+			} catch {
+				return Result.err({ code: "UNKNOWN", message: `Failed to diff-tree ${sha}` });
+			}
+		},
+
+		async diffNormalized({ from, to }: { from: string; to: string }): Promise<Result<string, GitError>> {
+			try {
+				const { exitCode, stdout, stderr } = await runGit(["diff", "-U0", `${from}..${to}`]);
+				if (exitCode !== 0) {
+					return Result.err({ code: "UNKNOWN", message: stderr || `Failed to diff ${from}..${to}` });
+				}
+				const normalized = stdout
+					.split("\n")
+					.filter((line) => !line.startsWith("index ") && !line.startsWith("@@"))
+					.join("\n");
+				return Result.ok(normalized);
+			} catch {
+				return Result.err({ code: "UNKNOWN", message: `Failed to diff ${from}..${to}` });
 			}
 		},
 

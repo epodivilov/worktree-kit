@@ -36,7 +36,16 @@ export interface GitPort {
 	listGoneBranches(): Promise<Result<string[], GitError>>;
 	mergeFFOnly(worktreePath: string, branch: string): Promise<Result<void, GitError>>;
 	updateBranchRef(branch: string): Promise<Result<void, GitError>>;
-	rebase(worktreePath: string, onto: string): Promise<Result<void, GitError>>;
+	rebase(
+		worktreePath: string,
+		onto: string,
+		opts?: { upstream: string; branch: string },
+	): Promise<Result<void, GitError>>;
+	revList(args: { range: string }): Promise<Result<string[], GitError>>;
+	revListCherryPick(args: { base: string; feature: string }): Promise<Result<string[], GitError>>;
+	logSubjects(range: string, limit?: number): Promise<Result<{ sha: string; subject: string }[], GitError>>;
+	diffTreeFiles(sha: string): Promise<Result<string[], GitError>>;
+	diffNormalized(args: { from: string; to: string }): Promise<Result<string, GitError>>;
 	rebaseAbort(worktreePath: string): Promise<Result<void, GitError>>;
 	isDirty(worktreePath: string): Promise<Result<boolean, GitError>>;
 	stageAll(worktreePath: string): Promise<Result<void, GitError>>;

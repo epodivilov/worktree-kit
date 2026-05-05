@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { Worktree } from "../../domain/entities/worktree.ts";
 import { expectErr, expectOk } from "../../test-utils/assertions.ts";
-import { createFakeGit } from "../../test-utils/fake-git.ts";
+import { createFakeGit, type FakeRebaseCall } from "../../test-utils/fake-git.ts";
 import { createFakeShell } from "../../test-utils/fake-shell.ts";
 import { updateWorktrees } from "./update-worktrees.ts";
 
@@ -252,6 +252,111 @@ describe("updateWorktrees — parent detection", () => {
 			parent: "main",
 			result: { status: "rebased" },
 		});
+	});
+});
+
+describe("updateWorktrees — already-merged prefix detection", () => {
+	test("stacked branch with squash-merged parent rebases via --onto <parent> <lastSkipped>", async () => {
+		// feature-a was squash-merged into main (worktree removed by cleanup).
+		// feature-b is stacked on feature-a; without prefix detection, plain rebase onto main
+		// would replay feature-a's commits and conflict with the squash.
+		const main: Worktree = { path: "/repo", branch: "main", head: "M2", isMain: true, isPrunable: false };
+		const featB: Worktree = { path: "/repo-b", branch: "feature-b", head: "fb2", isMain: false, isPrunable: false };
+
+		// rev-list main..feature-b is reverse-chronological:
+		// [fb2, fb1, fa2, fa1] — fa1 and fa2 are the (now-squashed) feature-a commits
+		const mergeBaseMap = new Map([
+			["feature-b:main", "M0"],
+			["main:feature-b", "M0"],
+		]);
+
+		const commitCountMap = new Map([["M0..feature-b", 4]]);
+
+		const rebaseCalls: FakeRebaseCall[] = [];
+
+		const git = createFakeGit({
+			worktrees: [main, featB],
+			mergeBaseMap,
+			commitCountMap,
+			rebaseCalls,
+			revListMap: new Map([
+				["main..feature-b", ["fb2", "fb1", "fa2", "fa1"]],
+				["feature-b..main", ["S"]],
+			]),
+			revListCherryPickMap: new Map([["main...feature-b", ["fb2", "fb1", "fa2", "fa1"]]]),
+			logSubjectsMap: new Map([
+				[
+					"main..feature-b",
+					[
+						{ sha: "fb2", subject: "feat-b 2" },
+						{ sha: "fb1", subject: "feat-b 1" },
+						{ sha: "fa2", subject: "feat-a 2" },
+						{ sha: "fa1", subject: "feat-a 1" },
+					],
+				],
+				["feature-b..main", [{ sha: "S", subject: "feat-a (squashed)" }]],
+			]),
+			diffTreeFilesMap: new Map([
+				["fa1", ["a1.ts"]],
+				["fa2", ["a2.ts"]],
+				["fb1", ["b1.ts"]],
+				["fb2", ["b2.ts"]],
+				["S", ["a1.ts", "a2.ts"]],
+			]),
+			diffNormalizedMap: new Map([
+				["M0..fa2", "DIFF_A"],
+				["S^..S", "DIFF_A"],
+			]),
+		});
+
+		const result = await updateWorktrees({ dryRun: false }, { git });
+
+		const output = expectOk(result);
+		const featureBReport = output.reports.find((r) => r.branch === "feature-b");
+		expect(featureBReport?.result).toMatchObject({ status: "rebased" });
+
+		const featureBRebase = rebaseCalls.find((c) => c.worktreePath === "/repo-b");
+		expect(featureBRebase).toBeDefined();
+		expect(featureBRebase?.onto).toBe("main");
+		expect(featureBRebase?.opts).toEqual({ upstream: "fa2", branch: "feature-b" });
+	});
+
+	test("no prefix detected → plain rebase (no regression)", async () => {
+		const main: Worktree = { path: "/repo", branch: "main", head: "M", isMain: true, isPrunable: false };
+		const featA: Worktree = { path: "/repo-a", branch: "feature-a", head: "fa", isMain: false, isPrunable: false };
+
+		const mergeBaseMap = new Map([
+			["feature-a:main", "M"],
+			["main:feature-a", "M"],
+		]);
+		const commitCountMap = new Map([["M..feature-a", 1]]);
+
+		const rebaseCalls: FakeRebaseCall[] = [];
+
+		const git = createFakeGit({
+			worktrees: [main, featA],
+			mergeBaseMap,
+			commitCountMap,
+			rebaseCalls,
+			revListMap: new Map([
+				["main..feature-a", ["fa"]],
+				["feature-a..main", []],
+			]),
+			revListCherryPickMap: new Map([["main...feature-a", ["fa"]]]),
+			logSubjectsMap: new Map([
+				["main..feature-a", [{ sha: "fa", subject: "new" }]],
+				["feature-a..main", []],
+			]),
+			diffTreeFilesMap: new Map([["fa", ["a.ts"]]]),
+		});
+
+		const result = await updateWorktrees({ dryRun: false }, { git });
+
+		expectOk(result);
+		const featureARebase = rebaseCalls.find((c) => c.worktreePath === "/repo-a");
+		expect(featureARebase).toBeDefined();
+		expect(featureARebase?.opts).toBeUndefined();
+		expect(featureARebase?.onto).toBe("main");
 	});
 });
 

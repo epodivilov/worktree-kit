@@ -2,6 +2,12 @@ import type { Worktree } from "../domain/entities/worktree.ts";
 import type { GitError, GitPort } from "../domain/ports/git-port.ts";
 import { Result } from "../shared/result.ts";
 
+export interface FakeRebaseCall {
+	worktreePath: string;
+	onto: string;
+	opts?: { upstream: string; branch: string };
+}
+
 export interface FakeGitOptions {
 	isRepo?: boolean;
 	root?: string;
@@ -23,6 +29,12 @@ export interface FakeGitOptions {
 	trackedPaths?: Set<string>;
 	pruneFailPaths?: Map<string, string>;
 	pruneCalls?: string[];
+	rebaseCalls?: FakeRebaseCall[];
+	revListMap?: Map<string, string[]>;
+	revListCherryPickMap?: Map<string, string[]>;
+	logSubjectsMap?: Map<string, { sha: string; subject: string }[]>;
+	diffTreeFilesMap?: Map<string, string[]>;
+	diffNormalizedMap?: Map<string, string>;
 }
 
 export function createFakeGit(options: FakeGitOptions = {}): GitPort {
@@ -190,11 +202,37 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 			return Result.ok(undefined);
 		},
 
-		async rebase(worktreePath: string, _onto: string): Promise<Result<void, GitError>> {
+		async rebase(
+			worktreePath: string,
+			onto: string,
+			opts?: { upstream: string; branch: string },
+		): Promise<Result<void, GitError>> {
+			options.rebaseCalls?.push({ worktreePath, onto, opts });
 			if (rebaseConflicts?.has(worktreePath)) {
 				return Result.err({ code: "REBASE_CONFLICT", message: "Rebase conflict" });
 			}
 			return Result.ok(undefined);
+		},
+
+		async revList({ range }: { range: string }): Promise<Result<string[], GitError>> {
+			return Result.ok(options.revListMap?.get(range) ?? []);
+		},
+
+		async revListCherryPick({ base, feature }: { base: string; feature: string }): Promise<Result<string[], GitError>> {
+			return Result.ok(options.revListCherryPickMap?.get(`${base}...${feature}`) ?? []);
+		},
+
+		async logSubjects(range: string, limit?: number): Promise<Result<{ sha: string; subject: string }[], GitError>> {
+			const entries = options.logSubjectsMap?.get(range) ?? [];
+			return Result.ok(limit !== undefined ? entries.slice(0, limit) : entries);
+		},
+
+		async diffTreeFiles(sha: string): Promise<Result<string[], GitError>> {
+			return Result.ok(options.diffTreeFilesMap?.get(sha) ?? []);
+		},
+
+		async diffNormalized({ from, to }: { from: string; to: string }): Promise<Result<string, GitError>> {
+			return Result.ok(options.diffNormalizedMap?.get(`${from}..${to}`) ?? "");
 		},
 
 		async rebaseAbort(_worktreePath: string): Promise<Result<void, GitError>> {

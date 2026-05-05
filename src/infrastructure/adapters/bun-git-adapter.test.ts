@@ -330,6 +330,151 @@ describe("BunGitAdapter", () => {
 		});
 	});
 
+	describe("revList / logSubjects / diffTreeFiles / diffNormalized / rebase --onto", () => {
+		test("revList returns empty array for an empty range", async () => {
+			await using tmp = await createTempDir();
+			const repoPath = await initTestRepo(tmp.path);
+
+			const originalCwd = process.cwd();
+			process.chdir(repoPath);
+			try {
+				const head = (await Bun.$`git -C ${repoPath} rev-parse HEAD`.quiet().text()).trim();
+				const commits = expectOk(await git.revList({ range: `${head}..${head}` }));
+				expect(commits).toEqual([]);
+			} finally {
+				process.chdir(originalCwd);
+			}
+		});
+
+		test("revList returns commits in reverse-chronological order", async () => {
+			await using tmp = await createTempDir();
+			const repoPath = await initTestRepo(tmp.path);
+			const defaultBranch = (await Bun.$`git -C ${repoPath} symbolic-ref --short HEAD`.quiet().text()).trim();
+			await Bun.$`git -C ${repoPath} checkout -b feature`.quiet();
+			await Bun.write(join(repoPath, "a.txt"), "a");
+			await Bun.$`git -C ${repoPath} add .`.quiet();
+			await Bun.$`git -C ${repoPath} commit -m "feat: a"`.quiet();
+			await Bun.write(join(repoPath, "b.txt"), "b");
+			await Bun.$`git -C ${repoPath} add .`.quiet();
+			await Bun.$`git -C ${repoPath} commit -m "feat: b"`.quiet();
+
+			const originalCwd = process.cwd();
+			process.chdir(repoPath);
+			try {
+				const commits = expectOk(await git.revList({ range: `${defaultBranch}..feature` }));
+				expect(commits).toHaveLength(2);
+				const subjects = await Promise.all(
+					commits.map(async (sha) => (await Bun.$`git -C ${repoPath} log -1 --format=%s ${sha}`.quiet().text()).trim()),
+				);
+				expect(subjects[0]).toBe("feat: b");
+				expect(subjects[1]).toBe("feat: a");
+			} finally {
+				process.chdir(originalCwd);
+			}
+		});
+
+		test("logSubjects parses %H %s lines and respects limit", async () => {
+			await using tmp = await createTempDir();
+			const repoPath = await initTestRepo(tmp.path);
+			await Bun.$`git -C ${repoPath} checkout -b feature`.quiet();
+			await Bun.write(join(repoPath, "a.txt"), "a");
+			await Bun.$`git -C ${repoPath} add .`.quiet();
+			await Bun.$`git -C ${repoPath} commit -m "feat: a"`.quiet();
+			await Bun.write(join(repoPath, "b.txt"), "b");
+			await Bun.$`git -C ${repoPath} add .`.quiet();
+			await Bun.$`git -C ${repoPath} commit -m "feat: b"`.quiet();
+
+			const originalCwd = process.cwd();
+			process.chdir(repoPath);
+			try {
+				const all = expectOk(await git.logSubjects("feature"));
+				expect(all.length).toBeGreaterThanOrEqual(2);
+				expect(all[0]?.subject).toBe("feat: b");
+				expect(all[0]?.sha).toMatch(/^[a-f0-9]{40}$/);
+
+				const limited = expectOk(await git.logSubjects("feature", 1));
+				expect(limited).toHaveLength(1);
+				expect(limited[0]?.subject).toBe("feat: b");
+			} finally {
+				process.chdir(originalCwd);
+			}
+		});
+
+		test("diffTreeFiles lists files changed by a commit", async () => {
+			await using tmp = await createTempDir();
+			const repoPath = await initTestRepo(tmp.path);
+			await Bun.write(join(repoPath, "x.txt"), "x");
+			await Bun.write(join(repoPath, "y.txt"), "y");
+			await Bun.$`git -C ${repoPath} add .`.quiet();
+			await Bun.$`git -C ${repoPath} commit -m "two files"`.quiet();
+			const head = (await Bun.$`git -C ${repoPath} rev-parse HEAD`.quiet().text()).trim();
+
+			const originalCwd = process.cwd();
+			process.chdir(repoPath);
+			try {
+				const files = expectOk(await git.diffTreeFiles(head));
+				expect(new Set(files)).toEqual(new Set(["x.txt", "y.txt"]));
+			} finally {
+				process.chdir(originalCwd);
+			}
+		});
+
+		test("diffNormalized strips index and @@ lines", async () => {
+			await using tmp = await createTempDir();
+			const repoPath = await initTestRepo(tmp.path);
+			await Bun.write(join(repoPath, "a.txt"), "hello\n");
+			await Bun.$`git -C ${repoPath} add .`.quiet();
+			await Bun.$`git -C ${repoPath} commit -m "add a"`.quiet();
+			const before = (await Bun.$`git -C ${repoPath} rev-parse HEAD`.quiet().text()).trim();
+			await Bun.write(join(repoPath, "a.txt"), "hello world\n");
+			await Bun.$`git -C ${repoPath} add .`.quiet();
+			await Bun.$`git -C ${repoPath} commit -m "modify a"`.quiet();
+			const after = (await Bun.$`git -C ${repoPath} rev-parse HEAD`.quiet().text()).trim();
+
+			const originalCwd = process.cwd();
+			process.chdir(repoPath);
+			try {
+				const diff = expectOk(await git.diffNormalized({ from: before, to: after }));
+				expect(diff).not.toContain("\nindex ");
+				expect(diff).not.toContain("\n@@");
+				expect(diff).toContain("-hello");
+				expect(diff).toContain("+hello world");
+			} finally {
+				process.chdir(originalCwd);
+			}
+		});
+
+		test("rebase with --onto invokes git rebase --onto <onto> <upstream> <branch>", async () => {
+			// Build: main A — B; feature branches off A; feature commit C
+			// Then squash-merge feature into main as commit S; remove feature.
+			// Re-create feature branch with same commits B (already in main as S) + new commit D.
+			// Run rebase with --onto main <commit-of-B-on-feature> feature → only D should land.
+			await using tmp = await createTempDir();
+			const repoPath = await initTestRepo(tmp.path);
+			const defaultBranch = (await Bun.$`git -C ${repoPath} symbolic-ref --short HEAD`.quiet().text()).trim();
+
+			await Bun.$`git -C ${repoPath} checkout -b feature`.quiet();
+			await Bun.write(join(repoPath, "f1.txt"), "1");
+			await Bun.$`git -C ${repoPath} add .`.quiet();
+			await Bun.$`git -C ${repoPath} commit -m "f1"`.quiet();
+			const f1 = (await Bun.$`git -C ${repoPath} rev-parse HEAD`.quiet().text()).trim();
+			await Bun.write(join(repoPath, "f2.txt"), "2");
+			await Bun.$`git -C ${repoPath} add .`.quiet();
+			await Bun.$`git -C ${repoPath} commit -m "f2"`.quiet();
+
+			await Bun.$`git -C ${repoPath} checkout ${defaultBranch}`.quiet();
+
+			const result = await git.rebase(repoPath, defaultBranch, { upstream: f1, branch: "feature" });
+			expectOk(result);
+
+			// After rebase, feature should be checked out, with only "f2" replayed onto default
+			const branch = (await Bun.$`git -C ${repoPath} symbolic-ref --short HEAD`.quiet().text()).trim();
+			expect(branch).toBe("feature");
+			const log = (await Bun.$`git -C ${repoPath} log --format=%s ${defaultBranch}..feature`.quiet().text()).trim();
+			expect(log).toBe("f2");
+		});
+	});
+
 	describe("removeWorktree", () => {
 		test("removes existing worktree", async () => {
 			await using tmp = await createTempDir();
