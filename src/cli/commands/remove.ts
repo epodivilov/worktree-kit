@@ -39,6 +39,11 @@ export function removeCommand(container: Container) {
 				description: "Force delete unmerged branches",
 				required: false,
 			},
+			yes: {
+				type: "boolean",
+				description: "Confirm destructive operations without prompting",
+				required: false,
+			},
 			"dry-run": {
 				type: "boolean",
 				description: "Show what would be done without making changes",
@@ -52,7 +57,7 @@ export function removeCommand(container: Container) {
 
 			await runCommand(async () => {
 				const parsed = v.parse(RemoveArgsSchema, args);
-				const { force } = parsed;
+				const { force, yes } = parsed;
 				const dryRun = parsed["dry-run"];
 
 				const configResult = await loadConfig({ fs, git });
@@ -183,7 +188,7 @@ export function removeCommand(container: Container) {
 								if (deleteResult.error.code === "BRANCH_NOT_MERGED") {
 									spinner.stop(pc.yellow(`Branch "${wt.branch}" not merged`));
 
-									let shouldForce = force;
+									let shouldForce = force || yes;
 									if (!shouldForce && !ui.nonInteractive) {
 										const forceConfirm = await ui.confirm({
 											message: `Branch "${wt.branch}" is not merged. Force delete?`,
@@ -275,7 +280,7 @@ export function removeCommand(container: Container) {
 
 								if (Result.isErr(deleteResult)) {
 									if (deleteResult.error.code === "BRANCH_NOT_MERGED") {
-										if (force) {
+										if (force || yes) {
 											const forceResult = await git.deleteBranchForce(wt.branch);
 											localDeleted = Result.isOk(forceResult);
 										}
@@ -311,18 +316,8 @@ export function removeCommand(container: Container) {
 					}
 
 					// Prompt to force-delete unmerged branches
-					if (unmergedBranches.length > 0 && !ui.nonInteractive) {
-						const confirmMessage =
-							unmergedBranches.length === 1
-								? `Branch "${unmergedBranches[0]}" is not fully merged. Force delete?`
-								: `${unmergedBranches.length} branches are not fully merged (${unmergedBranches.join(", ")}). Force delete?`;
-
-						const forceConfirm = await ui.confirm({
-							message: confirmMessage,
-							initialValue: false,
-						});
-
-						if (!ui.isCancel(forceConfirm) && forceConfirm) {
+					if (unmergedBranches.length > 0) {
+						const forceDeleteUnmerged = async () => {
 							for (const branch of unmergedBranches) {
 								const spinner = ui.createSpinner();
 								spinner.start(`Force deleting branch "${branch}"...`);
@@ -343,14 +338,32 @@ export function removeCommand(container: Container) {
 									spinner.stop(pc.red(`Failed to delete branch "${branch}"`));
 								}
 							}
+						};
+
+						if (yes) {
+							await forceDeleteUnmerged();
+						} else if (!ui.nonInteractive) {
+							const confirmMessage =
+								unmergedBranches.length === 1
+									? `Branch "${unmergedBranches[0]}" is not fully merged. Force delete?`
+									: `${unmergedBranches.length} branches are not fully merged (${unmergedBranches.join(", ")}). Force delete?`;
+
+							const forceConfirm = await ui.confirm({
+								message: confirmMessage,
+								initialValue: false,
+							});
+
+							if (!ui.isCancel(forceConfirm) && forceConfirm) {
+								await forceDeleteUnmerged();
+							} else {
+								for (const branch of unmergedBranches) {
+									ui.info(`Branch "${branch}" was not deleted`);
+								}
+							}
 						} else {
 							for (const branch of unmergedBranches) {
-								ui.info(`Branch "${branch}" was not deleted`);
+								ui.warn(`Branch "${branch}" was not deleted (not fully merged, use --force)`);
 							}
-						}
-					} else if (unmergedBranches.length > 0) {
-						for (const branch of unmergedBranches) {
-							ui.warn(`Branch "${branch}" was not deleted (not fully merged, use --force)`);
 						}
 					}
 				}

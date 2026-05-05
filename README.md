@@ -74,9 +74,10 @@ These flags apply to all commands:
 
 - Required selection prompts (branch name) exit with an error if the value is not provided via CLI arguments
 - Optional confirmation prompts use safe defaults (typically "no" for destructive actions)
-- `wt cleanup` proceeds automatically without confirmation
 
 This is useful for CI pipelines, shell scripts, and AI agents.
+
+**Explicit consent (`--yes`)** — destructive commands (`wt remove`, `wt cleanup`) accept a per-command `--yes` flag as explicit consent to proceed without confirmation. There is no global `--yes` and no environment variable: consent must be re-stated for each invocation.
 
 ## Commands
 
@@ -160,6 +161,7 @@ wt remove [branch] [options]
 | `--delete-branch` | Delete local branch after removal |
 | `--delete-remote-branch` | Delete remote branch |
 | `--force` | Force delete unmerged branches |
+| `--yes` | Confirm destructive operations without prompting |
 | `--dry-run` | Show what would be done without making changes |
 
 **Examples:**
@@ -174,6 +176,9 @@ wt remove feature/old-feature
 # Remove and delete branch
 wt remove feature/old-feature --delete-branch
 
+# Non-interactive removal with branch deletion
+wt remove feature/old --non-interactive --yes --delete-branch
+
 # Preview what would happen
 wt remove --dry-run
 ```
@@ -183,7 +188,7 @@ wt remove --dry-run
 - Shows a multi-select menu of removable worktrees (main worktree excluded)
 - Select one or more worktrees to remove in a single operation
 
-**Branch deletion** — when not specified via flags, behavior is controlled by `remove.deleteBranch` / `remove.deleteRemoteBranch` config options. If those are also not set, prompts interactively. Unmerged branches require `--force` or interactive confirmation.
+**Branch deletion** — when not specified via flags, behavior is controlled by `remove.deleteBranch` / `remove.deleteRemoteBranch` config options (see [Options](#options)). If those are also not set, prompts interactively. Unmerged branches require `--force`, `--yes`, or interactive confirmation. Setting `remove.deleteBranch: true` in config is treated as pre-authorized — `--yes` is not required to delete branches under non-interactive mode.
 
 **Orphans and detached HEAD** — `wt remove` cleans up orphaned worktrees whose directory was deleted out from under git (via `git worktree prune`) and handles detached-HEAD worktrees without prompting for branch deletion. Orphaned entries are marked `(missing)` in the interactive selection prompt.
 
@@ -291,6 +296,7 @@ wt cleanup [options]
 | Flag | Description |
 |------|-------------|
 | `--force` | Delete branches even if they have unmerged changes |
+| `--yes` | Confirm destructive operations (required with `--non-interactive`) |
 | `--dry-run` | Show what would be done without making changes |
 
 **Examples:**
@@ -302,11 +308,16 @@ wt cleanup
 # Force delete unmerged branches
 wt cleanup --force
 
+# Non-interactive cleanup (CI/agents)
+wt cleanup --non-interactive --yes
+
 # Preview what would happen
 wt cleanup --dry-run
 ```
 
 Runs `git fetch --prune`, finds branches with gone remotes, shows candidates, and asks for confirmation. Skips dirty worktrees and unmerged branches unless `--force` is used.
+
+`wt cleanup --non-interactive` without `--yes` exits with an error — explicit consent is required to delete branches non-interactively.
 
 ### `wt config show`
 

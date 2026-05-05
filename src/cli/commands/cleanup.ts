@@ -25,6 +25,11 @@ export function cleanupCommand(container: Container) {
 				description: "Delete branches even if they have unmerged changes",
 				required: false,
 			},
+			yes: {
+				type: "boolean",
+				description: "Confirm destructive operations (required with --non-interactive)",
+				required: false,
+			},
 			"dry-run": {
 				type: "boolean",
 				description: "Show what would be done without making changes",
@@ -38,7 +43,7 @@ export function cleanupCommand(container: Container) {
 
 			await runCommand(async () => {
 				const parsed = v.parse(CleanupArgsSchema, args);
-				const { force } = parsed;
+				const { force, yes } = parsed;
 				const dryRun = parsed["dry-run"];
 
 				const mainRootResult = await git.getMainWorktreeRoot();
@@ -88,7 +93,14 @@ export function cleanupCommand(container: Container) {
 				}
 
 				// Confirm
-				if (!ui.nonInteractive) {
+				if (ui.nonInteractive) {
+					if (!yes) {
+						throw new CommandError(
+							"Refusing to clean up without explicit consent. Pass --yes to confirm destructive operation.",
+							EXIT_FAILURE,
+						);
+					}
+				} else if (!yes) {
 					const confirmed = await ui.confirm({
 						message: "Proceed with cleanup?",
 						initialValue: false,

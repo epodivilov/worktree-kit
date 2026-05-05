@@ -13,6 +13,7 @@ export const RemoveArgsSchema = v.object({
 	"delete-branch": v.optional(v.boolean()),
 	"delete-remote-branch": v.optional(v.boolean()),
 	force: v.optional(v.boolean(), false),
+	yes: v.optional(v.boolean(), false),
 	"dry-run": v.optional(v.boolean(), false),
 });
 
@@ -28,6 +29,7 @@ export type UpdateArgs = v.InferOutput<typeof UpdateArgsSchema>;
 
 export const CleanupArgsSchema = v.object({
 	force: v.optional(v.boolean(), false),
+	yes: v.optional(v.boolean(), false),
 	"dry-run": v.optional(v.boolean(), false),
 });
 
