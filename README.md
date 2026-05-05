@@ -245,6 +245,41 @@ After each successful rebase, `post-update` hooks are executed for that branch. 
 
 After update completes, if any worktrees have branches that were deleted on the remote, an interactive prompt offers to clean them up.
 
+### `wt doctor`
+
+Run a health check across the repository worktrees and surface problems that other commands cannot resolve on their own.
+
+```bash
+wt doctor [options]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--json` | Output the report as JSON for scripts and AI agents |
+| `--verbose` | Include info-level findings (e.g. dirty worktrees) |
+| `--fix` | Prune orphaned worktree entries detected by the report |
+
+**Examples:**
+
+```bash
+# Interactive run — prompts to prune orphan entries when found
+wt doctor
+
+# Non-interactive auto-fix
+wt doctor --fix
+
+# Machine-readable report
+wt doctor --json
+```
+
+When the report contains `missing-worktree-directory` issues (admin records pointing to a directory that no longer exists), the interactive run asks `Prune N orphaned worktree entries?` and prunes them on confirmation. Pass `--fix` to skip the prompt.
+
+`--json` mode never prompts and never auto-fixes — `--fix` is ignored. Consume the JSON output and act on it from your script.
+
+`--fix` only prunes `missing-worktree-directory` entries. Other issues (`broken-symlink`, `rebase-in-progress`, `merge-in-progress`, `config-ref-missing`, `empty-prefix-directory`, `dirty-worktree`) are reported but never auto-fixed.
+
+Exit codes: `0` when clean, `2` when problems remain after the run, `3` on operational failure.
+
 ### `wt cleanup`
 
 Remove worktrees and branches whose remote tracking branch has been deleted.

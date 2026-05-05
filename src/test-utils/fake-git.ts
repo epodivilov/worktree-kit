@@ -21,6 +21,8 @@ export interface FakeGitOptions {
 	mergeBaseMap?: Map<string, string>;
 	commitCountMap?: Map<string, number>;
 	trackedPaths?: Set<string>;
+	pruneFailPaths?: Map<string, string>;
+	pruneCalls?: string[];
 }
 
 export function createFakeGit(options: FakeGitOptions = {}): GitPort {
@@ -123,18 +125,22 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 		},
 
 		async pruneWorktree(path: string): Promise<Result<void, GitError>> {
+			options.pruneCalls?.push(path);
+			const failMessage = options.pruneFailPaths?.get(path);
+			if (failMessage !== undefined) {
+				return Result.err({ code: "UNKNOWN", message: failMessage });
+			}
 			const idx = store.findIndex((w) => w.path === path);
-			if (idx === -1) {
-				return Result.err({ code: "UNKNOWN", message: `No worktree found at "${path}"` });
+			if (idx !== -1) {
+				const target = store[idx] as Worktree;
+				if (!target.isPrunable) {
+					return Result.err({
+						code: "UNKNOWN",
+						message: `Worktree at "${path}" is not prunable`,
+					});
+				}
+				store.splice(idx, 1);
 			}
-			const target = store[idx] as Worktree;
-			if (!target.isPrunable) {
-				return Result.err({
-					code: "UNKNOWN",
-					message: `Worktree at "${path}" is not prunable`,
-				});
-			}
-			store.splice(idx, 1);
 			return Result.ok(undefined);
 		},
 

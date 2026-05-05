@@ -1,11 +1,12 @@
 import { defineCommand } from "citty";
 import pc from "picocolors";
+import { pruneOrphanWorktrees } from "../../application/use-cases/prune-orphan-worktrees.ts";
 import { runHealthCheck } from "../../application/use-cases/run-health-check.ts";
 import type { HealthIssue, HealthSeverity } from "../../domain/entities/health-check.ts";
 import type { Container } from "../../infrastructure/container.ts";
 import { formatDisplayPath } from "../../shared/format-path.ts";
 import { Result } from "../../shared/result.ts";
-import { EXIT_FAILURE, EXIT_PARTIAL, EXIT_SUCCESS } from "../exit-codes.ts";
+import { EXIT_CANCEL, EXIT_FAILURE, EXIT_PARTIAL, EXIT_SUCCESS } from "../exit-codes.ts";
 import { CommandError, runCommand } from "../run-command.ts";
 
 const SEVERITY_ORDER: HealthSeverity[] = ["error", "warning", "info"];
@@ -70,12 +71,17 @@ export function doctorCommand(container: Container) {
 			json: {
 				type: "boolean",
 				default: false,
-				description: "Output report as JSON",
+				description: "Output report as JSON (never auto-fixes; --fix is ignored)",
 			},
 			verbose: {
 				type: "boolean",
 				default: false,
 				description: "Include info-level findings in the output",
+			},
+			fix: {
+				type: "boolean",
+				default: false,
+				description: "Prune orphaned worktree entries detected by the report",
 			},
 		},
 		async run({ args }) {
@@ -135,13 +141,75 @@ export function doctorCommand(container: Container) {
 					return;
 				}
 
-				const summary = summaryLine(counts, verbose);
-				if (hasProblems) {
+				const orphans = issues.filter(
+					(i): i is Extract<HealthIssue, { type: "missing-worktree-directory" }> =>
+						i.type === "missing-worktree-directory",
+				);
+
+				if (orphans.length === 0) {
+					const summary = summaryLine(counts, verbose);
+					if (hasProblems) {
+						ui.outro(counts.error > 0 ? pc.red(summary) : pc.yellow(summary));
+						process.exit(EXIT_PARTIAL);
+					}
+					ui.outro(summary);
+					return;
+				}
+
+				let shouldFix = Boolean(args.fix);
+				if (!shouldFix) {
+					if (ui.nonInteractive) {
+						ui.warn(
+							`Run 'wt doctor --fix' to prune ${orphans.length} orphaned worktree entr${orphans.length === 1 ? "y" : "ies"}`,
+						);
+						const summary = summaryLine(counts, verbose);
+						ui.outro(counts.error > 0 ? pc.red(summary) : pc.yellow(summary));
+						process.exit(EXIT_PARTIAL);
+					}
+					const confirmed = await ui.confirm({
+						message: `Prune ${orphans.length} orphaned worktree entr${orphans.length === 1 ? "y" : "ies"}?`,
+						initialValue: true,
+					});
+					if (ui.isCancel(confirmed)) {
+						ui.cancel("Doctor cancelled");
+						process.exit(EXIT_CANCEL);
+					}
+					shouldFix = confirmed === true;
+				}
+
+				if (!shouldFix) {
+					const summary = summaryLine(counts, verbose);
 					ui.outro(counts.error > 0 ? pc.red(summary) : pc.yellow(summary));
 					process.exit(EXIT_PARTIAL);
 				}
 
-				ui.outro(summary);
+				const pruneOutput = await pruneOrphanWorktrees({ paths: orphans.map((o) => o.worktreePath) }, { git });
+
+				let prunedCount = 0;
+				let failedCount = 0;
+				const dp = (p: string) => (repoRoot ? formatDisplayPath(p, repoRoot) : p);
+				for (const report of pruneOutput.reports) {
+					if (report.status === "pruned") {
+						prunedCount++;
+						ui.success(`Pruned ${dp(report.worktreePath)}`);
+					} else if (report.status === "error") {
+						failedCount++;
+						ui.error(`Failed to prune ${dp(report.worktreePath)}: ${report.message ?? "unknown error"}`);
+					}
+				}
+
+				const remainingErrors = counts.error - prunedCount;
+				const postFixHasProblems = remainingErrors > 0 || counts.warning > 0;
+				const outroLine =
+					prunedCount === 0
+						? `No entries pruned (${failedCount} failed)`
+						: `Pruned ${prunedCount} orphaned entr${prunedCount === 1 ? "y" : "ies"}`;
+
+				if (postFixHasProblems) {
+					ui.outro(pc.yellow(outroLine));
+					process.exit(EXIT_PARTIAL);
+				}
+				ui.outro(outroLine);
 			}, ui);
 		},
 	});
