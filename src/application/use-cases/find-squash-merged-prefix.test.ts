@@ -3,9 +3,9 @@ import { createFakeGit } from "../../test-utils/fake-git.ts";
 import { findSquashMergedPrefix } from "./find-squash-merged-prefix.ts";
 
 describe("findSquashMergedPrefix", () => {
-	test("full squash (all feature commits) returns null — let plain rebase surface the conflict", async () => {
-		// All feature commits would be skipped → rebase --onto would silently reset feature to base.
-		// Filter declines so the user can react instead of having local commits silently discarded.
+	test("full squash (all feature commits) returns result with skippedCount === totalCount", async () => {
+		// Caller uses skippedCount === totalCount to skip the rebase entirely instead of
+		// rebasing onto a squash commit, which would conflict on the same files.
 		const git = createFakeGit({
 			revListMap: new Map([
 				["base..feature", ["f2", "f1"]],
@@ -26,7 +26,12 @@ describe("findSquashMergedPrefix", () => {
 
 		const result = await findSquashMergedPrefix({ git }, { base: "base", feature: "feature" });
 
-		expect(result).toBeNull();
+		expect(result).toEqual({
+			lastSkippedCommit: "f2",
+			skippedCount: 2,
+			totalCount: 2,
+			method: "squash",
+		});
 	});
 
 	test("partial squash prefix: only first commit was squashed", async () => {

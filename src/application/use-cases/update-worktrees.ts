@@ -274,6 +274,31 @@ export async function updateWorktrees(
 			: await findSquashMergedPrefix({ git }, { base: parent, feature: wt.branch });
 		const prefix = cherryPickPrefix ?? squashPrefix;
 
+		if (prefix && prefix.skippedCount === prefix.totalCount) {
+			if (isDirty) {
+				const resetResult = await git.resetLastCommit(wt.path);
+				if (!resetResult.success) {
+					reports.push({
+						branch: wt.branch,
+						path: wt.path,
+						parent,
+						result: { status: "rebase-conflict", message: "Failed to restore WIP commit after fully-merged detection" },
+						hookNotifications: [],
+					});
+					failedBranches.add(wt.branch);
+					continue;
+				}
+			}
+			reports.push({
+				branch: wt.branch,
+				path: wt.path,
+				parent,
+				result: { status: "skipped", reason: "fully merged" },
+				hookNotifications: [],
+			});
+			continue;
+		}
+
 		const rebaseResult = prefix
 			? await git.rebase(wt.path, parent, { upstream: prefix.lastSkippedCommit, branch: wt.branch })
 			: await git.rebase(wt.path, parent);

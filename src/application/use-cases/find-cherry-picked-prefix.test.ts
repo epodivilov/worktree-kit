@@ -102,8 +102,8 @@ describe("findCherryPickedPrefix", () => {
 		expect(result).toBeNull();
 	});
 
-	test("full overlap returns null", async () => {
-		// All commits cherry-picked → would rebase to nothing; treat as no-op
+	test("full overlap returns result with skippedCount === totalCount", async () => {
+		// All commits cherry-picked: caller treats this as fully merged and skips rebase.
 		const git = createFakeGit({
 			revListMap: new Map([["base..feature", ["f2", "f1"]]]),
 			revListCherryPickMap: new Map([["base...feature", []]]),
@@ -121,7 +121,12 @@ describe("findCherryPickedPrefix", () => {
 
 		const result = await findCherryPickedPrefix({ git }, { base: "base", feature: "feature" });
 
-		expect(result).toBeNull();
+		expect(result).toEqual({
+			lastSkippedCommit: "f2",
+			skippedCount: 2,
+			totalCount: 2,
+			method: "patch-id",
+		});
 	});
 
 	test("no cherry-picked commits returns null", async () => {

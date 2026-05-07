@@ -24,7 +24,7 @@ function buildResult(
 	skippedCount: number,
 	method: CherryPickFilterResult["method"],
 ): CherryPickFilterResult | null {
-	if (skippedCount === 0 || skippedCount === totalCount) return null;
+	if (skippedCount === 0) return null;
 	if (!lastSkippedCommit) return null;
 	return { lastSkippedCommit, skippedCount, totalCount, method };
 }

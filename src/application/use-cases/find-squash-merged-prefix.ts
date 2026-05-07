@@ -76,7 +76,6 @@ export async function findSquashMergedPrefix(
 		for (let i = matchingPrefixes.length - 1; i >= 0; i--) {
 			const prefixLength = matchingPrefixes[i];
 			if (prefixLength === undefined) continue;
-			if (prefixLength === featureCommits.length) continue;
 			const lastPrefixCommit = featureCommits[prefixLength - 1];
 			if (!lastPrefixCommit) continue;
 
