@@ -3,6 +3,11 @@
 
 ## Bug Fixes
 
+- skip rebase for fully squash-merged and cherry-picked branches
+- detect squash-merged and cherry-picked branches as fully merged
+
+## Bug Fixes
+
 - exit 130 on prompt cancellation instead of 0
 - gate raw ANSI escapes in multiSpinner behind TTY check
 - stub fresh update cache to prevent fire-and-forget refresh leak
