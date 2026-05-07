@@ -1,5 +1,7 @@
 import type { GitPort } from "../../domain/ports/git-port.ts";
 import { Result as R, type Result } from "../../shared/result.ts";
+import { findCherryPickedPrefix } from "./find-cherry-picked-prefix.ts";
+import { findSquashMergedPrefix } from "./find-squash-merged-prefix.ts";
 
 export interface CleanupWorktreesInput {
 	force: boolean;
@@ -106,8 +108,20 @@ export async function cleanupWorktrees(
 					const hasUniqueCommits = !commitsAhead.success || commitsAhead.data > 0;
 
 					if (hasUniqueCommits && !input.force) {
-						reports.push({ branch, worktreePath, result: { status: "skipped-unmerged" } });
-						continue;
+						const cherryPickPrefix = await findCherryPickedPrefix({ git }, { base: defaultBranch, feature: branch });
+						const squashPrefix =
+							cherryPickPrefix && cherryPickPrefix.skippedCount === cherryPickPrefix.totalCount
+								? null
+								: await findSquashMergedPrefix({ git }, { base: defaultBranch, feature: branch });
+						const prefix =
+							cherryPickPrefix && cherryPickPrefix.skippedCount === cherryPickPrefix.totalCount
+								? cherryPickPrefix
+								: (squashPrefix ?? cherryPickPrefix);
+
+						if (!prefix || prefix.skippedCount !== prefix.totalCount) {
+							reports.push({ branch, worktreePath, result: { status: "skipped-unmerged" } });
+							continue;
+						}
 					}
 
 					const forceResult = await git.deleteBranchForce(branch);

@@ -108,6 +108,68 @@ describe("cleanupWorktrees", () => {
 		expect(output.reports[0]).toMatchObject({ branch: "feature-a", result: { status: "cleaned" } });
 	});
 
+	test("cherry-picked gone branch with commits ahead — cleaned without force", async () => {
+		const git = createFakeGit({
+			worktrees: [mainWt, featureA],
+			branches: ["main", "feature-a"],
+			goneBranches: ["feature-a"],
+			mergedBranches: [],
+			commitCountMap: new Map([["main..feature-a", 2]]),
+			revListMap: new Map([["main..feature-a", ["sha1", "sha2"]]]),
+			revListCherryPickMap: new Map([["main...feature-a", []]]),
+		});
+		const output = expectOk(await cleanupWorktrees({ force: false, dryRun: false }, { git }));
+
+		expect(output.reports[0]).toMatchObject({ branch: "feature-a", result: { status: "cleaned" } });
+	});
+
+	test("squash-merged gone branch with commits ahead — cleaned without force", async () => {
+		const git = createFakeGit({
+			worktrees: [mainWt, featureA],
+			branches: ["main", "feature-a"],
+			goneBranches: ["feature-a"],
+			mergedBranches: [],
+			commitCountMap: new Map([["main..feature-a", 2]]),
+			revListMap: new Map([
+				["main..feature-a", ["sha1", "sha2"]],
+				["feature-a..main", ["squash-sha"]],
+			]),
+			revListCherryPickMap: new Map([["main...feature-a", ["sha1", "sha2"]]]),
+			mergeBaseMap: new Map([["main:feature-a", "merge-base"]]),
+			diffTreeFilesMap: new Map([
+				["sha1", ["a.ts", "b.ts"]],
+				["sha2", ["b.ts"]],
+				["squash-sha", ["a.ts", "b.ts"]],
+			]),
+			diffNormalizedMap: new Map([
+				["squash-sha^..squash-sha", "DIFF"],
+				["merge-base..sha1", "DIFF"],
+			]),
+		});
+		const output = expectOk(await cleanupWorktrees({ force: false, dryRun: false }, { git }));
+
+		expect(output.reports[0]).toMatchObject({ branch: "feature-a", result: { status: "cleaned" } });
+	});
+
+	test("unmerged branch with unique commits and no prefix match — skipped-unmerged", async () => {
+		const git = createFakeGit({
+			worktrees: [mainWt, featureA],
+			branches: ["main", "feature-a"],
+			goneBranches: ["feature-a"],
+			mergedBranches: [],
+			commitCountMap: new Map([["main..feature-a", 2]]),
+			revListMap: new Map([
+				["main..feature-a", ["sha1", "sha2"]],
+				["feature-a..main", []],
+			]),
+			revListCherryPickMap: new Map([["main...feature-a", ["sha1", "sha2"]]]),
+			mergeBaseMap: new Map([["main:feature-a", "merge-base"]]),
+		});
+		const output = expectOk(await cleanupWorktrees({ force: false, dryRun: false }, { git }));
+
+		expect(output.reports[0]).toMatchObject({ branch: "feature-a", result: { status: "skipped-unmerged" } });
+	});
+
 	test("dirty worktree without --force — skipped", async () => {
 		const git = createFakeGit({
 			worktrees: [mainWt, featureA],
