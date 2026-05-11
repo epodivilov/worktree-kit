@@ -75,9 +75,11 @@ export async function loadConfig(deps: LoadConfigDeps): Promise<Result<LoadConfi
 
 	const configPath = join(rootResult.data, CONFIG_FILENAME);
 	const legacyConfigPath = join(rootResult.data, LEGACY_CONFIG_FILENAME);
+	const localPath = join(rootResult.data, LOCAL_CONFIG_FILENAME);
 
 	let actualPath: string;
 	let isLegacyConfig: boolean;
+	let isLocalStandalone = false;
 
 	if (await fs.exists(configPath)) {
 		actualPath = configPath;
@@ -85,6 +87,10 @@ export async function loadConfig(deps: LoadConfigDeps): Promise<Result<LoadConfi
 	} else if (await fs.exists(legacyConfigPath)) {
 		actualPath = legacyConfigPath;
 		isLegacyConfig = true;
+	} else if (await fs.exists(localPath)) {
+		actualPath = localPath;
+		isLegacyConfig = false;
+		isLocalStandalone = true;
 	} else {
 		return R.err(new Error(`Config not found at ${configPath}. Run 'wt init' to create one.`));
 	}
@@ -137,8 +143,7 @@ export async function loadConfig(deps: LoadConfigDeps): Promise<Result<LoadConfi
 	let localConfigPath: string | null = null;
 	let localOverrides: PartialOverrides | null = null;
 
-	const localPath = join(rootResult.data, LOCAL_CONFIG_FILENAME);
-	if (await fs.exists(localPath)) {
+	if (!isLocalStandalone && (await fs.exists(localPath))) {
 		const localResult = await readPartialConfig(fs, localPath, "local");
 		if (!localResult.success) {
 			return R.err(localResult.error);

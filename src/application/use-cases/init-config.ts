@@ -1,5 +1,11 @@
 import { join } from "node:path";
-import { CONFIG_FILENAME, INIT_ROOT_DIR, LEGACY_CONFIG_FILENAME, SCHEMA_URL } from "../../domain/constants.ts";
+import {
+	CONFIG_FILENAME,
+	INIT_ROOT_DIR,
+	LEGACY_CONFIG_FILENAME,
+	LOCAL_CONFIG_FILENAME,
+	SCHEMA_URL,
+} from "../../domain/constants.ts";
 import type { FilesystemPort } from "../../domain/ports/filesystem-port.ts";
 import type { GitPort } from "../../domain/ports/git-port.ts";
 import type { Result } from "../../shared/result.ts";
@@ -8,6 +14,7 @@ import { Result as R } from "../../shared/result.ts";
 export interface InitConfigInput {
 	force?: boolean;
 	migrate?: boolean;
+	local?: boolean;
 }
 
 export interface InitConfigOutput {
@@ -57,8 +64,10 @@ export async function initConfig(
 		return R.ok({ configPath });
 	}
 
-	if (!input.force && (await fs.exists(configPath))) {
-		return R.err(new Error(`Config already exists at ${configPath}`));
+	const targetPath = input.local ? join(rootResult.data, LOCAL_CONFIG_FILENAME) : configPath;
+
+	if (!input.force && (await fs.exists(targetPath))) {
+		return R.err(new Error(`Config already exists at ${targetPath}`));
 	}
 
 	const content = JSON.stringify(
@@ -72,10 +81,10 @@ export async function initConfig(
 		null,
 		2,
 	);
-	const writeResult = await fs.writeFile(configPath, content);
+	const writeResult = await fs.writeFile(targetPath, content);
 	if (!writeResult.success) {
 		return R.err(new Error(`Failed to write config: ${writeResult.error.message}`));
 	}
 
-	return R.ok({ configPath });
+	return R.ok({ configPath: targetPath });
 }

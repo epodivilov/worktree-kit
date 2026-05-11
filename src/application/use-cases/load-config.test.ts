@@ -250,6 +250,53 @@ describe("loadConfig", () => {
 		expect(globalConfigPath).toBeNull();
 	});
 
+	test("falls back to local config as standalone when no base config exists", async () => {
+		const content = JSON.stringify({ rootDir: "../wt", copy: [".env"] });
+		const fs = createFakeFilesystem({ files: { [LOCAL_CONFIG_PATH]: content } });
+		const git = createFakeGit({ root: ROOT });
+
+		const result = await loadConfig({ fs, git, globalConfigPath: GLOBAL_CONFIG_PATH });
+		const { config, configPath, localConfigPath, isLegacyConfig } = expectOk(result);
+
+		expect(config.rootDir).toBe("../wt");
+		expect(config.copy).toEqual([".env"]);
+		expect(configPath).toBe(LOCAL_CONFIG_PATH);
+		expect(localConfigPath).toBeNull();
+		expect(isLegacyConfig).toBe(false);
+	});
+
+	test("standalone local config merges with global config", async () => {
+		const local = JSON.stringify({ rootDir: "../wt" });
+		const global = JSON.stringify({ defaultBase: "default", copy: [".env.global"] });
+		const fs = createFakeFilesystem({
+			files: { [LOCAL_CONFIG_PATH]: local, [GLOBAL_CONFIG_PATH]: global },
+		});
+		const git = createFakeGit({ root: ROOT });
+
+		const result = await loadConfig({ fs, git, globalConfigPath: GLOBAL_CONFIG_PATH });
+		const { config } = expectOk(result);
+
+		expect(config.rootDir).toBe("../wt");
+		expect(config.defaultBase).toBe("default");
+		expect(config.copy).toEqual([".env.global"]);
+	});
+
+	test("prefers base config over standalone local config", async () => {
+		const baseContent = JSON.stringify({ rootDir: "../base" });
+		const localContent = JSON.stringify({ rootDir: "../local" });
+		const fs = createFakeFilesystem({
+			files: { [CONFIG_PATH]: baseContent, [LOCAL_CONFIG_PATH]: localContent },
+		});
+		const git = createFakeGit({ root: ROOT });
+
+		const result = await loadConfig({ fs, git, globalConfigPath: GLOBAL_CONFIG_PATH });
+		const { config, configPath, localConfigPath } = expectOk(result);
+
+		expect(config.rootDir).toBe("../local");
+		expect(configPath).toBe(CONFIG_PATH);
+		expect(localConfigPath).toBe(LOCAL_CONFIG_PATH);
+	});
+
 	test("returns error for invalid JSONC in global config", async () => {
 		const repo = JSON.stringify({ rootDir: "../wt" });
 		const fs = createFakeFilesystem({

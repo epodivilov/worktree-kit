@@ -24,6 +24,12 @@ export function initCommand(container: Container) {
 				description: "Rename legacy .worktreekitrc to .worktreekit.jsonc",
 				default: false,
 			},
+			local: {
+				type: "boolean",
+				alias: "l",
+				description: "Create .worktreekit.local.jsonc instead",
+				default: false,
+			},
 		},
 		async run({ args }) {
 			const { ui, fs, git } = container;
@@ -31,7 +37,7 @@ export function initCommand(container: Container) {
 			ui.intro("worktree-kit init");
 
 			await runCommand(async () => {
-				const result = await initConfig({ force: args.force, migrate: args.migrate }, { fs, git });
+				const result = await initConfig({ force: args.force, migrate: args.migrate, local: args.local }, { fs, git });
 
 				if (Result.isErr(result)) {
 					throw new CommandError(result.error.message, EXIT_FAILURE);

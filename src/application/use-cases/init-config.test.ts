@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { CONFIG_FILENAME, INIT_ROOT_DIR, LEGACY_CONFIG_FILENAME } from "../../domain/constants.ts";
+import {
+	CONFIG_FILENAME,
+	INIT_ROOT_DIR,
+	LEGACY_CONFIG_FILENAME,
+	LOCAL_CONFIG_FILENAME,
+} from "../../domain/constants.ts";
 import { Result } from "../../shared/result.ts";
 import { expectErr, expectOk } from "../../test-utils/assertions.ts";
 import { createFakeFilesystem } from "../../test-utils/fake-filesystem.ts";
@@ -9,6 +14,7 @@ import { initConfig } from "./init-config.ts";
 describe("initConfig", () => {
 	const ROOT = "/fake/project";
 	const CONFIG_PATH = `${ROOT}/${CONFIG_FILENAME}`;
+	const LOCAL_CONFIG_PATH = `${ROOT}/${LOCAL_CONFIG_FILENAME}`;
 	const LEGACY_CONFIG_PATH = `${ROOT}/${LEGACY_CONFIG_FILENAME}`;
 
 	test("creates config in repo root with default content", async () => {
@@ -111,6 +117,42 @@ describe("initConfig", () => {
 
 		const error = expectErr(result);
 		expect(error.message).toContain("Legacy config not found");
+	});
+
+	test("creates local config when local flag is set", async () => {
+		const fs = createFakeFilesystem();
+		const git = createFakeGit({ root: ROOT });
+		const result = await initConfig({ local: true }, { fs, git });
+
+		const { configPath } = expectOk(result);
+		expect(configPath).toBe(LOCAL_CONFIG_PATH);
+		expect(await fs.exists(LOCAL_CONFIG_PATH)).toBe(true);
+
+		const parsed = JSON.parse(expectOk(await fs.readFile(LOCAL_CONFIG_PATH)));
+		expect(parsed.rootDir).toBe(INIT_ROOT_DIR);
+	});
+
+	test("returns error when local config already exists and force is false", async () => {
+		const fs = createFakeFilesystem({
+			files: { [LOCAL_CONFIG_PATH]: '{"rootDir": "../wt"}' },
+		});
+		const git = createFakeGit({ root: ROOT });
+		const result = await initConfig({ local: true }, { fs, git });
+
+		const error = expectErr(result);
+		expect(error.message).toContain("already exists");
+	});
+
+	test("overwrites local config when force is true", async () => {
+		const fs = createFakeFilesystem({
+			files: { [LOCAL_CONFIG_PATH]: '{"rootDir": "../old"}' },
+		});
+		const git = createFakeGit({ root: ROOT });
+		const result = await initConfig({ local: true, force: true }, { fs, git });
+
+		expectOk(result);
+		const parsed = JSON.parse(expectOk(await fs.readFile(LOCAL_CONFIG_PATH)));
+		expect(parsed.rootDir).toBe(INIT_ROOT_DIR);
 	});
 
 	test("migrate returns error when new config already exists", async () => {
