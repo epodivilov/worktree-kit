@@ -1,6 +1,6 @@
 {
 	"name": "worktree-kit",
-	"version": "0.6.1",
+	"version": "0.6.2",
 	"description": "CLI tool to simplify git-worktree workflow with automatic config file copying",
 	"type": "module",
 	"bin": {

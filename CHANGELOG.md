@@ -1,6 +1,10 @@
 # Changelog
 
 
+## Features
+
+- support --local flag and standalone local config
+
 ## Bug Fixes
 
 - skip rebase for fully squash-merged and cherry-picked branches
