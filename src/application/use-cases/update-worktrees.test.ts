@@ -255,6 +255,82 @@ describe("updateWorktrees — parent detection", () => {
 	});
 });
 
+describe("updateWorktrees — gone parent retargeting", () => {
+	test("stacked branch whose parent has a gone remote — retargets to main and flags it", async () => {
+		const git = createFakeGit({
+			worktrees: [mainWt, featureA, featureB],
+			goneBranches: ["feature-a"],
+			mergeBaseMap: new Map([
+				["feature-b:main", "MB_BM"],
+				["main:feature-b", "MB_BM"],
+				["feature-b:feature-a", "MB_BA"],
+				["feature-a:feature-b", "MB_BA"],
+				["feature-a:main", "MB_AM"],
+				["main:feature-a", "MB_AM"],
+			]),
+			commitCountMap: new Map([
+				["MB_BM..feature-b", 5],
+				["MB_BA..feature-b", 2],
+				["MB_AM..feature-a", 3],
+				["MB_BA..feature-a", 0],
+			]),
+		});
+
+		const result = await updateWorktrees({ dryRun: false }, { git });
+		const output = expectOk(result);
+
+		const reportB = output.reports.find((r) => r.branch === "feature-b");
+		expect(reportB).toMatchObject({
+			parent: "main",
+			retargetedFrom: "feature-a",
+			result: { status: "rebased" },
+		});
+	});
+
+	test("A→B→C with gone middle B — C retargets to nearest live ancestor A", async () => {
+		const featureC: Worktree = { path: "/repo-c", branch: "feature-c", head: "ddd", isMain: false, isPrunable: false };
+		const git = createFakeGit({
+			worktrees: [mainWt, featureA, featureB, featureC],
+			goneBranches: ["feature-b"],
+			mergeBaseMap: new Map([
+				["feature-c:main", "MB_CM"],
+				["main:feature-c", "MB_CM"],
+				["feature-c:feature-a", "MB_CA"],
+				["feature-a:feature-c", "MB_CA"],
+				["feature-c:feature-b", "MB_CB"],
+				["feature-b:feature-c", "MB_CB"],
+				["feature-b:main", "MB_BM"],
+				["main:feature-b", "MB_BM"],
+				["feature-b:feature-a", "MB_BA"],
+				["feature-a:feature-b", "MB_BA"],
+				["feature-a:main", "MB_AM"],
+				["main:feature-a", "MB_AM"],
+			]),
+			commitCountMap: new Map([
+				["MB_CM..feature-c", 6],
+				["MB_CA..feature-c", 4],
+				["MB_CB..feature-c", 2],
+				["MB_BM..feature-b", 4],
+				["MB_BA..feature-b", 2],
+				["MB_CB..feature-b", 0],
+				["MB_AM..feature-a", 2],
+				["MB_BA..feature-a", 0],
+				["MB_CA..feature-a", 0],
+			]),
+		});
+
+		const result = await updateWorktrees({ dryRun: false }, { git });
+		const output = expectOk(result);
+
+		const reportC = output.reports.find((r) => r.branch === "feature-c");
+		expect(reportC).toMatchObject({
+			parent: "feature-a",
+			retargetedFrom: "feature-b",
+			result: { status: "rebased" },
+		});
+	});
+});
+
 describe("updateWorktrees — already-merged prefix detection", () => {
 	test("stacked branch with squash-merged parent rebases via --onto <parent> <lastSkipped>", async () => {
 		// feature-a was squash-merged into main (worktree removed by cleanup).
