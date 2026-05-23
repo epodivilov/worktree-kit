@@ -106,7 +106,9 @@ export function updateCommand(container: Container) {
 							break;
 						case "rebased":
 						case "rebased-dirty": {
-							const suffix = report.result.status === "rebased-dirty" ? " (via WIP commit)" : "";
+							const wip = report.result.status === "rebased-dirty" ? " (via WIP commit)" : "";
+							const reparent = report.retargetedFrom ? ` (re-parented from ${report.retargetedFrom})` : "";
+							const suffix = `${wip}${reparent}`;
 							if (hookFailures.length > 0) {
 								const failMsgs = hookFailures.map((n) => n.message).join("; ");
 								ui.warn(`${report.branch} rebased onto ${onto}${suffix} — ${failMsgs}`);
@@ -119,8 +121,9 @@ export function updateCommand(container: Container) {
 							ui.warn(`${report.branch} has conflicts, rebase aborted`);
 							break;
 						case "dry-run": {
-							const suffix = report.result.dirty ? " (dirty, via WIP commit)" : "";
-							ui.info(`${report.branch} would be rebased onto ${onto}${suffix}`);
+							const wip = report.result.dirty ? " (dirty, via WIP commit)" : "";
+							const reparent = report.retargetedFrom ? ` (re-parented from ${report.retargetedFrom})` : "";
+							ui.info(`${report.branch} would be rebased onto ${onto}${wip}${reparent}`);
 							break;
 						}
 						case "skipped":

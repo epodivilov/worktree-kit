@@ -27,6 +27,8 @@ export interface WorktreeReport {
 	branch: string;
 	path: string;
 	parent?: string;
+	/** Set when the branch's natural parent had a gone remote and was skipped in favor of `parent`. */
+	retargetedFrom?: string;
 	result: WorktreeUpdateStatus;
 	hookNotifications: Notification[];
 }
@@ -46,18 +48,19 @@ async function findParentBranch(
 	branch: string,
 	worktrees: Worktree[],
 	defaultBranch: string,
+	goneSet: Set<string>,
 	git: GitPort,
-): Promise<string> {
-	const candidates: { branch: string; distance: number }[] = [];
+): Promise<{ parent: string; retargetedFrom?: string }> {
+	const candidates: { branch: string; distance: number; gone: boolean }[] = [];
 
 	const defaultMergeBase = await git.getMergeBase(branch, defaultBranch);
 	if (defaultMergeBase.success) {
 		const defaultCount = await git.getCommitCount(defaultMergeBase.data, branch);
 		if (defaultCount.success && defaultCount.data === 0) {
-			return defaultBranch;
+			return { parent: defaultBranch };
 		}
 		if (defaultCount.success && defaultCount.data > 0) {
-			candidates.push({ branch: defaultBranch, distance: defaultCount.data });
+			candidates.push({ branch: defaultBranch, distance: defaultCount.data, gone: false });
 		}
 	}
 
@@ -72,14 +75,22 @@ async function findParentBranch(
 
 		if (countResult.data === 0) continue;
 
-		candidates.push({ branch: wt.branch, distance: countResult.data });
+		candidates.push({ branch: wt.branch, distance: countResult.data, gone: goneSet.has(wt.branch) });
 	}
 
-	if (candidates.length === 0) return defaultBranch;
+	if (candidates.length === 0) return { parent: defaultBranch };
 
 	candidates.sort((a, b) => a.distance - b.distance);
+
+	// Pick the closest branch whose remote still exists; gone branches are about to be
+	// cleaned up, so rebasing onto them would leave this branch stranded on a dead base.
+	const liveParent = candidates.find((c) => !c.gone)?.branch ?? defaultBranch;
 	const closest = candidates[0];
-	return closest ? closest.branch : defaultBranch;
+	if (closest?.gone && closest.branch !== liveParent) {
+		return { parent: liveParent, retargetedFrom: closest.branch };
+	}
+
+	return { parent: liveParent };
 }
 
 function buildRebaseOrder(worktrees: Worktree[], parentMap: Record<string, string>, defaultBranch: string): Worktree[] {
@@ -154,6 +165,9 @@ export async function updateWorktrees(
 		return R.err(new Error(`Fetch failed: ${fetchResult.error.message}`));
 	}
 
+	const goneResult = await git.listGoneBranches();
+	const goneSet = new Set(goneResult.success ? goneResult.data.filter((b) => b !== defaultBranch) : []);
+
 	const mainWorktree = worktrees.find((w) => w.branch === defaultBranch);
 	let defaultBranchUpdate: "ff-updated" | "ref-updated";
 
@@ -172,9 +186,14 @@ export async function updateWorktrees(
 	}
 
 	const parentMap: Record<string, string> = {};
+	const retargetMap: Record<string, string> = {};
 	for (const wt of worktrees) {
 		if (!wt.branch || wt.branch === defaultBranch) continue;
-		parentMap[wt.branch] = await findParentBranch(wt.branch, worktrees, defaultBranch, git);
+		const resolved = await findParentBranch(wt.branch, worktrees, defaultBranch, goneSet, git);
+		parentMap[wt.branch] = resolved.parent;
+		if (resolved.retargetedFrom) {
+			retargetMap[wt.branch] = resolved.retargetedFrom;
+		}
 	}
 
 	const orderedWorktrees = buildRebaseOrder(worktrees, parentMap, defaultBranch);
@@ -399,6 +418,13 @@ export async function updateWorktrees(
 				});
 				failedBranches.add(wt.branch);
 			}
+		}
+	}
+
+	for (const report of reports) {
+		const retargetedFrom = retargetMap[report.branch];
+		if (retargetedFrom) {
+			report.retargetedFrom = retargetedFrom;
 		}
 	}
 
