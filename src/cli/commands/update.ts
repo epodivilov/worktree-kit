@@ -117,9 +117,11 @@ export function updateCommand(container: Container) {
 							}
 							break;
 						}
-						case "rebase-conflict":
-							ui.warn(`${report.branch} has conflicts, rebase aborted`);
+						case "rebase-conflict": {
+							const reparent = report.retargetedFrom ? ` (re-parented from ${report.retargetedFrom})` : "";
+							ui.warn(`${report.branch} has conflicts, rebase aborted${reparent}`);
 							break;
+						}
 						case "dry-run": {
 							const wip = report.result.dirty ? " (dirty, via WIP commit)" : "";
 							const reparent = report.retargetedFrom ? ` (re-parented from ${report.retargetedFrom})` : "";

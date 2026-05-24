@@ -279,6 +279,9 @@ describe("updateWorktrees — gone parent retargeting", () => {
 		const result = await updateWorktrees({ dryRun: false }, { git });
 		const output = expectOk(result);
 
+		const reportA = output.reports.find((r) => r.branch === "feature-a");
+		expect(reportA?.retargetedFrom).toBeUndefined();
+
 		const reportB = output.reports.find((r) => r.branch === "feature-b");
 		expect(reportB).toMatchObject({
 			parent: "main",
