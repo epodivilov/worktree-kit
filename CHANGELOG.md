@@ -1,6 +1,11 @@
 # Changelog
 
 
+## Bug Fixes
+
+- retarget stacked branches off gone parents before rebase
+- address review feedback for gone-parent retargeting
+
 ## Features
 
 - support --local flag and standalone local config
