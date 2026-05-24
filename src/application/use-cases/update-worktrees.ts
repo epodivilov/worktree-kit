@@ -86,7 +86,7 @@ async function findParentBranch(
 	// cleaned up, so rebasing onto them would leave this branch stranded on a dead base.
 	const liveParent = candidates.find((c) => !c.gone)?.branch ?? defaultBranch;
 	const closest = candidates[0];
-	if (closest?.gone && closest.branch !== liveParent) {
+	if (closest?.gone) {
 		return { parent: liveParent, retargetedFrom: closest.branch };
 	}
 
@@ -227,6 +227,7 @@ export async function updateWorktrees(
 				branch: wt.branch,
 				path: wt.path,
 				parent,
+				retargetedFrom: retargetMap[wt.branch],
 				result: { status: "skipped", reason: `parent ${parent} failed` },
 				hookNotifications: [],
 			});
@@ -240,6 +241,7 @@ export async function updateWorktrees(
 				branch: wt.branch,
 				path: wt.path,
 				parent,
+				retargetedFrom: retargetMap[wt.branch],
 				result: { status: "rebase-conflict", message: "Could not check worktree status" },
 				hookNotifications: [],
 			});
@@ -254,6 +256,7 @@ export async function updateWorktrees(
 				branch: wt.branch,
 				path: wt.path,
 				parent,
+				retargetedFrom: retargetMap[wt.branch],
 				result: { status: "dry-run", dirty: isDirty },
 				hookNotifications: [],
 			});
@@ -267,6 +270,7 @@ export async function updateWorktrees(
 					branch: wt.branch,
 					path: wt.path,
 					parent,
+					retargetedFrom: retargetMap[wt.branch],
 					result: { status: "rebase-conflict", message: "Failed to stage changes for WIP commit" },
 					hookNotifications: [],
 				});
@@ -279,6 +283,7 @@ export async function updateWorktrees(
 					branch: wt.branch,
 					path: wt.path,
 					parent,
+					retargetedFrom: retargetMap[wt.branch],
 					result: { status: "rebase-conflict", message: "Failed to create WIP commit" },
 					hookNotifications: [],
 				});
@@ -301,6 +306,7 @@ export async function updateWorktrees(
 						branch: wt.branch,
 						path: wt.path,
 						parent,
+						retargetedFrom: retargetMap[wt.branch],
 						result: { status: "rebase-conflict", message: "Failed to restore WIP commit after fully-merged detection" },
 						hookNotifications: [],
 					});
@@ -312,6 +318,7 @@ export async function updateWorktrees(
 				branch: wt.branch,
 				path: wt.path,
 				parent,
+				retargetedFrom: retargetMap[wt.branch],
 				result: { status: "skipped", reason: "fully merged" },
 				hookNotifications: [],
 			});
@@ -349,6 +356,7 @@ export async function updateWorktrees(
 				branch: wt.branch,
 				path: wt.path,
 				parent,
+				retargetedFrom: retargetMap[wt.branch],
 				result: { status: isDirty ? "rebased-dirty" : "rebased" },
 				hookNotifications,
 			});
@@ -401,6 +409,7 @@ export async function updateWorktrees(
 					branch: wt.branch,
 					path: wt.path,
 					parent,
+					retargetedFrom: retargetMap[wt.branch],
 					result: { status: isDirty ? "rebased-dirty" : "rebased" },
 					hookNotifications,
 				});
@@ -413,18 +422,12 @@ export async function updateWorktrees(
 					branch: wt.branch,
 					path: wt.path,
 					parent,
+					retargetedFrom: retargetMap[wt.branch],
 					result: { status: "rebase-conflict", message: rebaseResult.error.message },
 					hookNotifications: [],
 				});
 				failedBranches.add(wt.branch);
 			}
-		}
-	}
-
-	for (const report of reports) {
-		const retargetedFrom = retargetMap[report.branch];
-		if (retargetedFrom) {
-			report.retargetedFrom = retargetedFrom;
 		}
 	}
 
