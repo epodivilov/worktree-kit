@@ -74,6 +74,29 @@ export async function createWorktree(
 
 	const worktreePath = resolve(repoRoot, config.rootDir, input.branch);
 
+	const worktreesResult = await git.listWorktrees();
+	if (!worktreesResult.success) {
+		return R.err(new Error(worktreesResult.error.message));
+	}
+	const existingWorktree = worktreesResult.data.find((w) => w.path === worktreePath || w.branch === input.branch);
+	if (existingWorktree) {
+		return R.err(
+			new Error(
+				`A worktree for '${existingWorktree.branch}' already exists at ${existingWorktree.path}. ` +
+					`Run 'wt remove ${existingWorktree.branch}' first or choose another branch name.`,
+			),
+		);
+	}
+
+	if (await fs.exists(worktreePath)) {
+		return R.err(
+			new Error(
+				`Target path ${worktreePath} already exists but is not a worktree. ` +
+					`Choose a different branch name or remove the directory.`,
+			),
+		);
+	}
+
 	let worktree: Worktree;
 	if (input.dryRun) {
 		worktree = { path: worktreePath, branch: input.branch, head: "", isMain: false, isPrunable: false };
