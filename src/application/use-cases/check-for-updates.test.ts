@@ -6,6 +6,7 @@ import {
 	refreshUpdateCache,
 	UPDATE_CHECK_TTL_MS,
 	type UpdateCheckCache,
+	writeUpdateCache,
 } from "./check-for-updates.ts";
 
 const CACHE_PATH = "/fake/cache/wt/update-check.json";
@@ -101,6 +102,70 @@ describe("checkForUpdates", () => {
 		});
 
 		expect(result).toEqual({ hasUpdate: false, latestVersion: null, isFresh: false });
+	});
+});
+
+describe("writeUpdateCache", () => {
+	test("writes the given version and checkedAt to cache", async () => {
+		const fs = createFakeFilesystem({});
+
+		const result = await writeUpdateCache({
+			fs,
+			cachePath: CACHE_PATH,
+			latestVersion: "2.0.0",
+			now: () => NOW,
+		});
+
+		expect(Result.isOk(result)).toBe(true);
+		const written = await fs.readFile(CACHE_PATH);
+		expect(written.success).toBe(true);
+		if (!written.success) return;
+		expect(JSON.parse(written.data)).toEqual({ checkedAt: NOW, latestVersion: "2.0.0" });
+	});
+
+	test("returns err result when the filesystem write fails", async () => {
+		const fs = createFakeFilesystem({
+			overrides: {
+				writeFile: async () => Result.err({ code: "PERMISSION_DENIED" as const, message: "denied", path: CACHE_PATH }),
+			},
+		});
+
+		const result = await writeUpdateCache({
+			fs,
+			cachePath: CACHE_PATH,
+			latestVersion: "2.0.0",
+			now: () => NOW,
+		});
+
+		expect(Result.isErr(result)).toBe(true);
+	});
+
+	test("after a self-update cache write, checkForUpdates reports hasUpdate=false", async () => {
+		// Simulate a stale cache: a fresh check that still advertises the old latest version,
+		// while the binary has since been updated to that version via `wt self-update`.
+		const fs = createFakeFilesystem({
+			files: { [CACHE_PATH]: cacheJson({ checkedAt: NOW - 1000, latestVersion: "1.0.0" }) },
+		});
+
+		const before = await checkForUpdates({
+			fs,
+			cachePath: CACHE_PATH,
+			currentVersion: "1.0.0",
+			now: () => NOW,
+		});
+		expect(before.hasUpdate).toBe(false);
+
+		// self-update writes the just-installed version into the cache.
+		await writeUpdateCache({ fs, cachePath: CACHE_PATH, latestVersion: "1.0.0", now: () => NOW });
+
+		// Next run: current binary version === cached latest version → no stale notice.
+		const after = await checkForUpdates({
+			fs,
+			cachePath: CACHE_PATH,
+			currentVersion: "1.0.0",
+			now: () => NOW,
+		});
+		expect(after).toEqual({ hasUpdate: false, latestVersion: "1.0.0", isFresh: true });
 	});
 });
 

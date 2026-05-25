@@ -53,6 +53,29 @@ export async function checkForUpdates(deps: CheckForUpdatesDeps): Promise<CheckF
 	return { hasUpdate, latestVersion: cache.latestVersion, isFresh };
 }
 
+export interface WriteUpdateCacheDeps {
+	fs: FilesystemPort;
+	cachePath: string;
+	latestVersion: string;
+	now?: () => number;
+}
+
+/**
+ * Persists the known latest version to the update-check cache.
+ * Used after a successful self-update to invalidate the stale "update available"
+ * notice, and as the storage primitive behind {@link refreshUpdateCache}.
+ */
+export async function writeUpdateCache(deps: WriteUpdateCacheDeps): Promise<Result<void>> {
+	const { fs, cachePath, latestVersion, now = Date.now } = deps;
+
+	const cache: UpdateCheckCache = { checkedAt: now(), latestVersion };
+	const result = await fs.writeFile(cachePath, JSON.stringify(cache));
+	if (R.isErr(result)) {
+		return R.err(new Error(result.error.message));
+	}
+	return R.ok(undefined);
+}
+
 export interface RefreshUpdateCacheDeps {
 	fs: FilesystemPort;
 	cachePath: string;
@@ -66,6 +89,5 @@ export async function refreshUpdateCache(deps: RefreshUpdateCacheDeps): Promise<
 	const result = await fetchLatest();
 	if (R.isErr(result)) return;
 
-	const cache: UpdateCheckCache = { checkedAt: now(), latestVersion: result.data.version };
-	await fs.writeFile(cachePath, JSON.stringify(cache));
+	await writeUpdateCache({ fs, cachePath, latestVersion: result.data.version, now });
 }
