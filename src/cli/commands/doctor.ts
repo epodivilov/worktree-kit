@@ -23,7 +23,7 @@ const SEVERITY_COLOR: Record<HealthSeverity, (s: string) => string> = {
 	info: pc.cyan,
 };
 
-function describeIssue(issue: HealthIssue, repoRoot: string): string {
+export function describeIssue(issue: HealthIssue, repoRoot: string): string {
 	const dp = (p: string) => (repoRoot ? formatDisplayPath(p, repoRoot) : p);
 	switch (issue.type) {
 		case "broken-symlink":
@@ -38,6 +38,8 @@ function describeIssue(issue: HealthIssue, repoRoot: string): string {
 			return `missing worktree directory  ${issue.branch || dp(issue.worktreePath)} ${pc.dim(`(${dp(issue.worktreePath)})`)}`;
 		case "empty-prefix-directory":
 			return `empty prefix directory    ${dp(issue.path)}`;
+		case "path-drift":
+			return `worktree path drift       ${issue.branch}  ${dp(issue.worktreePath)} ${pc.dim(`(expected ${dp(issue.expectedPath)})`)}`;
 		case "dirty-worktree":
 			return `dirty worktree            ${issue.branch || dp(issue.worktreePath)}`;
 	}

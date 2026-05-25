@@ -4,6 +4,7 @@ import type { HealthIssue, HealthReport } from "../../domain/entities/health-che
 import type { FilesystemPort } from "../../domain/ports/filesystem-port.ts";
 import type { GitPort } from "../../domain/ports/git-port.ts";
 import { Result as R, type Result } from "../../shared/result.ts";
+import { getExpectedWorktreePath, isDrifted } from "../../shared/worktree-drift.ts";
 import { loadConfig } from "./load-config.ts";
 
 export interface RunHealthCheckDeps {
@@ -84,6 +85,15 @@ export async function runHealthCheck(deps: RunHealthCheckDeps): Promise<Result<H
 				severity: "error",
 				worktreePath: wt.path,
 				branch: wt.branch,
+			});
+		}
+		if (config && isDrifted(wt, repoRoot, config.rootDir)) {
+			issues.push({
+				type: "path-drift",
+				severity: "warning",
+				worktreePath: wt.path,
+				branch: wt.branch,
+				expectedPath: getExpectedWorktreePath(repoRoot, config.rootDir, wt.branch),
 			});
 		}
 	}
