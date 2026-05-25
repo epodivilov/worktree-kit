@@ -27,6 +27,7 @@ export interface FakeGitOptions {
 	mergeBaseMap?: Map<string, string>;
 	commitCountMap?: Map<string, number>;
 	trackedPaths?: Set<string>;
+	lockedWorktrees?: Map<string, string>;
 	pruneFailPaths?: Map<string, string>;
 	pruneCalls?: string[];
 	rebaseCalls?: FakeRebaseCall[];
@@ -128,6 +129,10 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 		},
 
 		async removeWorktree(path: string, _options?: { force?: boolean }): Promise<Result<void, GitError>> {
+			const lockReason = options.lockedWorktrees?.get(path);
+			if (lockReason !== undefined) {
+				return Result.err({ code: "WORKTREE_LOCKED", message: lockReason });
+			}
 			const idx = store.findIndex((w) => w.path === path);
 			if (idx === -1) {
 				return Result.err({ code: "UNKNOWN", message: `Worktree not found at ${path}` });

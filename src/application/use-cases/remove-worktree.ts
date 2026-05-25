@@ -38,6 +38,16 @@ export async function removeWorktree(
 
 	const removeResult = await git.removeWorktree(worktree.path, { force: input.force });
 	if (!removeResult.success) {
+		if (removeResult.error.code === "WORKTREE_LOCKED") {
+			const reason = removeResult.error.message.trim();
+			const reasonPart = reason ? ` (lock reason: ${reason})` : "";
+			return R.err(
+				new Error(
+					`Worktree at "${worktree.path}" is locked${reasonPart}. ` +
+						`Unlock it with: git worktree unlock "${worktree.path}", then retry wt remove.`,
+				),
+			);
+		}
 		return R.err(new Error(`Failed to remove worktree: ${removeResult.error.message}`));
 	}
 

@@ -5,6 +5,7 @@ export interface GitError {
 	readonly code:
 		| "NOT_A_REPO"
 		| "WORKTREE_EXISTS"
+		| "WORKTREE_LOCKED"
 		| "BRANCH_EXISTS"
 		| "BRANCH_NOT_MERGED"
 		| "BRANCH_NOT_FOUND"
