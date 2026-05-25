@@ -68,6 +68,52 @@ describe("createWorktree", () => {
 		expectErr(result);
 	});
 
+	test("returns actionable error when target path matches an existing worktree", async () => {
+		let createCalled = false;
+		const baseGit = createFakeGit({
+			root: ROOT,
+			worktrees: [{ path: "/fake/worktrees/feat-x", branch: "feat-x", head: "abc", isMain: false, isPrunable: false }],
+		});
+		const git = {
+			...baseGit,
+			async createWorktree(branch: string, path: string, baseBranch?: string) {
+				createCalled = true;
+				return baseGit.createWorktree(branch, path, baseBranch);
+			},
+		};
+		const fs = createFakeFilesystem({ files: { [`${ROOT}/${CONFIG_FILENAME}`]: CONFIG }, cwd: ROOT });
+		const result = await createWorktree({ branch: "feat-x" }, { git, fs });
+
+		const error = expectErr(result);
+		expect(error.message).toContain("already exists at");
+		expect(error.message).toContain("wt remove feat-x");
+		expect(createCalled).toBe(false);
+	});
+
+	test("returns actionable error when target path exists but is not a worktree", async () => {
+		const git = createFakeGit({ root: ROOT, worktrees: [] });
+		const fs = createFakeFilesystem({
+			files: { [`${ROOT}/${CONFIG_FILENAME}`]: CONFIG },
+			directories: ["/fake/worktrees/feat-collide"],
+			cwd: ROOT,
+		});
+		const result = await createWorktree({ branch: "feat-collide" }, { git, fs });
+
+		const error = expectErr(result);
+		expect(error.message).toContain("already exists but is not a worktree");
+	});
+
+	test("detects collision in dry-run mode", async () => {
+		const git = createFakeGit({
+			root: ROOT,
+			worktrees: [{ path: "/fake/worktrees/feat-x", branch: "feat-x", head: "abc", isMain: false, isPrunable: false }],
+		});
+		const fs = createFakeFilesystem({ files: { [`${ROOT}/${CONFIG_FILENAME}`]: CONFIG }, cwd: ROOT });
+		const result = await createWorktree({ branch: "feat-x", dryRun: true }, { git, fs });
+
+		expectErr(result);
+	});
+
 	test("works without config (no files to copy)", async () => {
 		const git = createFakeGit({ root: ROOT, worktrees: [] });
 		const fs = createFakeFilesystem({ cwd: ROOT });
