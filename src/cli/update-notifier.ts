@@ -5,7 +5,7 @@ import type { Container } from "../infrastructure/container.ts";
 import { fetchLatestVersion } from "../infrastructure/github-releases.ts";
 import { getCacheDir } from "../shared/xdg-paths.ts";
 
-const UPDATE_CHECK_FILENAME = "update-check.json";
+export const UPDATE_CHECK_FILENAME = "update-check.json";
 
 const SKIP_FLAGS = new Set(["--help", "-h", "--version", "-v"]);
 

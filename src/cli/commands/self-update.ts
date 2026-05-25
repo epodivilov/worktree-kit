@@ -1,11 +1,15 @@
+import { join } from "node:path";
 import { defineCommand } from "citty";
 import pc from "picocolors";
 import pkg from "../../../package.json";
+import { writeUpdateCache } from "../../application/use-cases/check-for-updates.ts";
 import type { Container } from "../../infrastructure/container.ts";
 import { fetchLatestVersion } from "../../infrastructure/github-releases.ts";
 import { Result as R, type Result } from "../../shared/result.ts";
+import { getCacheDir } from "../../shared/xdg-paths.ts";
 import { EXIT_FAILURE } from "../exit-codes.ts";
 import { CommandError, runCommand } from "../run-command.ts";
+import { UPDATE_CHECK_FILENAME } from "../update-notifier.ts";
 
 const REPO = "epodivilov/worktree-kit";
 
@@ -103,7 +107,7 @@ export function selfUpdateCommand(container: Container) {
 			description: "Update worktree-kit to the latest version",
 		},
 		async run() {
-			const { ui } = container;
+			const { ui, fs } = container;
 
 			ui.intro("worktree-kit self-update");
 
@@ -156,6 +160,15 @@ export function selfUpdateCommand(container: Container) {
 				}
 
 				spinner.stop(pc.green("Updated"));
+
+				// Refresh the update-check cache so the stale "update available" notice
+				// does not appear on the next run. A failure here must not fail the update.
+				await writeUpdateCache({
+					fs,
+					cachePath: join(getCacheDir(), UPDATE_CHECK_FILENAME),
+					latestVersion: latest.version,
+				});
+
 				ui.success(`${currentVersion} → ${latest.version}`);
 				ui.outro("Done!");
 			}, ui);
