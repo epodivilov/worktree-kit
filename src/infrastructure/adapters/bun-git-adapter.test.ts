@@ -507,5 +507,28 @@ describe("BunGitAdapter", () => {
 				process.chdir(originalCwd);
 			}
 		});
+
+		test("returns WORKTREE_LOCKED with lock reason for a locked worktree", async () => {
+			await using tmp = await createTempDir();
+			const repoPath = await initTestRepo(tmp.path);
+			const wtPath = join(tmp.path, "feature-wt");
+			await Bun.$`git -C ${repoPath} branch feature`.quiet();
+			await Bun.$`git -C ${repoPath} worktree add ${wtPath} feature`.quiet();
+			await Bun.$`git -C ${repoPath} worktree lock ${wtPath} --reason ${"claude agent (pid 4242)"}`.quiet();
+
+			const originalCwd = process.cwd();
+			process.chdir(repoPath);
+			try {
+				const error = expectErr(await git.removeWorktree(wtPath));
+				expect(error.code).toBe("WORKTREE_LOCKED");
+				expect(error.message).toBe("claude agent (pid 4242)");
+
+				// Locked worktree must remain.
+				const worktrees = expectOk(await git.listWorktrees());
+				expect(worktrees).toHaveLength(2);
+			} finally {
+				process.chdir(originalCwd);
+			}
+		});
 	});
 });

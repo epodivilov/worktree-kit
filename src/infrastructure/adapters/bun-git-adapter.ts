@@ -249,8 +249,17 @@ export function createBunGitAdapter(logger: LoggerPort): GitPort {
 				args.push(path);
 				const { exitCode, stderr } = await runGit(args);
 				if (exitCode !== 0) {
+					const lowerStderr = stderr.toLowerCase();
+					if (lowerStderr.includes("locked working tree")) {
+						const reasonMatch = stderr.match(/lock reason:\s*(.+)/i);
+						const reason = reasonMatch?.[1]?.trim();
+						return Result.err({
+							code: "WORKTREE_LOCKED",
+							message: reason ?? "",
+						});
+					}
 					return Result.err({
-						code: stderr.toLowerCase().includes("not a git repository") ? "NOT_A_REPO" : "UNKNOWN",
+						code: lowerStderr.includes("not a git repository") ? "NOT_A_REPO" : "UNKNOWN",
 						message: stderr || "Failed to remove worktree",
 					});
 				}

@@ -69,6 +69,25 @@ describe("removeWorktree", () => {
 		expect(output.pruned).toBe(true);
 	});
 
+	test("returns actionable error with unlock command when worktree is locked", async () => {
+		const git = createFakeGit({
+			worktrees: [main, feature],
+			lockedWorktrees: new Map([[feature.path, "claude agent task-xyz (pid 1234)"]]),
+		});
+
+		const result = await removeWorktree({ worktree: feature }, { git });
+		const error = expectErr(result);
+
+		expect(error.message).toContain(feature.path);
+		expect(error.message).toContain(`git worktree unlock "${feature.path}"`);
+		expect(error.message).toContain("claude agent task-xyz (pid 1234)");
+		expect(error.message).toContain("retry wt remove");
+
+		// Locked worktree must not be removed.
+		const remaining = expectOk(await git.listWorktrees());
+		expect(remaining.find((w) => w.path === feature.path)).toBeDefined();
+	});
+
 	test("pruning one orphan does not affect other orphans", async () => {
 		const orphanA: Worktree = {
 			path: "/repo-orphan-a",
