@@ -245,6 +245,56 @@ describe("runHealthCheck", () => {
 		});
 	});
 
+	test("drifted worktree (dir name differs from branch) — flagged as warning", async () => {
+		const driftedWt: Worktree = {
+			path: `${ROOT_DIR}/old-name`,
+			branch: "renamed-branch",
+			head: "ddd",
+			isMain: false,
+			isPrunable: false,
+		};
+		const fs = createFakeFilesystem({
+			files: { [CONFIG_PATH]: configFile() },
+			directories: [ROOT, ROOT_DIR, driftedWt.path],
+		});
+		const git = createFakeGit({ root: ROOT, worktrees: [mainWt, driftedWt] });
+
+		const report = expectOk(await runHealthCheck({ git, fs }));
+
+		expect(report.healthy).toBe(false);
+		expect(report.issues).toContainEqual({
+			type: "path-drift",
+			severity: "warning",
+			worktreePath: driftedWt.path,
+			branch: "renamed-branch",
+			expectedPath: `${ROOT_DIR}/renamed-branch`,
+		});
+	});
+
+	test("worktree whose dir matches its branch — NOT flagged as drift", async () => {
+		const fs = createFakeFilesystem({
+			files: { [CONFIG_PATH]: configFile() },
+			directories: [ROOT, ROOT_DIR, featureWt.path],
+		});
+		const git = createFakeGit({ root: ROOT, worktrees: [mainWt, featureWt] });
+
+		const report = expectOk(await runHealthCheck({ git, fs }));
+
+		expect(report.issues.filter((i) => i.type === "path-drift")).toHaveLength(0);
+	});
+
+	test("main worktree is never flagged as drift", async () => {
+		const fs = createFakeFilesystem({
+			files: { [CONFIG_PATH]: configFile() },
+			directories: [ROOT, ROOT_DIR, featureWt.path],
+		});
+		const git = createFakeGit({ root: ROOT, worktrees: [mainWt, featureWt] });
+
+		const report = expectOk(await runHealthCheck({ git, fs }));
+
+		expect(report.issues.some((i) => i.type === "path-drift" && i.worktreePath === ROOT)).toBe(false);
+	});
+
 	test("multiple issues collected with correct severity", async () => {
 		const emptyPrefix = `${ROOT_DIR}/abandoned`;
 		const fs = createFakeFilesystem({

@@ -7,6 +7,7 @@ export type HealthIssue =
 	| { type: "config-ref-missing"; severity: "error"; path: string; field: "copy" | "symlinks" }
 	| { type: "missing-worktree-directory"; severity: "error"; worktreePath: string; branch: string }
 	| { type: "empty-prefix-directory"; severity: "warning"; path: string }
+	| { type: "path-drift"; severity: "warning"; worktreePath: string; branch: string; expectedPath: string }
 	| { type: "dirty-worktree"; severity: "info"; worktreePath: string; branch: string };
 
 export interface HealthReport {
