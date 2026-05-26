@@ -30,6 +30,8 @@ export interface FakeGitOptions {
 	lockedWorktrees?: Map<string, string>;
 	pruneFailPaths?: Map<string, string>;
 	pruneCalls?: string[];
+	moveFailPaths?: Map<string, { code: GitError["code"]; message: string }>;
+	moveCalls?: { from: string; to: string }[];
 	rebaseCalls?: FakeRebaseCall[];
 	revListMap?: Map<string, string[]>;
 	revListCherryPickMap?: Map<string, string[]>;
@@ -138,6 +140,20 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 				return Result.err({ code: "UNKNOWN", message: `Worktree not found at ${path}` });
 			}
 			store.splice(idx, 1);
+			return Result.ok(undefined);
+		},
+
+		async moveWorktree(from: string, to: string): Promise<Result<void, GitError>> {
+			options.moveCalls?.push({ from, to });
+			const failure = options.moveFailPaths?.get(from);
+			if (failure !== undefined) {
+				return Result.err({ code: failure.code, message: failure.message });
+			}
+			const idx = store.findIndex((w) => w.path === from);
+			if (idx === -1) {
+				return Result.err({ code: "UNKNOWN", message: `Worktree not found at ${from}` });
+			}
+			store[idx] = { ...(store[idx] as Worktree), path: to };
 			return Result.ok(undefined);
 		},
 

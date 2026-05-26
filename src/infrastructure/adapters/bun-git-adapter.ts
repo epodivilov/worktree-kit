@@ -272,6 +272,21 @@ export function createBunGitAdapter(logger: LoggerPort): GitPort {
 			}
 		},
 
+		async moveWorktree(from: string, to: string): Promise<Result<void, GitError>> {
+			try {
+				const { exitCode, stderr } = await runGit(["worktree", "move", from, to]);
+				if (exitCode !== 0) {
+					return Result.err(mapMoveError(stderr));
+				}
+				return Result.ok(undefined);
+			} catch {
+				return Result.err({
+					code: "UNKNOWN",
+					message: "Failed to move worktree",
+				});
+			}
+		},
+
 		async pruneWorktree(path: string): Promise<Result<void, GitError>> {
 			try {
 				const { exitCode, stdout: gitCommonDir } = await runGit(["rev-parse", "--git-common-dir"]);
@@ -780,6 +795,24 @@ async function canonicalizePath(p: string): Promise<string> {
 			return p;
 		}
 	}
+}
+
+function mapMoveError(stderr: string): GitError {
+	const lower = stderr.toLowerCase();
+
+	if (lower.includes("locked working tree")) {
+		const reasonMatch = stderr.match(/lock reason:\s*(.+)/i);
+		const reason = reasonMatch?.[1]?.trim();
+		return { code: "WORKTREE_LOCKED", message: reason ?? stderr };
+	}
+	if (lower.includes("already exists")) {
+		return { code: "WORKTREE_EXISTS", message: stderr };
+	}
+	if (lower.includes("not a git repository")) {
+		return { code: "NOT_A_REPO", message: stderr };
+	}
+
+	return { code: "UNKNOWN", message: stderr || "Failed to move worktree" };
 }
 
 function mapCreateError(stderr: string): GitError {
