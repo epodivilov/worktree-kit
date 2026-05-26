@@ -971,3 +971,65 @@ describe("updateWorktrees — post-update hooks", () => {
 		expect(reportB?.hookNotifications[0]?.level).toBe("warn");
 	});
 });
+
+describe("updateWorktrees — upstream sync", () => {
+	test("upstream set — fast-forwards default branch from upstream remote", async () => {
+		const worktrees = [mainWt, featureA];
+		const mergeFFOnlyCalls: { worktreePath: string; branch: string; remote: string }[] = [];
+		const git = createFakeGit({ worktrees, mergeFFOnlyCalls, ...flatBranchesConfig(worktrees) });
+
+		const result = await updateWorktrees({ dryRun: false, upstream: "upstream" }, { git });
+
+		const output = expectOk(result);
+		expect(output.syncedFromUpstream).toBe("upstream");
+		const ff = mergeFFOnlyCalls.find((c) => c.worktreePath === "/repo");
+		expect(ff?.remote).toBe("upstream");
+		expect(ff?.branch).toBe("main");
+	});
+
+	test("upstream set with post-update hook — runs hook for default branch", async () => {
+		const worktrees = [mainWt, featureA];
+		const git = createFakeGit({ worktrees, ...flatBranchesConfig(worktrees) });
+		const shell = createFakeShell();
+
+		const result = await updateWorktrees(
+			{ dryRun: false, upstream: "upstream", postUpdateHooks: ["git push origin main"], repoRoot: "/repo" },
+			{ git, shell },
+		);
+
+		const output = expectOk(result);
+		const mainReport = output.reports.find((r) => r.branch === "main");
+		expect(mainReport?.result).toMatchObject({ status: "is-default-branch" });
+		expect(mainReport?.hookNotifications).toHaveLength(1);
+
+		const mainHookCall = shell.calls.find((c) => c.options.cwd === "/repo");
+		expect(mainHookCall).toBeDefined();
+		expect(mainHookCall?.options.env).toMatchObject({
+			WORKTREE_BRANCH: "main",
+			WORKTREE_PATH: "/repo",
+			BASE_BRANCH: "upstream/main",
+		});
+	});
+
+	test("upstream unset — fast-forwards from origin and no hook runs for default branch", async () => {
+		const worktrees = [mainWt, featureA];
+		const mergeFFOnlyCalls: { worktreePath: string; branch: string; remote: string }[] = [];
+		const git = createFakeGit({ worktrees, mergeFFOnlyCalls, ...flatBranchesConfig(worktrees) });
+		const shell = createFakeShell();
+
+		const result = await updateWorktrees(
+			{ dryRun: false, postUpdateHooks: ["git push"], repoRoot: "/repo" },
+			{ git, shell },
+		);
+
+		const output = expectOk(result);
+		expect(output.syncedFromUpstream).toBeUndefined();
+		const ff = mergeFFOnlyCalls.find((c) => c.worktreePath === "/repo");
+		expect(ff?.remote).toBe("origin");
+
+		const mainReport = output.reports.find((r) => r.branch === "main");
+		expect(mainReport?.hookNotifications).toHaveLength(0);
+		// No hook should have run in the main worktree path.
+		expect(shell.calls.find((c) => c.options.cwd === "/repo")).toBeUndefined();
+	});
+});

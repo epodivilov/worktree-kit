@@ -13,6 +13,8 @@ export interface UpdateWorktreesInput {
 	postUpdateHooks?: readonly string[];
 	onConflictHooks?: readonly string[];
 	repoRoot?: string;
+	/** Name of the upstream remote to sync the default branch from (fork workflow). */
+	upstream?: string;
 }
 
 export type WorktreeUpdateStatus =
@@ -36,6 +38,8 @@ export interface WorktreeReport {
 export interface UpdateWorktreesOutput {
 	defaultBranch: string;
 	defaultBranchUpdate: "ff-updated" | "ref-updated";
+	/** Set to the upstream remote name when the default branch was synced from upstream. */
+	syncedFromUpstream?: string;
 	reports: WorktreeReport[];
 }
 
@@ -170,13 +174,41 @@ export async function updateWorktrees(
 
 	const mainWorktree = worktrees.find((w) => w.branch === defaultBranch);
 	let defaultBranchUpdate: "ff-updated" | "ref-updated";
+	let defaultBranchHookNotifications: Notification[] = [];
+	let syncedFromUpstream: string | undefined;
 
 	if (mainWorktree) {
-		const ffResult = await git.mergeFFOnly(mainWorktree.path, defaultBranch);
+		const ffResult = input.upstream
+			? await git.mergeFFOnly(mainWorktree.path, defaultBranch, input.upstream)
+			: await git.mergeFFOnly(mainWorktree.path, defaultBranch);
 		if (!ffResult.success) {
 			return R.err(new Error(`Failed to fast-forward ${defaultBranch}: ${ffResult.error.message}`));
 		}
 		defaultBranchUpdate = "ff-updated";
+
+		// When syncing the default branch from an upstream remote, run post-update hooks
+		// for the default branch too (mirrors the feature-branch path).
+		if (input.upstream) {
+			syncedFromUpstream = input.upstream;
+			if (!input.dryRun && input.postUpdateHooks?.length && deps.shell) {
+				const baseRef = `${input.upstream}/${defaultBranch}`;
+				const hookResult = await runHooks(
+					{
+						commands: input.postUpdateHooks,
+						context: {
+							worktreePath: mainWorktree.path,
+							branch: defaultBranch,
+							repoRoot: input.repoRoot ?? "",
+							baseBranch: baseRef,
+						},
+					},
+					{ shell: deps.shell },
+				);
+				if (hookResult.success) {
+					defaultBranchHookNotifications = hookResult.data.notifications;
+				}
+			}
+		}
 	} else {
 		const refResult = await git.updateBranchRef(defaultBranch);
 		if (!refResult.success) {
@@ -215,7 +247,7 @@ export async function updateWorktrees(
 			branch: defaultBranch,
 			path: mainWorktree.path,
 			result: { status: "is-default-branch" },
-			hookNotifications: [],
+			hookNotifications: defaultBranchHookNotifications,
 		});
 	}
 
@@ -431,5 +463,5 @@ export async function updateWorktrees(
 		}
 	}
 
-	return R.ok({ defaultBranch, defaultBranchUpdate, reports });
+	return R.ok({ defaultBranch, defaultBranchUpdate, syncedFromUpstream, reports });
 }

@@ -155,6 +155,42 @@ describe("initConfig", () => {
 		expect(parsed.rootDir).toBe(INIT_ROOT_DIR);
 	});
 
+	test("with upstream url and no existing remote — adds remote and records config field", async () => {
+		const fs = createFakeFilesystem();
+		const addRemoteCalls: { name: string; url: string }[] = [];
+		const git = createFakeGit({ root: ROOT, remotes: ["origin"], addRemoteCalls });
+		const result = await initConfig({ upstream: "https://github.com/orig/repo.git" }, { fs, git });
+
+		expectOk(result);
+		expect(addRemoteCalls).toEqual([{ name: "upstream", url: "https://github.com/orig/repo.git" }]);
+		const parsed = JSON.parse(expectOk(await fs.readFile(CONFIG_PATH)));
+		expect(parsed.upstream).toBe("upstream");
+	});
+
+	test("with upstream url and existing upstream remote — records config field but does not add remote", async () => {
+		const fs = createFakeFilesystem();
+		const addRemoteCalls: { name: string; url: string }[] = [];
+		const git = createFakeGit({ root: ROOT, remotes: ["origin", "upstream"], addRemoteCalls });
+		const result = await initConfig({ upstream: "https://github.com/orig/repo.git" }, { fs, git });
+
+		expectOk(result);
+		expect(addRemoteCalls).toEqual([]);
+		const parsed = JSON.parse(expectOk(await fs.readFile(CONFIG_PATH)));
+		expect(parsed.upstream).toBe("upstream");
+	});
+
+	test("without upstream — no upstream key and no addRemote call", async () => {
+		const fs = createFakeFilesystem();
+		const addRemoteCalls: { name: string; url: string }[] = [];
+		const git = createFakeGit({ root: ROOT, remotes: ["origin"], addRemoteCalls });
+		const result = await initConfig({}, { fs, git });
+
+		expectOk(result);
+		expect(addRemoteCalls).toEqual([]);
+		const parsed = JSON.parse(expectOk(await fs.readFile(CONFIG_PATH)));
+		expect(parsed.upstream).toBeUndefined();
+	});
+
 	test("migrate returns error when new config already exists", async () => {
 		const fs = createFakeFilesystem({
 			files: {

@@ -47,6 +47,7 @@ export function updateCommand(container: Container) {
 				const configResult = await loadConfig({ git, fs });
 				const postUpdateHooks = configResult.success ? configResult.data.config.hooks["post-update"] : [];
 				const onConflictHooks = configResult.success ? configResult.data.config.hooks["on-conflict"] : [];
+				const upstream = configResult.success ? configResult.data.config.upstream : undefined;
 
 				let repoRoot = "";
 				if (postUpdateHooks.length > 0 || onConflictHooks.length > 0) {
@@ -76,7 +77,7 @@ export function updateCommand(container: Container) {
 
 				const needsShell = postUpdateHooks.length > 0 || onConflictHooks.length > 0;
 				const result = await updateWorktrees(
-					{ dryRun, branch, postUpdateHooks, onConflictHooks, repoRoot },
+					{ dryRun, branch, postUpdateHooks, onConflictHooks, repoRoot, upstream },
 					{ git, shell: needsShell ? shell : undefined },
 				);
 
@@ -89,9 +90,11 @@ export function updateCommand(container: Container) {
 
 				spinner.stop(pc.green("Done"));
 
-				const { defaultBranch, defaultBranchUpdate, reports } = result.data;
+				const { defaultBranch, defaultBranchUpdate, syncedFromUpstream, reports } = result.data;
 
-				if (defaultBranchUpdate === "ff-updated") {
+				if (syncedFromUpstream) {
+					ui.success(`${defaultBranch} synced from ${syncedFromUpstream}/${defaultBranch}`);
+				} else if (defaultBranchUpdate === "ff-updated") {
 					ui.success(`${defaultBranch} fast-forwarded`);
 				} else {
 					ui.success(`${defaultBranch} ref updated`);
@@ -103,6 +106,10 @@ export function updateCommand(container: Container) {
 
 					switch (report.result.status) {
 						case "is-default-branch":
+							if (hookFailures.length > 0) {
+								const failMsgs = hookFailures.map((n) => n.message).join("; ");
+								ui.warn(`${report.branch} post-update hooks — ${failMsgs}`);
+							}
 							break;
 						case "rebased":
 						case "rebased-dirty": {

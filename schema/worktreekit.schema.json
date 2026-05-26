@@ -70,6 +70,10 @@
 			"default": "ask",
 			"description": "Default base branch strategy: 'current' uses the current branch, 'default' uses the repository default branch, 'ask' prompts the user"
 		},
+		"upstream": {
+			"type": "string",
+			"description": "Name of the upstream git remote to sync the default branch from during 'wt update' (fork workflow). Configure via 'wt init --upstream <url>'"
+		},
 		"create": {
 			"type": "object",
 			"description": "Options for the create command",

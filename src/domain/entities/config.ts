@@ -23,6 +23,7 @@ export interface WorktreeConfig {
 	readonly symlinks: readonly string[];
 	readonly hooks: HooksConfig;
 	readonly defaultBase: DefaultBase;
+	readonly upstream?: string;
 	readonly create: CreateCommandConfig;
 	readonly remove: RemoveCommandConfig;
 }

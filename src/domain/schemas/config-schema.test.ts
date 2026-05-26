@@ -191,4 +191,25 @@ describe("WorktreeConfigSchema", () => {
 		});
 		expect(result.success).toBe(false);
 	});
+
+	test("config with upstream parses correctly", () => {
+		const result = v.safeParse(WorktreeConfigSchema, { rootDir: "../wt", upstream: "upstream" });
+		expect(result.success).toBe(true);
+		if (result.success) {
+			expect(result.output.upstream).toBe("upstream");
+		}
+	});
+
+	test("config without upstream defaults to undefined", () => {
+		const result = v.safeParse(WorktreeConfigSchema, { rootDir: "../wt" });
+		expect(result.success).toBe(true);
+		if (result.success) {
+			expect(result.output.upstream).toBeUndefined();
+		}
+	});
+
+	test("rejects non-string upstream", () => {
+		const result = v.safeParse(WorktreeConfigSchema, { rootDir: "../wt", upstream: 123 });
+		expect(result.success).toBe(false);
+	});
 });
