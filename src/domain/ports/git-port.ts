@@ -35,8 +35,10 @@ export interface GitPort {
 	deleteRemoteBranch(branch: string, remote?: string): Promise<Result<void, GitError>>;
 	fetchAll(): Promise<Result<void, GitError>>;
 	fetchPrune(): Promise<Result<void, GitError>>;
+	addRemote(name: string, url: string): Promise<Result<void, GitError>>;
+	listRemotes(): Promise<Result<string[], GitError>>;
 	listGoneBranches(): Promise<Result<string[], GitError>>;
-	mergeFFOnly(worktreePath: string, branch: string): Promise<Result<void, GitError>>;
+	mergeFFOnly(worktreePath: string, branch: string, remote?: string): Promise<Result<void, GitError>>;
 	updateBranchRef(branch: string): Promise<Result<void, GitError>>;
 	rebase(
 		worktreePath: string,
