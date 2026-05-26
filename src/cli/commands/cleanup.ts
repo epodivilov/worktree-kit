@@ -142,7 +142,9 @@ export function cleanupCommand(container: Container) {
 							ui.warn(`${report.branch} — skipped (not fully merged, use --force)`);
 							break;
 						case "skipped-dirty":
-							ui.warn(`${report.branch} — skipped (worktree has uncommitted changes)`);
+							ui.warn(
+								`${report.branch} — skipped: uncommitted changes in ${dp(report.worktreePath)}. Commit or stash them and re-run, or use --force to discard.`,
+							);
 							break;
 						case "orphan-cleaned": {
 							const reason = report.branch ? "branch does not exist" : "detached HEAD";
@@ -153,7 +155,9 @@ export function cleanupCommand(container: Container) {
 						case "orphan-skipped-dirty": {
 							const reason = report.branch ? "branch does not exist" : "detached HEAD";
 							const name = report.branch || dp(report.worktreePath);
-							ui.warn(`${name} — orphaned worktree skipped (${reason}, uncommitted changes, use --force)`);
+							ui.warn(
+								`${name} — orphaned worktree skipped (${reason}, uncommitted changes). Commit or stash them and re-run, or use --force to discard.`,
+							);
 							break;
 						}
 						case "error":

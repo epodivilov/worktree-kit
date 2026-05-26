@@ -204,7 +204,9 @@ export function updateCommand(container: Container) {
 							ui.warn(`${cleanupReport.branch} — skipped (not fully merged, use 'wt cleanup --force')`);
 							break;
 						case "skipped-dirty":
-							ui.warn(`${cleanupReport.branch} — skipped (worktree has uncommitted changes)`);
+							ui.warn(
+								`${cleanupReport.branch} — skipped: uncommitted changes in ${dp(cleanupReport.worktreePath)}. Commit or stash them, then run 'wt cleanup' (or 'wt cleanup --force' to discard).`,
+							);
 							break;
 						case "dry-run": {
 							const name = cleanupReport.branch || dp(cleanupReport.worktreePath);
@@ -220,7 +222,9 @@ export function updateCommand(container: Container) {
 						case "orphan-skipped-dirty": {
 							const reason = cleanupReport.branch ? "branch does not exist" : "detached HEAD";
 							const name = cleanupReport.branch || dp(cleanupReport.worktreePath);
-							ui.warn(`${name} — orphaned worktree skipped (${reason}, uncommitted changes)`);
+							ui.warn(
+								`${name} — orphaned worktree skipped (${reason}, uncommitted changes). Commit or stash them, then run 'wt cleanup' (or 'wt cleanup --force' to discard).`,
+							);
 							break;
 						}
 						case "orphan-dry-run": {
