@@ -25,7 +25,10 @@ export interface FakeGitOptions {
 	fetchFails?: boolean;
 	mergeFFOnlyFails?: boolean;
 	remotes?: string[];
+	/** Backing name→url map for getRemoteUrl/setRemoteUrl. */
+	remoteUrls?: Map<string, string>;
 	addRemoteCalls?: { name: string; url: string }[];
+	setRemoteUrlCalls?: { name: string; url: string }[];
 	mergeFFOnlyCalls?: { worktreePath: string; branch: string; remote: string }[];
 	mergeBaseMap?: Map<string, string>;
 	commitCountMap?: Map<string, number>;
@@ -210,6 +213,21 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 		async addRemote(name: string, url: string): Promise<Result<void, GitError>> {
 			options.addRemoteCalls?.push({ name, url });
 			remoteStore.push(name);
+			options.remoteUrls?.set(name, url);
+			return Result.ok(undefined);
+		},
+
+		async getRemoteUrl(name: string): Promise<Result<string, GitError>> {
+			const url = options.remoteUrls?.get(name);
+			if (url === undefined) {
+				return Result.err({ code: "UNKNOWN", message: `No URL configured for remote "${name}"` });
+			}
+			return Result.ok(url);
+		},
+
+		async setRemoteUrl(name: string, url: string): Promise<Result<void, GitError>> {
+			options.setRemoteUrlCalls?.push({ name, url });
+			options.remoteUrls?.set(name, url);
 			return Result.ok(undefined);
 		},
 

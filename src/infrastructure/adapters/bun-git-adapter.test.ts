@@ -519,6 +519,65 @@ describe("BunGitAdapter", () => {
 				process.chdir(originalCwd);
 			}
 		});
+
+		test("getRemoteUrl returns the configured URL", async () => {
+			await using tmp = await createTempDir();
+			const repoPath = await initTestRepo(tmp.path);
+			await Bun.$`git -C ${repoPath} remote add upstream https://example.com/orig/repo.git`.quiet();
+
+			const originalCwd = process.cwd();
+			process.chdir(repoPath);
+			try {
+				const url = expectOk(await git.getRemoteUrl("upstream"));
+				expect(url).toBe("https://example.com/orig/repo.git");
+			} finally {
+				process.chdir(originalCwd);
+			}
+		});
+
+		test("getRemoteUrl fails for an unknown remote", async () => {
+			await using tmp = await createTempDir();
+			const repoPath = await initTestRepo(tmp.path);
+
+			const originalCwd = process.cwd();
+			process.chdir(repoPath);
+			try {
+				const error = expectErr(await git.getRemoteUrl("nope"));
+				expect(error.code).toBe("UNKNOWN");
+			} finally {
+				process.chdir(originalCwd);
+			}
+		});
+
+		test("setRemoteUrl updates the URL reported by getRemoteUrl", async () => {
+			await using tmp = await createTempDir();
+			const repoPath = await initTestRepo(tmp.path);
+			await Bun.$`git -C ${repoPath} remote add upstream https://example.com/orig/repo.git`.quiet();
+
+			const originalCwd = process.cwd();
+			process.chdir(repoPath);
+			try {
+				expectOk(await git.setRemoteUrl("upstream", "https://example.com/new/repo.git"));
+				const url = expectOk(await git.getRemoteUrl("upstream"));
+				expect(url).toBe("https://example.com/new/repo.git");
+			} finally {
+				process.chdir(originalCwd);
+			}
+		});
+
+		test("setRemoteUrl fails for an unknown remote", async () => {
+			await using tmp = await createTempDir();
+			const repoPath = await initTestRepo(tmp.path);
+
+			const originalCwd = process.cwd();
+			process.chdir(repoPath);
+			try {
+				const error = expectErr(await git.setRemoteUrl("nope", "https://example.com/x.git"));
+				expect(error.code).toBe("UNKNOWN");
+			} finally {
+				process.chdir(originalCwd);
+			}
+		});
 	});
 
 	describe("removeWorktree", () => {

@@ -425,6 +425,30 @@ export function createBunGitAdapter(logger: LoggerPort): GitPort {
 			}
 		},
 
+		async getRemoteUrl(name: string): Promise<Result<string, GitError>> {
+			try {
+				const { exitCode, stdout, stderr } = await runGit(["remote", "get-url", name]);
+				if (exitCode !== 0) {
+					return Result.err({ code: "UNKNOWN", message: stderr || `Failed to get URL for remote "${name}"` });
+				}
+				return Result.ok(stdout);
+			} catch {
+				return Result.err({ code: "UNKNOWN", message: `Failed to get URL for remote "${name}"` });
+			}
+		},
+
+		async setRemoteUrl(name: string, url: string): Promise<Result<void, GitError>> {
+			try {
+				const { exitCode, stderr } = await runGit(["remote", "set-url", name, url]);
+				if (exitCode !== 0) {
+					return Result.err({ code: "UNKNOWN", message: stderr || `Failed to set URL for remote "${name}"` });
+				}
+				return Result.ok(undefined);
+			} catch {
+				return Result.err({ code: "UNKNOWN", message: `Failed to set URL for remote "${name}"` });
+			}
+		},
+
 		async listRemotes(): Promise<Result<string[], GitError>> {
 			try {
 				const { exitCode, stdout } = await runGit(["remote"]);
