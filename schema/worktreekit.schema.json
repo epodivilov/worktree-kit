@@ -71,8 +71,8 @@
 			"description": "Default base branch strategy: 'current' uses the current branch, 'default' uses the repository default branch, 'ask' prompts the user"
 		},
 		"upstream": {
-			"type": "string",
-			"description": "Name of the git remote whose default branch is used to fast-forward your local default branch (fork sync). Conventionally 'upstream', but may be any remote name. 'wt init' detects existing remotes and lets you pick one; 'wt init --upstream <url>' adds/updates the 'upstream' remote and records it"
+			"oneOf": [{ "type": "string" }, { "const": false }],
+			"description": "Name of the git remote whose default branch is used to fast-forward your local default branch (fork sync). A remote name (conventionally 'upstream') enables fork sync; `false` opts out so 'wt update' never syncs from an upstream or asks again. 'wt init' detects existing remotes and lets you pick one; 'wt update' auto-detects an unconfigured upstream and offers to save it; 'wt init --upstream <url>' adds/updates the 'upstream' remote and records it"
 		},
 		"create": {
 			"type": "object",
