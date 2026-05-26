@@ -93,6 +93,16 @@ wt init [options]
 |------|-------|-------------|
 | `--force` | `-f` | Overwrite existing config |
 | `--migrate` | `-m` | Rename legacy `.worktreekitrc` to `.worktreekit.jsonc` |
+| `--local` | `-l` | Create `.worktreekit.local.jsonc` instead |
+| `--upstream <url>` | | Add an `upstream` git remote (for fork workflows) and record it in config |
+
+For a fork workflow, point `--upstream` at the original repository so `wt update` can sync your default branch from it:
+
+```bash
+wt init --upstream git@github.com:original-org/repo.git
+```
+
+This adds the `upstream` remote (if not already present) and writes `"upstream": "upstream"` into the config.
 
 ### `wt create`
 
@@ -225,6 +235,8 @@ wt update --dry-run
 2. Fast-forwards the default branch (or updates its ref if no worktree exists for it)
 3. Detects parent branches via merge-base
 4. Rebases feature branches in correct order — parents before children
+
+**Fork workflow** — when `upstream` is set in config (see `wt init --upstream`), the default branch is fast-forwarded from `<upstream>/<default>` instead of `origin/<default>`. After a successful upstream sync, `post-update` hooks also run for the default branch (so you can, for example, push the synced default branch back to your fork).
 
 If a worktree has uncommitted changes, a temporary WIP commit is created before rebase and reset afterwards. On rebase conflict, the rebase is aborted and the issue is reported — unless `on-conflict` hooks are configured (see below).
 
@@ -392,6 +404,7 @@ Create a `.worktreekit.jsonc` file in the project root (or use `wt init`). JSONC
 | `copy` | `string[]` | `[]` | Files to copy. Supports exact paths, directories, glob patterns, and `!` negation |
 | `symlinks` | `string[]` | `[]` | Paths to symlink from root repo. Supports exact paths, glob patterns, and `!` negation |
 | `defaultBase` | `"current"` \| `"default"` \| `"ask"` | `"ask"` | Base branch selection strategy when creating new branches |
+| `upstream` | `string` | — | Name of the upstream remote to sync the default branch from during `wt update` (fork workflow). Configure via `wt init --upstream <url>` |
 | `create.base` | `string` | — | Fixed base branch for all new worktrees (overrides `defaultBase`) |
 | `remove.deleteBranch` | `boolean` | — | Auto-delete local branch on removal. Prompts if not set |
 | `remove.deleteRemoteBranch` | `boolean` | — | Auto-delete remote branch on removal. Prompts if not set |

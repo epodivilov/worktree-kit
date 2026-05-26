@@ -15,7 +15,11 @@ export interface InitConfigInput {
 	force?: boolean;
 	migrate?: boolean;
 	local?: boolean;
+	/** Git URL of an upstream remote to configure for fork workflows. */
+	upstream?: string;
 }
+
+const UPSTREAM_REMOTE_NAME = "upstream";
 
 export interface InitConfigOutput {
 	configPath: string;
@@ -70,6 +74,19 @@ export async function initConfig(
 		return R.err(new Error(`Config already exists at ${targetPath}`));
 	}
 
+	if (input.upstream) {
+		const remotesResult = await git.listRemotes();
+		if (!remotesResult.success) {
+			return R.err(new Error(`Failed to list remotes: ${remotesResult.error.message}`));
+		}
+		if (!remotesResult.data.includes(UPSTREAM_REMOTE_NAME)) {
+			const addResult = await git.addRemote(UPSTREAM_REMOTE_NAME, input.upstream);
+			if (!addResult.success) {
+				return R.err(new Error(`Failed to add upstream remote: ${addResult.error.message}`));
+			}
+		}
+	}
+
 	const content = JSON.stringify(
 		{
 			$schema: SCHEMA_URL,
@@ -77,6 +94,7 @@ export async function initConfig(
 			copy: [],
 			symlinks: [],
 			defaultBase: "ask",
+			...(input.upstream ? { upstream: UPSTREAM_REMOTE_NAME } : {}),
 		},
 		null,
 		2,

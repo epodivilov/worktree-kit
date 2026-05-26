@@ -30,6 +30,10 @@ export function initCommand(container: Container) {
 				description: "Create .worktreekit.local.jsonc instead",
 				default: false,
 			},
+			upstream: {
+				type: "string",
+				description: "Configure an 'upstream' git remote for fork workflows (adds the remote and records it in config)",
+			},
 		},
 		async run({ args }) {
 			const { ui, fs, git } = container;
@@ -37,7 +41,10 @@ export function initCommand(container: Container) {
 			ui.intro("worktree-kit init");
 
 			await runCommand(async () => {
-				const result = await initConfig({ force: args.force, migrate: args.migrate, local: args.local }, { fs, git });
+				const result = await initConfig(
+					{ force: args.force, migrate: args.migrate, local: args.local, upstream: args.upstream },
+					{ fs, git },
+				);
 
 				if (Result.isErr(result)) {
 					throw new CommandError(result.error.message, EXIT_FAILURE);
