@@ -36,6 +36,8 @@ export interface GitPort {
 	fetchAll(): Promise<Result<void, GitError>>;
 	fetchPrune(): Promise<Result<void, GitError>>;
 	addRemote(name: string, url: string): Promise<Result<void, GitError>>;
+	getRemoteUrl(name: string): Promise<Result<string, GitError>>;
+	setRemoteUrl(name: string, url: string): Promise<Result<void, GitError>>;
 	listRemotes(): Promise<Result<string[], GitError>>;
 	listGoneBranches(): Promise<Result<string[], GitError>>;
 	mergeFFOnly(worktreePath: string, branch: string, remote?: string): Promise<Result<void, GitError>>;
