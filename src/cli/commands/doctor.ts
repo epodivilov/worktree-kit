@@ -1,6 +1,7 @@
 import { defineCommand } from "citty";
 import pc from "picocolors";
 import { pruneOrphanWorktrees } from "../../application/use-cases/prune-orphan-worktrees.ts";
+import { renameDriftedWorktrees } from "../../application/use-cases/rename-drifted-worktrees.ts";
 import { runHealthCheck } from "../../application/use-cases/run-health-check.ts";
 import type { HealthIssue, HealthSeverity } from "../../domain/entities/health-check.ts";
 import type { Container } from "../../infrastructure/container.ts";
@@ -73,7 +74,7 @@ export function doctorCommand(container: Container) {
 			json: {
 				type: "boolean",
 				default: false,
-				description: "Output report as JSON (never auto-fixes; --fix is ignored)",
+				description: "Output report as JSON (never auto-fixes; --fix/--rename are ignored)",
 			},
 			verbose: {
 				type: "boolean",
@@ -84,6 +85,11 @@ export function doctorCommand(container: Container) {
 				type: "boolean",
 				default: false,
 				description: "Prune orphaned worktree entries detected by the report",
+			},
+			rename: {
+				type: "boolean",
+				default: false,
+				description: "Rename drifted worktrees to match their branch name",
 			},
 		},
 		async run({ args }) {
@@ -143,12 +149,114 @@ export function doctorCommand(container: Container) {
 					return;
 				}
 
+				const dp = (p: string) => (repoRoot ? formatDisplayPath(p, repoRoot) : p);
+
 				const orphans = issues.filter(
 					(i): i is Extract<HealthIssue, { type: "missing-worktree-directory" }> =>
 						i.type === "missing-worktree-directory",
 				);
+				const drifts = issues.filter((i): i is Extract<HealthIssue, { type: "path-drift" }> => i.type === "path-drift");
 
-				if (orphans.length === 0) {
+				let prunedCount = 0;
+				let renamedCount = 0;
+				const outroLines: string[] = [];
+
+				// Prune orphaned worktree entries (--fix).
+				if (orphans.length > 0) {
+					let shouldPrune = Boolean(args.fix);
+					if (!shouldPrune) {
+						if (ui.nonInteractive) {
+							ui.warn(
+								`Run 'wt doctor --fix' to prune ${orphans.length} orphaned worktree entr${orphans.length === 1 ? "y" : "ies"}`,
+							);
+						} else {
+							const confirmed = await ui.confirm({
+								message: `Prune ${orphans.length} orphaned worktree entr${orphans.length === 1 ? "y" : "ies"}?`,
+								initialValue: true,
+							});
+							if (ui.isCancel(confirmed)) {
+								ui.cancel("Doctor cancelled");
+								process.exit(EXIT_CANCEL);
+							}
+							shouldPrune = confirmed === true;
+						}
+					}
+
+					if (shouldPrune) {
+						const pruneOutput = await pruneOrphanWorktrees({ paths: orphans.map((o) => o.worktreePath) }, { git });
+						let failedCount = 0;
+						for (const report of pruneOutput.reports) {
+							if (report.status === "pruned") {
+								prunedCount++;
+								ui.success(`Pruned ${dp(report.worktreePath)}`);
+							} else if (report.status === "error") {
+								failedCount++;
+								ui.error(`Failed to prune ${dp(report.worktreePath)}: ${report.message ?? "unknown error"}`);
+							}
+						}
+						outroLines.push(
+							prunedCount === 0
+								? `No entries pruned (${failedCount} failed)`
+								: `Pruned ${prunedCount} orphaned entr${prunedCount === 1 ? "y" : "ies"}`,
+						);
+					}
+				}
+
+				// Rename drifted worktrees to match their branch (--rename).
+				if (drifts.length > 0) {
+					let shouldRename = Boolean(args.rename);
+					if (!shouldRename) {
+						if (ui.nonInteractive) {
+							ui.warn(
+								`Run 'wt doctor --rename' to rename ${drifts.length} drifted worktree${drifts.length === 1 ? "" : "s"}`,
+							);
+						} else {
+							const confirmed = await ui.confirm({
+								message: `Rename ${drifts.length} drifted worktree${drifts.length === 1 ? "" : "s"} to match their branch?`,
+								initialValue: true,
+							});
+							if (ui.isCancel(confirmed)) {
+								ui.cancel("Doctor cancelled");
+								process.exit(EXIT_CANCEL);
+							}
+							shouldRename = confirmed === true;
+						}
+					}
+
+					if (shouldRename) {
+						const renameOutput = await renameDriftedWorktrees(
+							{
+								moves: drifts.map((d) => ({
+									from: d.worktreePath,
+									to: d.expectedPath,
+									branch: d.branch,
+								})),
+							},
+							{ git },
+						);
+						let failedCount = 0;
+						for (const report of renameOutput.reports) {
+							if (report.status === "renamed") {
+								renamedCount++;
+								ui.success(`Renamed ${dp(report.from)} -> ${dp(report.to)}`);
+							} else if (report.status === "error") {
+								failedCount++;
+								ui.error(`Failed to rename ${dp(report.from)}: ${report.message ?? "unknown error"}`);
+							}
+						}
+						outroLines.push(
+							renamedCount === 0
+								? `No worktrees renamed (${failedCount} failed)`
+								: `Renamed ${renamedCount} drifted worktree${renamedCount === 1 ? "" : "s"}`,
+						);
+					}
+				}
+
+				const remainingErrors = counts.error - prunedCount;
+				const remainingWarnings = counts.warning - renamedCount;
+				const postFixHasProblems = remainingErrors > 0 || remainingWarnings > 0;
+
+				if (outroLines.length === 0) {
 					const summary = summaryLine(counts, verbose);
 					if (hasProblems) {
 						ui.outro(counts.error > 0 ? pc.red(summary) : pc.yellow(summary));
@@ -158,57 +266,9 @@ export function doctorCommand(container: Container) {
 					return;
 				}
 
-				let shouldFix = Boolean(args.fix);
-				if (!shouldFix) {
-					if (ui.nonInteractive) {
-						ui.warn(
-							`Run 'wt doctor --fix' to prune ${orphans.length} orphaned worktree entr${orphans.length === 1 ? "y" : "ies"}`,
-						);
-						const summary = summaryLine(counts, verbose);
-						ui.outro(counts.error > 0 ? pc.red(summary) : pc.yellow(summary));
-						process.exit(EXIT_PARTIAL);
-					}
-					const confirmed = await ui.confirm({
-						message: `Prune ${orphans.length} orphaned worktree entr${orphans.length === 1 ? "y" : "ies"}?`,
-						initialValue: true,
-					});
-					if (ui.isCancel(confirmed)) {
-						ui.cancel("Doctor cancelled");
-						process.exit(EXIT_CANCEL);
-					}
-					shouldFix = confirmed === true;
-				}
-
-				if (!shouldFix) {
-					const summary = summaryLine(counts, verbose);
-					ui.outro(counts.error > 0 ? pc.red(summary) : pc.yellow(summary));
-					process.exit(EXIT_PARTIAL);
-				}
-
-				const pruneOutput = await pruneOrphanWorktrees({ paths: orphans.map((o) => o.worktreePath) }, { git });
-
-				let prunedCount = 0;
-				let failedCount = 0;
-				const dp = (p: string) => (repoRoot ? formatDisplayPath(p, repoRoot) : p);
-				for (const report of pruneOutput.reports) {
-					if (report.status === "pruned") {
-						prunedCount++;
-						ui.success(`Pruned ${dp(report.worktreePath)}`);
-					} else if (report.status === "error") {
-						failedCount++;
-						ui.error(`Failed to prune ${dp(report.worktreePath)}: ${report.message ?? "unknown error"}`);
-					}
-				}
-
-				const remainingErrors = counts.error - prunedCount;
-				const postFixHasProblems = remainingErrors > 0 || counts.warning > 0;
-				const outroLine =
-					prunedCount === 0
-						? `No entries pruned (${failedCount} failed)`
-						: `Pruned ${prunedCount} orphaned entr${prunedCount === 1 ? "y" : "ies"}`;
-
+				const outroLine = outroLines.join("; ");
 				if (postFixHasProblems) {
-					ui.outro(pc.yellow(outroLine));
+					ui.outro(remainingErrors > 0 ? pc.red(outroLine) : pc.yellow(outroLine));
 					process.exit(EXIT_PARTIAL);
 				}
 				ui.outro(outroLine);
