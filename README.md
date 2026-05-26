@@ -248,6 +248,14 @@ wt update --dry-run
 
 **Fork workflow** — when `upstream` is set in config (see `wt init --upstream`), the default branch is fast-forwarded from `<upstream>/<default>` instead of `origin/<default>`. After a successful upstream sync, `post-update` hooks also run for the default branch (so you can, for example, push the synced default branch back to your fork).
 
+When `upstream` is **not** configured, an interactive `wt update` auto-detects candidate remotes (every remote except `origin`) the same way `wt init` does, and offers to save your choice:
+
+- Picking a remote records `"upstream": "<name>"` and syncs the default branch from it in the same run.
+- Choosing "Skip and don't ask again" writes `"upstream": false`, an explicit opt-out so future `wt update` runs never sync from an upstream or prompt again.
+- If there are no candidate remotes, nothing is written.
+
+Detection is skipped in non-interactive mode and during `--dry-run` (these never mutate the config). If the active config is the legacy `.worktreekitrc`, `wt update` will not rewrite it; migrate first with `wt init --migrate`.
+
 If a worktree has uncommitted changes, a temporary WIP commit is created before rebase and reset afterwards. On rebase conflict, the rebase is aborted and the issue is reported — unless `on-conflict` hooks are configured (see below).
 
 After each successful rebase, `post-update` hooks are executed for that branch. This is useful for auto-pushing rebased branches:
@@ -414,7 +422,7 @@ Create a `.worktreekit.jsonc` file in the project root (or use `wt init`). JSONC
 | `copy` | `string[]` | `[]` | Files to copy. Supports exact paths, directories, glob patterns, and `!` negation |
 | `symlinks` | `string[]` | `[]` | Paths to symlink from root repo. Supports exact paths, glob patterns, and `!` negation |
 | `defaultBase` | `"current"` \| `"default"` \| `"ask"` | `"ask"` | Base branch selection strategy when creating new branches |
-| `upstream` | `string` | — | Name of the git remote whose default branch is used to fast-forward your local default branch during `wt update` (fork sync). Conventionally `upstream`, but any remote name works. `wt init` detects and lets you pick a remote; `wt init --upstream <url>` adds/updates the `upstream` remote |
+| `upstream` | `string \| false` | — | Git remote whose default branch fast-forwards your local default branch during `wt update` (fork sync). A remote name (conventionally `upstream`) enables sync; `false` opts out so `wt update` never syncs from an upstream or asks again. `wt init` detects and lets you pick a remote; `wt update` auto-detects an unconfigured upstream and offers to save it or opt out; `wt init --upstream <url>` adds/updates the `upstream` remote |
 | `create.base` | `string` | — | Fixed base branch for all new worktrees (overrides `defaultBase`) |
 | `remove.deleteBranch` | `boolean` | — | Auto-delete local branch on removal. Prompts if not set |
 | `remove.deleteRemoteBranch` | `boolean` | — | Auto-delete remote branch on removal. Prompts if not set |
