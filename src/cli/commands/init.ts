@@ -5,6 +5,7 @@ import type { UiPort } from "../../domain/ports/ui-port.ts";
 import type { Container } from "../../infrastructure/container.ts";
 import { Result } from "../../shared/result.ts";
 import { EXIT_CANCEL, EXIT_FAILURE } from "../exit-codes.ts";
+import { resolveUpstream as detectUpstream } from "../resolve-upstream.ts";
 import { CommandError, runCommand } from "../run-command.ts";
 
 const UPSTREAM_REMOTE_NAME = "upstream";
@@ -61,39 +62,10 @@ async function resolveUpstream(
 		return { name: UPSTREAM_REMOTE_NAME };
 	}
 
-	// B. No URL flag — detect existing remotes (interactive only).
-	if (ui.nonInteractive) {
-		return undefined;
-	}
-
-	const candidates = remotes.filter((r) => r !== "origin");
-	if (candidates.length === 0) {
-		return undefined;
-	}
-
-	if (candidates.length === 1) {
-		const name = candidates[0] as string;
-		const confirmed = await ui.confirm({
-			message: `Use '${name}' as the upstream remote for syncing the default branch?`,
-			initialValue: true,
-		});
-		if (ui.isCancel(confirmed)) {
-			ui.cancel("Cancelled");
-			process.exit(EXIT_CANCEL);
-		}
-		return confirmed === true ? { name } : undefined;
-	}
-
-	const SKIP = "__skip__";
-	const chosen = await ui.select<string>({
-		message: "Which remote should be used as the upstream for syncing the default branch?",
-		options: [...candidates.map((name) => ({ value: name, label: name })), { value: SKIP, label: "Don't configure" }],
-	});
-	if (ui.isCancel(chosen)) {
-		ui.cancel("Cancelled");
-		process.exit(EXIT_CANCEL);
-	}
-	return chosen === SKIP ? undefined : { name: chosen };
+	// B. No URL flag — detect existing remotes (interactive only). init records
+	// nothing on decline/none, and never persists an opt-out.
+	const detected = await detectUpstream(git, ui, { declineLabel: "Don't configure" });
+	return detected.kind === "selected" ? { name: detected.name } : undefined;
 }
 
 export function initCommand(container: Container) {
