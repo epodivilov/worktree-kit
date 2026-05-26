@@ -94,15 +94,25 @@ wt init [options]
 | `--force` | `-f` | Overwrite existing config |
 | `--migrate` | `-m` | Rename legacy `.worktreekitrc` to `.worktreekit.jsonc` |
 | `--local` | `-l` | Create `.worktreekit.local.jsonc` instead |
-| `--upstream <url>` | | Add an `upstream` git remote (for fork workflows) and record it in config |
+| `--upstream <url>` | | Git URL of the original repo for fork workflows: adds/updates the `upstream` remote and records it in config |
 
-For a fork workflow, point `--upstream` at the original repository so `wt update` can sync your default branch from it:
+The `upstream` config field holds the **name** of the git remote whose default branch is used to fast-forward your local default branch during `wt update` (fork sync). It is conventionally `upstream`, but can be any remote name.
+
+When run interactively, `wt init` inspects your existing remotes (every remote except `origin` is a candidate):
+
+- If there is exactly one candidate, it asks whether to use it as the upstream.
+- If there are several, it lets you select one (or choose "Don't configure").
+- If there are none, no `upstream` is written.
+
+In non-interactive mode, detection is skipped unless you pass `--upstream`.
+
+For a fork workflow you can also point `--upstream` at the original repository directly:
 
 ```bash
 wt init --upstream git@github.com:original-org/repo.git
 ```
 
-This adds the `upstream` remote (if not already present) and writes `"upstream": "upstream"` into the config.
+This adds the `upstream` remote if it is missing and records `"upstream": "upstream"` in the config. If the `upstream` remote already exists with a different URL, `wt init` asks before overwriting it (interactive); in non-interactive mode it keeps the existing URL unless you pass `--force`.
 
 ### `wt create`
 
@@ -404,7 +414,7 @@ Create a `.worktreekit.jsonc` file in the project root (or use `wt init`). JSONC
 | `copy` | `string[]` | `[]` | Files to copy. Supports exact paths, directories, glob patterns, and `!` negation |
 | `symlinks` | `string[]` | `[]` | Paths to symlink from root repo. Supports exact paths, glob patterns, and `!` negation |
 | `defaultBase` | `"current"` \| `"default"` \| `"ask"` | `"ask"` | Base branch selection strategy when creating new branches |
-| `upstream` | `string` | — | Name of the upstream remote to sync the default branch from during `wt update` (fork workflow). Configure via `wt init --upstream <url>` |
+| `upstream` | `string` | — | Name of the git remote whose default branch is used to fast-forward your local default branch during `wt update` (fork sync). Conventionally `upstream`, but any remote name works. `wt init` detects and lets you pick a remote; `wt init --upstream <url>` adds/updates the `upstream` remote |
 | `create.base` | `string` | — | Fixed base branch for all new worktrees (overrides `defaultBase`) |
 | `remove.deleteBranch` | `boolean` | — | Auto-delete local branch on removal. Prompts if not set |
 | `remove.deleteRemoteBranch` | `boolean` | — | Auto-delete remote branch on removal. Prompts if not set |

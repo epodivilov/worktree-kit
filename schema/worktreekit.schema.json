@@ -72,7 +72,7 @@
 		},
 		"upstream": {
 			"type": "string",
-			"description": "Name of the upstream git remote to sync the default branch from during 'wt update' (fork workflow). Configure via 'wt init --upstream <url>'"
+			"description": "Name of the git remote whose default branch is used to fast-forward your local default branch (fork sync). Conventionally 'upstream', but may be any remote name. 'wt init' detects existing remotes and lets you pick one; 'wt init --upstream <url>' adds/updates the 'upstream' remote and records it"
 		},
 		"create": {
 			"type": "object",
