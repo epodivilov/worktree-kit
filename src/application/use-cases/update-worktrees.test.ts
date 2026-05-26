@@ -987,6 +987,19 @@ describe("updateWorktrees — upstream sync", () => {
 		expect(ff?.branch).toBe("main");
 	});
 
+	test("arbitrary upstream remote name — fast-forwards from that remote", async () => {
+		const worktrees = [mainWt, featureA];
+		const mergeFFOnlyCalls: { worktreePath: string; branch: string; remote: string }[] = [];
+		const git = createFakeGit({ worktrees, mergeFFOnlyCalls, ...flatBranchesConfig(worktrees) });
+
+		const result = await updateWorktrees({ dryRun: false, upstream: "source" }, { git });
+
+		const output = expectOk(result);
+		expect(output.syncedFromUpstream).toBe("source");
+		const ff = mergeFFOnlyCalls.find((c) => c.worktreePath === "/repo");
+		expect(ff?.remote).toBe("source");
+	});
+
 	test("upstream set with post-update hook — runs hook for default branch", async () => {
 		const worktrees = [mainWt, featureA];
 		const git = createFakeGit({ worktrees, ...flatBranchesConfig(worktrees) });

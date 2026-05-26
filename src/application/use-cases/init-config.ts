@@ -11,15 +11,28 @@ import type { GitPort } from "../../domain/ports/git-port.ts";
 import type { Result } from "../../shared/result.ts";
 import { Result as R } from "../../shared/result.ts";
 
+/**
+ * Resolved upstream decision computed by the CLI layer (which handles all
+ * detection and prompting). When present, `name` is the remote name to record
+ * in config; `remote`, if set, describes a git mutation to perform first.
+ */
+export interface UpstreamDecision {
+	/** Name of the git remote to record in config (e.g. "upstream", "source"). */
+	name: string;
+	/** Optional remote mutation to perform before writing the config. */
+	remote?: {
+		action: "add" | "set-url";
+		url: string;
+	};
+}
+
 export interface InitConfigInput {
 	force?: boolean;
 	migrate?: boolean;
 	local?: boolean;
-	/** Git URL of an upstream remote to configure for fork workflows. */
-	upstream?: string;
+	/** Resolved upstream decision from the CLI layer. */
+	upstream?: UpstreamDecision;
 }
-
-const UPSTREAM_REMOTE_NAME = "upstream";
 
 export interface InitConfigOutput {
 	configPath: string;
@@ -74,15 +87,17 @@ export async function initConfig(
 		return R.err(new Error(`Config already exists at ${targetPath}`));
 	}
 
-	if (input.upstream) {
-		const remotesResult = await git.listRemotes();
-		if (!remotesResult.success) {
-			return R.err(new Error(`Failed to list remotes: ${remotesResult.error.message}`));
-		}
-		if (!remotesResult.data.includes(UPSTREAM_REMOTE_NAME)) {
-			const addResult = await git.addRemote(UPSTREAM_REMOTE_NAME, input.upstream);
+	if (input.upstream?.remote) {
+		const { action, url } = input.upstream.remote;
+		if (action === "add") {
+			const addResult = await git.addRemote(input.upstream.name, url);
 			if (!addResult.success) {
 				return R.err(new Error(`Failed to add upstream remote: ${addResult.error.message}`));
+			}
+		} else {
+			const setResult = await git.setRemoteUrl(input.upstream.name, url);
+			if (!setResult.success) {
+				return R.err(new Error(`Failed to update upstream remote URL: ${setResult.error.message}`));
 			}
 		}
 	}
@@ -94,7 +109,7 @@ export async function initConfig(
 			copy: [],
 			symlinks: [],
 			defaultBase: "ask",
-			...(input.upstream ? { upstream: UPSTREAM_REMOTE_NAME } : {}),
+			...(input.upstream ? { upstream: input.upstream.name } : {}),
 		},
 		null,
 		2,
