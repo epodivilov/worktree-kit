@@ -155,28 +155,62 @@ describe("initConfig", () => {
 		expect(parsed.rootDir).toBe(INIT_ROOT_DIR);
 	});
 
-	test("with upstream url and no existing remote — adds remote and records config field", async () => {
+	test("upstream decision with add mutation — adds remote and records the resolved name", async () => {
 		const fs = createFakeFilesystem();
 		const addRemoteCalls: { name: string; url: string }[] = [];
-		const git = createFakeGit({ root: ROOT, remotes: ["origin"], addRemoteCalls });
-		const result = await initConfig({ upstream: "https://github.com/orig/repo.git" }, { fs, git });
+		const setRemoteUrlCalls: { name: string; url: string }[] = [];
+		const git = createFakeGit({ root: ROOT, remotes: ["origin"], addRemoteCalls, setRemoteUrlCalls });
+		const result = await initConfig(
+			{ upstream: { name: "upstream", remote: { action: "add", url: "https://github.com/orig/repo.git" } } },
+			{ fs, git },
+		);
 
 		expectOk(result);
 		expect(addRemoteCalls).toEqual([{ name: "upstream", url: "https://github.com/orig/repo.git" }]);
+		expect(setRemoteUrlCalls).toEqual([]);
 		const parsed = JSON.parse(expectOk(await fs.readFile(CONFIG_PATH)));
 		expect(parsed.upstream).toBe("upstream");
 	});
 
-	test("with upstream url and existing upstream remote — records config field but does not add remote", async () => {
+	test("upstream decision without mutation — records the name but does not touch the remote", async () => {
 		const fs = createFakeFilesystem();
 		const addRemoteCalls: { name: string; url: string }[] = [];
-		const git = createFakeGit({ root: ROOT, remotes: ["origin", "upstream"], addRemoteCalls });
-		const result = await initConfig({ upstream: "https://github.com/orig/repo.git" }, { fs, git });
+		const setRemoteUrlCalls: { name: string; url: string }[] = [];
+		const git = createFakeGit({ root: ROOT, remotes: ["origin", "upstream"], addRemoteCalls, setRemoteUrlCalls });
+		const result = await initConfig({ upstream: { name: "upstream" } }, { fs, git });
 
 		expectOk(result);
 		expect(addRemoteCalls).toEqual([]);
+		expect(setRemoteUrlCalls).toEqual([]);
 		const parsed = JSON.parse(expectOk(await fs.readFile(CONFIG_PATH)));
 		expect(parsed.upstream).toBe("upstream");
+	});
+
+	test("upstream decision with set-url mutation — calls setRemoteUrl, not addRemote", async () => {
+		const fs = createFakeFilesystem();
+		const addRemoteCalls: { name: string; url: string }[] = [];
+		const setRemoteUrlCalls: { name: string; url: string }[] = [];
+		const git = createFakeGit({ root: ROOT, remotes: ["origin", "upstream"], addRemoteCalls, setRemoteUrlCalls });
+		const result = await initConfig(
+			{ upstream: { name: "upstream", remote: { action: "set-url", url: "https://github.com/orig/repo.git" } } },
+			{ fs, git },
+		);
+
+		expectOk(result);
+		expect(addRemoteCalls).toEqual([]);
+		expect(setRemoteUrlCalls).toEqual([{ name: "upstream", url: "https://github.com/orig/repo.git" }]);
+		const parsed = JSON.parse(expectOk(await fs.readFile(CONFIG_PATH)));
+		expect(parsed.upstream).toBe("upstream");
+	});
+
+	test("records an arbitrary resolved remote name", async () => {
+		const fs = createFakeFilesystem();
+		const git = createFakeGit({ root: ROOT, remotes: ["origin", "source"] });
+		const result = await initConfig({ upstream: { name: "source" } }, { fs, git });
+
+		expectOk(result);
+		const parsed = JSON.parse(expectOk(await fs.readFile(CONFIG_PATH)));
+		expect(parsed.upstream).toBe("source");
 	});
 
 	test("without upstream — no upstream key and no addRemote call", async () => {
