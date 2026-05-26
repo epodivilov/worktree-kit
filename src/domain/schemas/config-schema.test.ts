@@ -200,6 +200,14 @@ describe("WorktreeConfigSchema", () => {
 		}
 	});
 
+	test("config with upstream: false parses correctly", () => {
+		const result = v.safeParse(WorktreeConfigSchema, { rootDir: "../wt", upstream: false });
+		expect(result.success).toBe(true);
+		if (result.success) {
+			expect(result.output.upstream).toBe(false);
+		}
+	});
+
 	test("config without upstream defaults to undefined", () => {
 		const result = v.safeParse(WorktreeConfigSchema, { rootDir: "../wt" });
 		expect(result.success).toBe(true);
@@ -210,6 +218,11 @@ describe("WorktreeConfigSchema", () => {
 
 	test("rejects non-string upstream", () => {
 		const result = v.safeParse(WorktreeConfigSchema, { rootDir: "../wt", upstream: 123 });
+		expect(result.success).toBe(false);
+	});
+
+	test("rejects upstream: true (only false opts out)", () => {
+		const result = v.safeParse(WorktreeConfigSchema, { rootDir: "../wt", upstream: true });
 		expect(result.success).toBe(false);
 	});
 });

@@ -29,7 +29,7 @@ export const WorktreeConfigSchema = v.pipe(
 		symlinks: v.optional(v.array(v.string())),
 		hooks: v.optional(HooksInputSchema),
 		defaultBase: v.optional(v.picklist(["current", "default", "ask"])),
-		upstream: v.optional(v.string()),
+		upstream: v.optional(v.union([v.string(), v.literal(false)])),
 		create: CreateCommandConfigSchema,
 		remove: RemoveCommandConfigSchema,
 	}),
@@ -66,7 +66,7 @@ export const PartialWorktreeConfigSchema = v.object({
 	symlinks: v.optional(v.array(v.string())),
 	hooks: v.optional(HooksInputSchema),
 	defaultBase: v.optional(v.picklist(["current", "default", "ask"])),
-	upstream: v.optional(v.string()),
+	upstream: v.optional(v.union([v.string(), v.literal(false)])),
 	create: CreateCommandConfigSchema,
 	remove: RemoveCommandConfigSchema,
 });
