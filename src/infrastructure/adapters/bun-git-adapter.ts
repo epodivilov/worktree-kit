@@ -413,6 +413,30 @@ export function createBunGitAdapter(logger: LoggerPort): GitPort {
 			}
 		},
 
+		async addRemote(name: string, url: string): Promise<Result<void, GitError>> {
+			try {
+				const { exitCode, stderr } = await runGit(["remote", "add", name, url]);
+				if (exitCode !== 0) {
+					return Result.err({ code: "UNKNOWN", message: stderr || `Failed to add remote "${name}"` });
+				}
+				return Result.ok(undefined);
+			} catch {
+				return Result.err({ code: "UNKNOWN", message: `Failed to add remote "${name}"` });
+			}
+		},
+
+		async listRemotes(): Promise<Result<string[], GitError>> {
+			try {
+				const { exitCode, stdout } = await runGit(["remote"]);
+				if (exitCode !== 0) {
+					return Result.err({ code: "NOT_A_REPO", message: "Not inside a git repository" });
+				}
+				return Result.ok(stdout.split("\n").filter(Boolean));
+			} catch {
+				return Result.err({ code: "UNKNOWN", message: "Failed to list remotes" });
+			}
+		},
+
 		async listGoneBranches(): Promise<Result<string[], GitError>> {
 			try {
 				const { exitCode, stdout } = await runGit(["branch", "--list", "--format=%(refname:short)|%(upstream:track)"]);
@@ -430,9 +454,9 @@ export function createBunGitAdapter(logger: LoggerPort): GitPort {
 			}
 		},
 
-		async mergeFFOnly(worktreePath: string, branch: string): Promise<Result<void, GitError>> {
+		async mergeFFOnly(worktreePath: string, branch: string, remote = "origin"): Promise<Result<void, GitError>> {
 			try {
-				const { exitCode, stderr } = await runGit(["-C", worktreePath, "merge", "--ff-only", `origin/${branch}`]);
+				const { exitCode, stderr } = await runGit(["-C", worktreePath, "merge", "--ff-only", `${remote}/${branch}`]);
 				if (exitCode !== 0) {
 					return Result.err({ code: "MERGE_FAILED", message: stderr || `Failed to fast-forward ${branch}` });
 				}

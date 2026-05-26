@@ -475,6 +475,52 @@ describe("BunGitAdapter", () => {
 		});
 	});
 
+	describe("addRemote / listRemotes", () => {
+		test("listRemotes returns empty array for a fresh repo with no remotes", async () => {
+			await using tmp = await createTempDir();
+			const repoPath = await initTestRepo(tmp.path);
+
+			const originalCwd = process.cwd();
+			process.chdir(repoPath);
+			try {
+				const remotes = expectOk(await git.listRemotes());
+				expect(remotes).toEqual([]);
+			} finally {
+				process.chdir(originalCwd);
+			}
+		});
+
+		test("addRemote adds a remote that listRemotes then reports", async () => {
+			await using tmp = await createTempDir();
+			const repoPath = await initTestRepo(tmp.path);
+
+			const originalCwd = process.cwd();
+			process.chdir(repoPath);
+			try {
+				expectOk(await git.addRemote("upstream", "https://example.com/orig/repo.git"));
+				const remotes = expectOk(await git.listRemotes());
+				expect(remotes).toContain("upstream");
+			} finally {
+				process.chdir(originalCwd);
+			}
+		});
+
+		test("addRemote fails when the remote already exists", async () => {
+			await using tmp = await createTempDir();
+			const repoPath = await initTestRepo(tmp.path);
+			await Bun.$`git -C ${repoPath} remote add upstream https://example.com/orig/repo.git`.quiet();
+
+			const originalCwd = process.cwd();
+			process.chdir(repoPath);
+			try {
+				const error = expectErr(await git.addRemote("upstream", "https://example.com/other/repo.git"));
+				expect(error.code).toBe("UNKNOWN");
+			} finally {
+				process.chdir(originalCwd);
+			}
+		});
+	});
+
 	describe("removeWorktree", () => {
 		test("removes existing worktree", async () => {
 			await using tmp = await createTempDir();

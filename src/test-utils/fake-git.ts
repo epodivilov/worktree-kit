@@ -24,6 +24,9 @@ export interface FakeGitOptions {
 	onConflictResolved?: Set<string>;
 	fetchFails?: boolean;
 	mergeFFOnlyFails?: boolean;
+	remotes?: string[];
+	addRemoteCalls?: { name: string; url: string }[];
+	mergeFFOnlyCalls?: { worktreePath: string; branch: string; remote: string }[];
 	mergeBaseMap?: Map<string, string>;
 	commitCountMap?: Map<string, number>;
 	trackedPaths?: Set<string>;
@@ -55,11 +58,13 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 		rebaseConflicts,
 		fetchFails = false,
 		mergeFFOnlyFails = false,
+		remotes = ["origin"],
 	} = options;
 	const store = [...worktrees];
 	const branchStore = [...branches];
 	const mergedBranchStore = new Set(mergedBranches);
 	const deletedBranches = new Set<string>();
+	const remoteStore = [...remotes];
 
 	return {
 		async isGitRepository(): Promise<Result<boolean, GitError>> {
@@ -202,6 +207,19 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 			return Result.ok(undefined);
 		},
 
+		async addRemote(name: string, url: string): Promise<Result<void, GitError>> {
+			options.addRemoteCalls?.push({ name, url });
+			remoteStore.push(name);
+			return Result.ok(undefined);
+		},
+
+		async listRemotes(): Promise<Result<string[], GitError>> {
+			if (!isRepo) {
+				return Result.err({ code: "NOT_A_REPO", message: "Not inside a git repository" });
+			}
+			return Result.ok([...remoteStore]);
+		},
+
 		async listGoneBranches(): Promise<Result<string[], GitError>> {
 			if (!isRepo) {
 				return Result.err({ code: "NOT_A_REPO", message: "Not inside a git repository" });
@@ -209,7 +227,8 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 			return Result.ok([...goneBranches]);
 		},
 
-		async mergeFFOnly(_worktreePath: string, _branch: string): Promise<Result<void, GitError>> {
+		async mergeFFOnly(worktreePath: string, branch: string, remote = "origin"): Promise<Result<void, GitError>> {
+			options.mergeFFOnlyCalls?.push({ worktreePath, branch, remote });
 			if (mergeFFOnlyFails) {
 				return Result.err({ code: "MERGE_FAILED", message: "Cannot fast-forward" });
 			}
