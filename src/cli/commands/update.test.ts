@@ -17,8 +17,25 @@ interface FakeUiLog {
 	outro: string[];
 }
 
-function createFakeUi(opts: { nonInteractive?: boolean } = {}): { ui: UiPort; log: FakeUiLog } {
+interface FakeUiOptions {
+	nonInteractive?: boolean;
+	/** Response for ui.confirm. */
+	confirm?: boolean | symbol;
+	/** Response for ui.select (value to return). */
+	select?: string | symbol;
+}
+
+const CANCEL_SYMBOL = Symbol("cancel");
+
+function createFakeUi(opts: FakeUiOptions = {}): {
+	ui: UiPort;
+	log: FakeUiLog;
+	confirmMessages: string[];
+	selectCalls: { message: string; values: string[] }[];
+} {
 	const log: FakeUiLog = { info: [], success: [], warn: [], error: [], outro: [] };
+	const confirmMessages: string[] = [];
+	const selectCalls: { message: string; values: string[] }[] = [];
 	const ui = {
 		nonInteractive: opts.nonInteractive ?? false,
 		intro() {},
@@ -49,21 +66,23 @@ function createFakeUi(opts: { nonInteractive?: boolean } = {}): { ui: UiPort; lo
 		async text() {
 			return "";
 		},
-		async confirm() {
-			return true;
+		async confirm(options: { message: string }) {
+			confirmMessages.push(options.message);
+			return opts.confirm ?? true;
 		},
-		async select() {
-			return undefined as never;
+		async select<T>(options: { message: string; options: Array<{ value: T; label: string }> }) {
+			selectCalls.push({ message: options.message, values: options.options.map((o) => String(o.value)) });
+			return (opts.select ?? options.options[0]?.value) as T;
 		},
 		async multiselect() {
 			return [] as never;
 		},
-		isCancel(_value: unknown): _value is symbol {
-			return false;
+		isCancel(value: unknown): value is symbol {
+			return value === CANCEL_SYMBOL;
 		},
 		cancel() {},
 	} satisfies UiPort;
-	return { ui, log };
+	return { ui, log, confirmMessages, selectCalls };
 }
 
 function buildContainer(
@@ -140,6 +159,131 @@ function dirtyGoneScenario(gitOverrides: Partial<FakeGitOptions> = {}) {
 	});
 	return { fs, git };
 }
+
+function upstreamScenario(
+	configContent: string,
+	gitOverrides: Partial<FakeGitOptions> = {},
+): { fs: ReturnType<typeof createFakeFilesystem>; git: ReturnType<typeof createFakeGit> } {
+	const fs = createFakeFilesystem({
+		files: { [`${ROOT}/${CONFIG_FILENAME}`]: configContent },
+		directories: [ROOT, `${ROOT}/.worktrees`],
+	});
+	const git = createFakeGit({
+		root: ROOT,
+		mainRoot: ROOT,
+		worktrees: [mainWt],
+		branches: ["main"],
+		goneBranches: [],
+		...gitOverrides,
+	});
+	return { fs, git };
+}
+
+async function readConfigUpstream(fs: ReturnType<typeof createFakeFilesystem>): Promise<unknown> {
+	const read = await fs.readFile(`${ROOT}/${CONFIG_FILENAME}`);
+	if (!read.success) throw new Error("config not written");
+	return JSON.parse(read.data).upstream;
+}
+
+describe("update upstream auto-detection", () => {
+	const CONFIG_NO_UPSTREAM = JSON.stringify({ rootDir: ".worktrees" }, null, 2);
+
+	test("undefined + one non-origin remote + confirm yes → persists name and syncs from it", async () => {
+		const mergeFFOnlyCalls: { worktreePath: string; branch: string; remote: string }[] = [];
+		const { fs, git } = upstreamScenario(CONFIG_NO_UPSTREAM, {
+			remotes: ["origin", "upstream"],
+			mergeFFOnlyCalls,
+		});
+		const { ui, confirmMessages } = createFakeUi({ confirm: true });
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runUpdate(container, { "dry-run": false });
+
+		expect(code).toBe(0);
+		expect(confirmMessages.some((m) => m.includes("upstream"))).toBe(true);
+		expect(await readConfigUpstream(fs)).toBe("upstream");
+		// The default branch was fast-forwarded from the picked remote.
+		expect(mergeFFOnlyCalls.some((c) => c.branch === "main" && c.remote === "upstream")).toBe(true);
+	});
+
+	test("undefined + decline → persists false, no upstream sync", async () => {
+		const mergeFFOnlyCalls: { worktreePath: string; branch: string; remote: string }[] = [];
+		const { fs, git } = upstreamScenario(CONFIG_NO_UPSTREAM, {
+			remotes: ["origin", "upstream"],
+			mergeFFOnlyCalls,
+		});
+		const { ui } = createFakeUi({ confirm: false });
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runUpdate(container, { "dry-run": false });
+
+		expect(code).toBe(0);
+		expect(await readConfigUpstream(fs)).toBe(false);
+		// Fast-forward fell back to origin (no upstream remote used).
+		expect(mergeFFOnlyCalls.every((c) => c.remote === "origin")).toBe(true);
+	});
+
+	test("upstream === false → no prompt, no detect, no upstream sync", async () => {
+		const mergeFFOnlyCalls: { worktreePath: string; branch: string; remote: string }[] = [];
+		const { fs, git } = upstreamScenario(JSON.stringify({ rootDir: ".worktrees", upstream: false }, null, 2), {
+			remotes: ["origin", "upstream"],
+			mergeFFOnlyCalls,
+		});
+		const { ui, confirmMessages, selectCalls } = createFakeUi();
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runUpdate(container, { "dry-run": false });
+
+		expect(code).toBe(0);
+		expect(confirmMessages).toEqual([]);
+		expect(selectCalls).toEqual([]);
+		expect(await readConfigUpstream(fs)).toBe(false);
+		expect(mergeFFOnlyCalls.every((c) => c.remote === "origin")).toBe(true);
+	});
+
+	test("upstream string → no prompt, syncs from it", async () => {
+		const mergeFFOnlyCalls: { worktreePath: string; branch: string; remote: string }[] = [];
+		const { fs, git } = upstreamScenario(JSON.stringify({ rootDir: ".worktrees", upstream: "upstream" }, null, 2), {
+			remotes: ["origin", "upstream"],
+			mergeFFOnlyCalls,
+		});
+		const { ui, confirmMessages, selectCalls } = createFakeUi();
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runUpdate(container, { "dry-run": false });
+
+		expect(code).toBe(0);
+		expect(confirmMessages).toEqual([]);
+		expect(selectCalls).toEqual([]);
+		expect(mergeFFOnlyCalls.some((c) => c.branch === "main" && c.remote === "upstream")).toBe(true);
+	});
+
+	test("non-interactive + undefined → no prompt, no persist", async () => {
+		const { fs, git } = upstreamScenario(CONFIG_NO_UPSTREAM, { remotes: ["origin", "upstream"] });
+		const { ui, confirmMessages, selectCalls } = createFakeUi({ nonInteractive: true });
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runUpdate(container, { "dry-run": false, cleanup: true });
+
+		expect(code).toBe(0);
+		expect(confirmMessages).toEqual([]);
+		expect(selectCalls).toEqual([]);
+		expect(await readConfigUpstream(fs)).toBeUndefined();
+	});
+
+	test("--dry-run + undefined → no prompt, no persist", async () => {
+		const { fs, git } = upstreamScenario(CONFIG_NO_UPSTREAM, { remotes: ["origin", "upstream"] });
+		const { ui, confirmMessages, selectCalls } = createFakeUi();
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runUpdate(container, { "dry-run": true });
+
+		expect(code).toBe(0);
+		expect(confirmMessages).toEqual([]);
+		expect(selectCalls).toEqual([]);
+		expect(await readConfigUpstream(fs)).toBeUndefined();
+	});
+});
 
 describe("update --cleanup — dirty worktree warning", () => {
 	test("skipped-dirty warning names the path and points to 'wt cleanup'", async () => {

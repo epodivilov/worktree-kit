@@ -3,6 +3,7 @@ import pc from "picocolors";
 import * as v from "valibot";
 import { cleanupWorktrees } from "../../application/use-cases/cleanup-worktrees.ts";
 import { loadConfig } from "../../application/use-cases/load-config.ts";
+import { setConfigUpstream } from "../../application/use-cases/set-config-upstream.ts";
 import { updateWorktrees } from "../../application/use-cases/update-worktrees.ts";
 import { UpdateArgsSchema } from "../../domain/schemas/command-args-schema.ts";
 import type { Container } from "../../infrastructure/container.ts";
@@ -10,6 +11,7 @@ import { formatDisplayPath } from "../../shared/format-path.ts";
 import { Result } from "../../shared/result.ts";
 import { CleanupHandle } from "../cleanup-handle.ts";
 import { EXIT_CANCEL, EXIT_FAILURE } from "../exit-codes.ts";
+import { resolveUpstream } from "../resolve-upstream.ts";
 import { CommandError, runCommand } from "../run-command.ts";
 
 export function updateCommand(container: Container) {
@@ -47,13 +49,44 @@ export function updateCommand(container: Container) {
 				const configResult = await loadConfig({ git, fs });
 				const postUpdateHooks = configResult.success ? configResult.data.config.hooks["post-update"] : [];
 				const onConflictHooks = configResult.success ? configResult.data.config.hooks["on-conflict"] : [];
-				const upstream = configResult.success ? configResult.data.config.upstream : undefined;
+				const configuredUpstream = configResult.success ? configResult.data.config.upstream : undefined;
 
 				let repoRoot = "";
 				if (postUpdateHooks.length > 0 || onConflictHooks.length > 0) {
 					const rootResult = await git.getRepositoryRoot();
 					if (rootResult.success) {
 						repoRoot = rootResult.data;
+					}
+				}
+
+				// Resolve the upstream remote to sync the default branch from.
+				// - `false` → explicit opt-out, never sync and never ask.
+				// - non-empty string → use it (configured).
+				// - undefined → eligible for auto-detection (interactive, non-dry-run only).
+				let upstream: string | undefined = typeof configuredUpstream === "string" ? configuredUpstream : undefined;
+
+				if (configResult.success && configuredUpstream === undefined && !ui.nonInteractive && !dryRun) {
+					const detected = await resolveUpstream(git, ui, { declineLabel: "Skip and don't ask again" });
+					const { configPath, isLegacyConfig } = configResult.data;
+
+					const persist = async (value: string | false): Promise<void> => {
+						if (isLegacyConfig) {
+							ui.warn(
+								`Legacy config ${configPath} cannot be updated automatically. Run 'wt init --migrate', then re-run 'wt update' to save the upstream choice.`,
+							);
+							return;
+						}
+						const setResult = await setConfigUpstream({ configPath, value }, { fs });
+						if (Result.isErr(setResult)) {
+							ui.warn(`Could not save upstream choice: ${setResult.error.message}`);
+						}
+					};
+
+					if (detected.kind === "selected") {
+						upstream = detected.name;
+						await persist(detected.name);
+					} else if (detected.kind === "declined") {
+						await persist(false);
 					}
 				}
 
