@@ -3,6 +3,45 @@
 
 ## Bug Fixes
 
+- surface actionable error when removing a locked worktree
+- invalidate update-check cache after successful update
+
+## Documentation
+
+- describe remote-name semantics and init detection
+- document update auto-detection and false opt-out
+
+## Features
+
+- detect target path collision before creating worktree
+- add worktree drift detector
+- mark drifted worktrees
+- report worktree path drift
+- add moveWorktree port + adapter
+- rename drifted worktrees with --rename
+- actionable warning for dirty worktrees skipped in cleanup
+- add remote management ports + mergeFFOnly remote param
+- upstream remote support for forks
+- add getRemoteUrl + setRemoteUrl ports + adapter
+- detect remotes and record the real upstream name
+- allow upstream to be false (opt-out)
+- add setConfigUpstream use case
+- auto-detect and persist upstream remote
+
+## Refactoring
+
+- extract shared upstream-detection helper
+
+## Build
+
+- add bun-types as direct devDependency for clean-install typecheck
+
+## Ci
+
+- add typecheck/lint/test workflow for PRs
+
+## Bug Fixes
+
 - retarget stacked branches off gone parents before rebase
 - address review feedback for gone-parent retargeting
 
