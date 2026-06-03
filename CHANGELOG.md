@@ -3,6 +3,15 @@
 
 ## Bug Fixes
 
+- keep empty branches cleanup-eligible in cleanup-worktrees
+- only prompt to delete positively-merged gone branches
+
+## Refactoring
+
+- split classifyGoneBranch into 4 states (merged/empty/unmerged/dirty)
+
+## Bug Fixes
+
 - check mergedness before removing worktree
 - hide unmergeable gone branches from cleanup prompt
 
