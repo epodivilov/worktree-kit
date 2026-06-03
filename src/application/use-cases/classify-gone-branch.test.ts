@@ -15,7 +15,7 @@ describe("classifyGoneBranch", () => {
 		expect(result).toBe("skipped-dirty");
 	});
 
-	test("worktree + dirty + force → cleanable", async () => {
+	test("worktree + dirty + force → merged", async () => {
 		const git = createFakeGit({
 			branches: ["main", "feature"],
 			dirtyWorktrees: new Set(["/wt/feature"]),
@@ -24,10 +24,10 @@ describe("classifyGoneBranch", () => {
 			{ branch: "feature", defaultBranch: "main", worktreePath: "/wt/feature", force: true },
 			{ git },
 		);
-		expect(result).toBe("cleanable");
+		expect(result).toBe("merged");
 	});
 
-	test("no worktree + ahead=0 (plain merged) → cleanable", async () => {
+	test("no worktree + ahead=0 → empty", async () => {
 		const git = createFakeGit({
 			branches: ["main", "feature"],
 			commitCountMap: new Map([["main..feature", 0]]),
@@ -36,10 +36,22 @@ describe("classifyGoneBranch", () => {
 			{ branch: "feature", defaultBranch: "main", worktreePath: null, force: false },
 			{ git },
 		);
-		expect(result).toBe("cleanable");
+		expect(result).toBe("empty");
 	});
 
-	test("no worktree + ahead>0 + cherry-picked-prefix covers all → cleanable", async () => {
+	test("worktree + clean + ahead=0 → empty", async () => {
+		const git = createFakeGit({
+			branches: ["main", "feature"],
+			commitCountMap: new Map([["main..feature", 0]]),
+		});
+		const result = await classifyGoneBranch(
+			{ branch: "feature", defaultBranch: "main", worktreePath: "/wt/feature", force: false },
+			{ git },
+		);
+		expect(result).toBe("empty");
+	});
+
+	test("no worktree + ahead>0 + cherry-picked-prefix covers all → merged", async () => {
 		const git = createFakeGit({
 			branches: ["main", "feature"],
 			commitCountMap: new Map([["main..feature", 2]]),
@@ -50,10 +62,10 @@ describe("classifyGoneBranch", () => {
 			{ branch: "feature", defaultBranch: "main", worktreePath: null, force: false },
 			{ git },
 		);
-		expect(result).toBe("cleanable");
+		expect(result).toBe("merged");
 	});
 
-	test("no worktree + ahead>0 + squash-prefix covers all → cleanable", async () => {
+	test("no worktree + ahead>0 + squash-prefix covers all → merged", async () => {
 		const git = createFakeGit({
 			branches: ["main", "feature"],
 			commitCountMap: new Map([["main..feature", 2]]),
@@ -77,7 +89,7 @@ describe("classifyGoneBranch", () => {
 			{ branch: "feature", defaultBranch: "main", worktreePath: null, force: false },
 			{ git },
 		);
-		expect(result).toBe("cleanable");
+		expect(result).toBe("merged");
 	});
 
 	test("no worktree + ahead>0 + no prefix matches → skipped-unmerged", async () => {
@@ -116,7 +128,7 @@ describe("classifyGoneBranch", () => {
 		expect(result).toBe("skipped-unmerged");
 	});
 
-	test("force always → cleanable regardless of mergedness or dirtiness", async () => {
+	test("force always → merged regardless of mergedness or dirtiness", async () => {
 		const git = createFakeGit({
 			branches: ["main", "feature"],
 			commitCountMap: new Map([["main..feature", 5]]),
@@ -126,6 +138,6 @@ describe("classifyGoneBranch", () => {
 			{ branch: "feature", defaultBranch: "main", worktreePath: "/wt/feature", force: true },
 			{ git },
 		);
-		expect(result).toBe("cleanable");
+		expect(result).toBe("merged");
 	});
 });
