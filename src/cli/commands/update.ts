@@ -1,6 +1,7 @@
 import { defineCommand } from "citty";
 import pc from "picocolors";
 import * as v from "valibot";
+import { classifyGoneBranch } from "../../application/use-cases/classify-gone-branch.ts";
 import { cleanupWorktrees } from "../../application/use-cases/cleanup-worktrees.ts";
 import { loadConfig } from "../../application/use-cases/load-config.ts";
 import { setConfigUpstream } from "../../application/use-cases/set-config-upstream.ts";
@@ -184,8 +185,37 @@ export function updateCommand(container: Container) {
 					return;
 				}
 
+				// Pre-classify so we don't prompt the user about branches that would
+				// just be kept (active worktree + uncommitted work, or unmerged).
+				const worktreesForClassify = await git.listWorktrees();
+				const worktreePathByBranch = new Map<string, string | null>();
+				if (Result.isOk(worktreesForClassify)) {
+					for (const wt of worktreesForClassify.data) {
+						if (wt.branch) worktreePathByBranch.set(wt.branch, wt.path);
+					}
+				}
+
+				const cleanable: string[] = [];
+				const kept: string[] = [];
+				for (const b of staleBranches) {
+					const classification = await classifyGoneBranch(
+						{ branch: b, defaultBranch, worktreePath: worktreePathByBranch.get(b) ?? null, force: false },
+						{ git },
+					);
+					if (classification === "cleanable") cleanable.push(b);
+					else kept.push(b);
+				}
+
+				if (cleanable.length === 0) {
+					if (kept.length > 0) {
+						ui.info(`${kept.length} branch(es) kept — active worktree, not merged`);
+					}
+					ui.outro(outroMessage);
+					return;
+				}
+
 				if (ui.nonInteractive && !autoCleanup) {
-					ui.warn(`${staleBranches.length} branch(es) have gone remotes, run 'wt cleanup'`);
+					ui.warn(`${cleanable.length} branch(es) have gone remotes, run 'wt cleanup'`);
 					ui.outro(outroMessage);
 					return;
 				}
@@ -193,11 +223,14 @@ export function updateCommand(container: Container) {
 				let shouldCleanup = autoCleanup;
 				if (!shouldCleanup) {
 					ui.info("Branches with gone remotes:");
-					for (const b of staleBranches) {
+					for (const b of cleanable) {
 						ui.info(`  ${pc.bold(b)}`);
 					}
+					if (kept.length > 0) {
+						ui.info(`${kept.length} branch(es) kept — active worktree, not merged`);
+					}
 					const confirmed = await ui.confirm({
-						message: `Clean up ${staleBranches.length} stale branch(es)?`,
+						message: `Clean up ${cleanable.length} stale branch(es)?`,
 						initialValue: false,
 					});
 					if (ui.isCancel(confirmed)) {
