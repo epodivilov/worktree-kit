@@ -195,27 +195,29 @@ export function updateCommand(container: Container) {
 					}
 				}
 
-				const cleanable: string[] = [];
+				// Only prompt for branches with positive proof of merge.
+				// "empty" (ahead=0 without merge proof) and unmerged/dirty are kept.
+				const merged: string[] = [];
 				const kept: string[] = [];
 				for (const b of staleBranches) {
 					const classification = await classifyGoneBranch(
 						{ branch: b, defaultBranch, worktreePath: worktreePathByBranch.get(b) ?? null, force: false },
 						{ git },
 					);
-					if (classification === "cleanable") cleanable.push(b);
+					if (classification === "merged") merged.push(b);
 					else kept.push(b);
 				}
 
-				if (cleanable.length === 0) {
+				if (merged.length === 0) {
 					if (kept.length > 0) {
-						ui.info(`${kept.length} branch(es) kept — active worktree, not merged`);
+						ui.info(`${kept.length} branch(es) kept (active worktree or unmerged)`);
 					}
 					ui.outro(outroMessage);
 					return;
 				}
 
 				if (ui.nonInteractive && !autoCleanup) {
-					ui.warn(`${cleanable.length} branch(es) have gone remotes, run 'wt cleanup'`);
+					ui.warn(`${merged.length} branch(es) have gone remotes, run 'wt cleanup'`);
 					ui.outro(outroMessage);
 					return;
 				}
@@ -223,14 +225,14 @@ export function updateCommand(container: Container) {
 				let shouldCleanup = autoCleanup;
 				if (!shouldCleanup) {
 					ui.info("Branches with gone remotes:");
-					for (const b of cleanable) {
+					for (const b of merged) {
 						ui.info(`  ${pc.bold(b)}`);
 					}
 					if (kept.length > 0) {
-						ui.info(`${kept.length} branch(es) kept — active worktree, not merged`);
+						ui.info(`${kept.length} branch(es) kept (active worktree or unmerged)`);
 					}
 					const confirmed = await ui.confirm({
-						message: `Clean up ${cleanable.length} stale branch(es)?`,
+						message: `Clean up ${merged.length} stale branch(es)?`,
 						initialValue: false,
 					});
 					if (ui.isCancel(confirmed)) {
