@@ -96,6 +96,7 @@ export async function cleanupWorktrees(
 				continue;
 			}
 
+			// "merged" and "empty" both proceed to removal in cleanup.
 			if (worktree) {
 				const removeResult = await git.removeWorktree(worktree.path, { force: input.force });
 				if (!removeResult.success) {
