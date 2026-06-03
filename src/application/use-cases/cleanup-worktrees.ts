@@ -1,7 +1,6 @@
 import type { GitPort } from "../../domain/ports/git-port.ts";
 import { Result as R, type Result } from "../../shared/result.ts";
-import { findCherryPickedPrefix } from "./find-cherry-picked-prefix.ts";
-import { findSquashMergedPrefix } from "./find-squash-merged-prefix.ts";
+import { classifyGoneBranch } from "./classify-gone-branch.ts";
 
 export interface CleanupWorktreesInput {
 	force: boolean;
@@ -82,13 +81,22 @@ export async function cleanupWorktrees(
 				continue;
 			}
 
-			if (worktree) {
-				const dirtyResult = await git.isDirty(worktree.path);
-				if (dirtyResult.success && dirtyResult.data && !input.force) {
-					reports.push({ branch, worktreePath, result: { status: "skipped-dirty" } });
-					continue;
-				}
+			const classification = await classifyGoneBranch(
+				{ branch, defaultBranch, worktreePath, force: input.force },
+				{ git },
+			);
 
+			if (classification === "skipped-dirty") {
+				reports.push({ branch, worktreePath, result: { status: "skipped-dirty" } });
+				continue;
+			}
+
+			if (classification === "skipped-unmerged") {
+				reports.push({ branch, worktreePath, result: { status: "skipped-unmerged" } });
+				continue;
+			}
+
+			if (worktree) {
 				const removeResult = await git.removeWorktree(worktree.path, { force: input.force });
 				if (!removeResult.success) {
 					reports.push({
@@ -101,29 +109,8 @@ export async function cleanupWorktrees(
 			}
 
 			const deleteResult = await git.deleteBranch(branch);
-
 			if (!deleteResult.success) {
 				if (deleteResult.error.code === "BRANCH_NOT_MERGED") {
-					const commitsAhead = await git.getCommitCount(defaultBranch, branch);
-					const hasUniqueCommits = !commitsAhead.success || commitsAhead.data > 0;
-
-					if (hasUniqueCommits && !input.force) {
-						const cherryPickPrefix = await findCherryPickedPrefix({ git }, { base: defaultBranch, feature: branch });
-						const squashPrefix =
-							cherryPickPrefix && cherryPickPrefix.skippedCount === cherryPickPrefix.totalCount
-								? null
-								: await findSquashMergedPrefix({ git }, { base: defaultBranch, feature: branch });
-						const prefix =
-							cherryPickPrefix && cherryPickPrefix.skippedCount === cherryPickPrefix.totalCount
-								? cherryPickPrefix
-								: (squashPrefix ?? cherryPickPrefix);
-
-						if (!prefix || prefix.skippedCount !== prefix.totalCount) {
-							reports.push({ branch, worktreePath, result: { status: "skipped-unmerged" } });
-							continue;
-						}
-					}
-
 					const forceResult = await git.deleteBranchForce(branch);
 					if (!forceResult.success) {
 						reports.push({
