@@ -285,21 +285,51 @@ describe("update upstream auto-detection", () => {
 	});
 });
 
-describe("update --cleanup — dirty worktree warning", () => {
-	test("skipped-dirty warning names the path and points to 'wt cleanup'", async () => {
+describe("update --cleanup — dirty worktree", () => {
+	test("dirty gone branch is hidden from cleanup and reported as kept", async () => {
 		const { fs, git } = dirtyGoneScenario();
 		const { ui, log } = createFakeUi();
 		const container = buildContainer(ui, git, fs);
 
 		const code = await runUpdate(container, { "dry-run": false, cleanup: true });
 
-		const warning = log.warn.find((m) => m.includes("feature") && m.includes("uncommitted changes"));
-		expect(warning).toBeDefined();
-		expect(warning).toContain(".worktrees/feature");
-		expect(warning).toContain("stash");
-		// After `wt update` the next step is the dedicated cleanup command.
-		expect(warning).toContain("wt cleanup");
-		expect(warning).toContain("wt cleanup --force");
 		expect(code).toBe(0);
+		// The branch isn't cleaned up (worktree is dirty) — surface it as kept.
+		expect(log.info.some((m) => m.includes("kept"))).toBe(true);
+		// And no dirty-skipped warning fires because cleanup didn't run for it.
+		expect(log.warn.some((m) => m.includes("uncommitted changes"))).toBe(false);
+	});
+});
+
+describe("update — unmergeable gone branches", () => {
+	test("gone branch with active worktree + unmerged → no prompt, kept info, outro Done!", async () => {
+		const fs = createFakeFilesystem({
+			files: { [`${ROOT}/${CONFIG_FILENAME}`]: JSON.stringify({ rootDir: ".worktrees" }) },
+			directories: [ROOT, `${ROOT}/.worktrees`, featureWt.path],
+		});
+		const git = createFakeGit({
+			root: ROOT,
+			mainRoot: ROOT,
+			worktrees: [mainWt, featureWt],
+			branches: ["main", "feature"],
+			goneBranches: ["feature"],
+			mergedBranches: [],
+			commitCountMap: new Map([["main..feature", 2]]),
+			revListMap: new Map([
+				["main..feature", ["sha1", "sha2"]],
+				["feature..main", []],
+			]),
+			revListCherryPickMap: new Map([["main...feature", ["sha1", "sha2"]]]),
+			mergeBaseMap: new Map([["main:feature", "merge-base"]]),
+		});
+		const { ui, log, confirmMessages } = createFakeUi();
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runUpdate(container, { "dry-run": false });
+
+		expect(code).toBe(0);
+		expect(confirmMessages).toEqual([]);
+		expect(log.info.some((m) => m.includes("kept"))).toBe(true);
+		expect(log.outro).toEqual(["Done!"]);
 	});
 });
