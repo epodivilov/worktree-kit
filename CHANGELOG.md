@@ -3,6 +3,15 @@
 
 ## Bug Fixes
 
+- check mergedness before removing worktree
+- hide unmergeable gone branches from cleanup prompt
+
+## Features
+
+- add classifyGoneBranch use case
+
+## Bug Fixes
+
 - surface actionable error when removing a locked worktree
 - invalidate update-check cache after successful update
 
