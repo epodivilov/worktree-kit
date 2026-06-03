@@ -301,6 +301,34 @@ describe("update --cleanup — dirty worktree", () => {
 	});
 });
 
+describe("update — empty stale branches", () => {
+	test("gone branch with ahead=0 + active worktree → not prompted, kept info shown", async () => {
+		const fs = createFakeFilesystem({
+			files: { [`${ROOT}/${CONFIG_FILENAME}`]: JSON.stringify({ rootDir: ".worktrees" }) },
+			directories: [ROOT, `${ROOT}/.worktrees`, featureWt.path],
+		});
+		const git = createFakeGit({
+			root: ROOT,
+			mainRoot: ROOT,
+			worktrees: [mainWt, featureWt],
+			branches: ["main", "feature"],
+			goneBranches: ["feature"],
+			mergedBranches: [],
+			commitCountMap: new Map([["main..feature", 0]]),
+		});
+		const { ui, log, confirmMessages } = createFakeUi();
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runUpdate(container, { "dry-run": false });
+
+		expect(code).toBe(0);
+		// "empty" branches are no longer treated as positively merged in `wt update`.
+		expect(confirmMessages).toEqual([]);
+		expect(log.info.some((m) => m.includes("kept"))).toBe(true);
+		expect(log.outro).toEqual(["Done!"]);
+	});
+});
+
 describe("update — unmergeable gone branches", () => {
 	test("gone branch with active worktree + unmerged → no prompt, kept info, outro Done!", async () => {
 		const fs = createFakeFilesystem({
