@@ -3,6 +3,18 @@
 
 ## Bug Fixes
 
+- report branch-deletion failures in multi-worktree path
+- return Result from isRebaseInProgress and isMergeInProgress
+- surface ignored Result failures in destructive paths
+- only clean up branches the prompt counted
+- make dry-run preview predict the real outcome
+
+## Ci
+
+- verify the binary builds on every push and PR
+
+## Bug Fixes
+
 - keep empty branches cleanup-eligible in cleanup-worktrees
 - only prompt to delete positively-merged gone branches
 
