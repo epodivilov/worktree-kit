@@ -7,6 +7,8 @@ export interface CleanupWorktreesInput {
 	dryRun: boolean;
 	skipFetch?: boolean;
 	skipOrphans?: boolean;
+	/** Allow-list: when set, only these gone branches are processed (empty list = none). */
+	branches?: readonly string[];
 }
 
 export type CleanupBranchStatus =
@@ -67,9 +69,14 @@ export async function cleanupWorktrees(
 			return R.err(new Error(worktreesResult.error.message));
 		}
 		const worktreeByBranch = new Map(worktreesResult.data.map((w) => [w.branch, w]));
+		const allowList = input.branches ? new Set(input.branches) : null;
 
 		for (const branch of goneBranches) {
 			if (branch === defaultBranch) {
+				continue;
+			}
+
+			if (allowList && !allowList.has(branch)) {
 				continue;
 			}
 

@@ -3,6 +3,7 @@ import { CONFIG_FILENAME } from "../../domain/constants.ts";
 import type { Worktree } from "../../domain/entities/worktree.ts";
 import type { UiPort } from "../../domain/ports/ui-port.ts";
 import type { Container } from "../../infrastructure/container.ts";
+import { expectOk } from "../../test-utils/assertions.ts";
 import { createFakeFilesystem } from "../../test-utils/fake-filesystem.ts";
 import { createFakeGit, type FakeGitOptions } from "../../test-utils/fake-git.ts";
 import { updateCommand } from "./update.ts";
@@ -298,6 +299,65 @@ describe("update --cleanup — dirty worktree", () => {
 		expect(log.info.some((m) => m.includes("kept"))).toBe(true);
 		// And no dirty-skipped warning fires because cleanup didn't run for it.
 		expect(log.warn.some((m) => m.includes("uncommitted changes"))).toBe(false);
+	});
+});
+
+describe("update --cleanup — allow-list parity with prompt", () => {
+	function mixedGoneScenario() {
+		const fs = createFakeFilesystem({
+			files: { [`${ROOT}/${CONFIG_FILENAME}`]: JSON.stringify({ rootDir: ".worktrees" }) },
+			directories: [ROOT, `${ROOT}/.worktrees`],
+		});
+		const git = createFakeGit({
+			root: ROOT,
+			mainRoot: ROOT,
+			worktrees: [mainWt],
+			branches: ["main", "merged-one", "empty-one"],
+			goneBranches: ["merged-one", "empty-one"],
+			mergedBranches: ["merged-one"],
+			// merged-one: 2 commits ahead, all cherry-picked into main → "merged".
+			// empty-one: 0 commits ahead, no merge proof → "empty" (kept by `wt update`).
+			commitCountMap: new Map([
+				["main..merged-one", 2],
+				["main..empty-one", 0],
+			]),
+			revListMap: new Map([["main..merged-one", ["sha1", "sha2"]]]),
+			revListCherryPickMap: new Map([["main...merged-one", []]]),
+		});
+		return { fs, git };
+	}
+
+	test("only positively-merged branches are deleted, empty ones survive", async () => {
+		const { fs, git } = mixedGoneScenario();
+		const { ui, log } = createFakeUi();
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runUpdate(container, { "dry-run": false, cleanup: true });
+
+		expect(code).toBe(0);
+		expect(expectOk(await git.branchExists("merged-one"))).toBe(false);
+		expect(expectOk(await git.branchExists("empty-one"))).toBe(true);
+		expect(log.success.some((m) => m.includes("merged-one"))).toBe(true);
+		// Auto-cleanup reports kept branches as a count, never by deleting them.
+		expect(log.info.some((m) => m.includes("1 branch(es) kept"))).toBe(true);
+		// The kept branch must not appear in any cleanup output.
+		const allLines = [...log.success, ...log.warn, ...log.error];
+		expect(allLines.some((m) => m.includes("empty-one"))).toBe(false);
+	});
+
+	test("dry-run preview lists only branches the prompt counted", async () => {
+		const { fs, git } = mixedGoneScenario();
+		const { ui, log } = createFakeUi();
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runUpdate(container, { "dry-run": true, cleanup: true });
+
+		expect(code).toBe(0);
+		const previewLines = log.info.filter((m) => m.includes("would be cleaned up"));
+		expect(previewLines).toHaveLength(1);
+		expect(previewLines[0]).toContain("merged-one");
+		expect(expectOk(await git.branchExists("empty-one"))).toBe(true);
+		expect(expectOk(await git.branchExists("merged-one"))).toBe(true);
 	});
 });
 
