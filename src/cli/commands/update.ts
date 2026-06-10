@@ -99,7 +99,8 @@ export function updateCommand(container: Container) {
 					const worktrees = await git.listWorktrees();
 					if (!worktrees.success) return;
 					for (const wt of worktrees.data) {
-						if (await git.isRebaseInProgress(wt.path)) {
+						const rebasing = await git.isRebaseInProgress(wt.path);
+						if (rebasing.success && rebasing.data) {
 							await git.rebaseAbort(wt.path);
 							const msg = await git.getLastCommitMessage(wt.path);
 							if (msg.success && msg.data === "WIP") {
