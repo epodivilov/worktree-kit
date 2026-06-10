@@ -221,9 +221,11 @@ export function updateCommand(container: Container) {
 					else kept.push(b);
 				}
 
+				const keptMessage = `${kept.length} branch(es) kept (active worktree or unmerged)`;
+
 				if (merged.length === 0) {
 					if (kept.length > 0) {
-						ui.info(`${kept.length} branch(es) kept (active worktree or unmerged)`);
+						ui.info(keptMessage);
 					}
 					ui.outro(outroMessage);
 					return;
@@ -236,13 +238,16 @@ export function updateCommand(container: Container) {
 				}
 
 				let shouldCleanup = autoCleanup;
+				if (shouldCleanup && kept.length > 0) {
+					ui.info(keptMessage);
+				}
 				if (!shouldCleanup) {
 					ui.info("Branches with gone remotes:");
 					for (const b of merged) {
 						ui.info(`  ${pc.bold(b)}`);
 					}
 					if (kept.length > 0) {
-						ui.info(`${kept.length} branch(es) kept (active worktree or unmerged)`);
+						ui.info(keptMessage);
 					}
 					const confirmed = await ui.confirm({
 						message: `Clean up ${merged.length} stale branch(es)?`,
@@ -264,7 +269,7 @@ export function updateCommand(container: Container) {
 				cleanupSpinner.start("Cleaning up stale branches...");
 
 				const cleanupResult = await cleanupWorktrees(
-					{ force: false, dryRun, skipFetch: true, skipOrphans: true },
+					{ force: false, dryRun, skipFetch: true, skipOrphans: true, branches: merged },
 					{ git },
 				);
 

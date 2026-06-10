@@ -39,6 +39,42 @@ describe("cleanupWorktrees", () => {
 		expect(output.reports[1]).toMatchObject({ branch: "feature-b", result: { status: "cleaned" } });
 	});
 
+	test("allow-list — only listed gone branches are processed", async () => {
+		const git = createFakeGit({
+			worktrees: [mainWt, featureA, featureB],
+			branches: ["main", "feature-a", "feature-b"],
+			goneBranches: ["feature-a", "feature-b"],
+			mergedBranches: ["feature-a", "feature-b"],
+			commitCountMap: new Map([
+				["main..feature-a", 0],
+				["main..feature-b", 0],
+			]),
+		});
+		const output = expectOk(
+			await cleanupWorktrees({ force: false, dryRun: false, skipOrphans: true, branches: ["feature-a"] }, { git }),
+		);
+
+		expect(output.reports).toHaveLength(1);
+		expect(output.reports[0]).toMatchObject({ branch: "feature-a", result: { status: "cleaned" } });
+		expect(expectOk(await git.branchExists("feature-b"))).toBe(true);
+	});
+
+	test("empty allow-list — no gone branches are processed", async () => {
+		const git = createFakeGit({
+			worktrees: [mainWt, featureA],
+			branches: ["main", "feature-a"],
+			goneBranches: ["feature-a"],
+			mergedBranches: ["feature-a"],
+			commitCountMap: new Map([["main..feature-a", 0]]),
+		});
+		const output = expectOk(
+			await cleanupWorktrees({ force: false, dryRun: false, skipOrphans: true, branches: [] }, { git }),
+		);
+
+		expect(output.reports).toHaveLength(0);
+		expect(expectOk(await git.branchExists("feature-a"))).toBe(true);
+	});
+
 	test("no gone branches and no orphans — empty reports", async () => {
 		const git = createFakeGit({
 			worktrees: [mainWt, featureA],
