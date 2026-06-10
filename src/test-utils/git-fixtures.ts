@@ -34,6 +34,8 @@ export interface RemoteFixture {
 	addTrackedBranch(name: string, opts?: { withCommit?: boolean }): Promise<void>;
 	/** Delete the branch on the remote; after a fetch with prune the local branch shows as [gone]. */
 	deleteRemoteBranch(name: string): Promise<void>;
+	/** Second clone of the same remote — for simulating pushes made elsewhere. */
+	cloneSecond(): Promise<string>;
 }
 
 /** Bare remote + tracking clone: the minimal setup for fetch/prune/gone-branch scenarios. */
@@ -70,6 +72,13 @@ export async function createRemoteFixture(parentDir: string): Promise<RemoteFixt
 		},
 		async deleteRemoteBranch(name: string): Promise<void> {
 			await Bun.$`git -C ${repoPath} push origin --delete ${name}`.quiet();
+		},
+		async cloneSecond(): Promise<string> {
+			const cloneDir = join(parentDir, "clone2");
+			await Bun.$`git clone ${remotePath} ${cloneDir}`.quiet();
+			const clonePath = await realpath(cloneDir);
+			await configureUser(clonePath);
+			return clonePath;
 		},
 	};
 }
