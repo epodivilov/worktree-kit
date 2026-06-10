@@ -97,6 +97,39 @@ describe("updateWorktrees", () => {
 		expect(output.reports[2]).toMatchObject({ branch: "feature-b", result: { status: "rebased" } });
 	});
 
+	test("WIP restore failure after successful rebase — rebased-dirty with warning", async () => {
+		const worktrees = [mainWt, featureA, featureB];
+		const git = createFakeGit({
+			worktrees,
+			dirtyWorktrees: new Set(["/repo-a"]),
+			resetLastCommitFail: { code: "UNKNOWN", message: "reset failed" },
+			...flatBranchesConfig(worktrees),
+		});
+		const result = await updateWorktrees({ dryRun: false }, { git });
+
+		const output = expectOk(result);
+		expect(output.reports[1]).toMatchObject({ branch: "feature-a", result: { status: "rebased-dirty" } });
+		expect(output.reports[1]?.result).toHaveProperty("warning");
+		expect((output.reports[1]?.result as { warning?: string }).warning).toContain("WIP commit");
+		expect(output.reports[2]).toMatchObject({ branch: "feature-b", result: { status: "rebased" } });
+		expect((output.reports[2]?.result as { warning?: string }).warning).toBeUndefined();
+	});
+
+	test("rebase abort failure on conflict — conflict report carries warning", async () => {
+		const worktrees = [mainWt, featureA, featureB];
+		const git = createFakeGit({
+			worktrees,
+			rebaseConflicts: new Set(["/repo-a"]),
+			rebaseAbortFail: { code: "UNKNOWN", message: "abort failed" },
+			...flatBranchesConfig(worktrees),
+		});
+		const result = await updateWorktrees({ dryRun: false }, { git });
+
+		const output = expectOk(result);
+		expect(output.reports[1]).toMatchObject({ branch: "feature-a", result: { status: "rebase-conflict" } });
+		expect((output.reports[1]?.result as { warning?: string }).warning).toContain("mid-rebase");
+	});
+
 	test("rebase conflict — abort and continue", async () => {
 		const worktrees = [mainWt, featureA, featureB];
 		const git = createFakeGit({

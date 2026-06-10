@@ -118,6 +118,9 @@ export function initCommand(container: Container) {
 					throw new CommandError(result.error.message, EXIT_FAILURE);
 				}
 
+				for (const warning of result.data.warnings) {
+					ui.warn(warning);
+				}
 				const action = args.migrate ? "Migrated config to" : "Created config at";
 				ui.success(`${action}: ${result.data.configPath}`);
 				ui.outro("Done!");

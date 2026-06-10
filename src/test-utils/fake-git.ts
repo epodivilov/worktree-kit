@@ -39,6 +39,8 @@ export interface FakeGitOptions {
 	moveFailPaths?: Map<string, { code: GitError["code"]; message: string }>;
 	moveCalls?: { from: string; to: string }[];
 	deleteRemoteBranchFail?: { code: GitError["code"]; message: string };
+	resetLastCommitFail?: { code: GitError["code"]; message: string };
+	rebaseAbortFail?: { code: GitError["code"]; message: string };
 	rebaseCalls?: FakeRebaseCall[];
 	revListMap?: Map<string, string[]>;
 	revListCherryPickMap?: Map<string, string[]>;
@@ -295,6 +297,9 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 		},
 
 		async rebaseAbort(_worktreePath: string): Promise<Result<void, GitError>> {
+			if (options.rebaseAbortFail !== undefined) {
+				return Result.err(options.rebaseAbortFail);
+			}
 			return Result.ok(undefined);
 		},
 
@@ -322,6 +327,9 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 		},
 
 		async resetLastCommit(_worktreePath: string): Promise<Result<void, GitError>> {
+			if (options.resetLastCommitFail !== undefined) {
+				return Result.err(options.resetLastCommitFail);
+			}
 			return Result.ok(undefined);
 		},
 

@@ -110,6 +110,25 @@ describe("initConfig", () => {
 		expect(JSON.parse(content).rootDir).toBe("../wt");
 	});
 
+	test("migrate succeeds with warning when $schema injection write fails", async () => {
+		const legacyContent = '{"rootDir": "../wt"}';
+		const fs = createFakeFilesystem({
+			files: { [LEGACY_CONFIG_PATH]: legacyContent },
+			overrides: {
+				writeFile: async (path: string) =>
+					Result.err({ code: "PERMISSION_DENIED" as const, message: "read-only filesystem", path }),
+			},
+		});
+		const git = createFakeGit({ root: ROOT });
+		const result = await initConfig({ migrate: true }, { fs, git });
+
+		const { configPath, warnings } = expectOk(result);
+		expect(configPath).toBe(CONFIG_PATH);
+		expect(warnings).toHaveLength(1);
+		expect(warnings[0]).toContain("$schema");
+		expect(warnings[0]).toContain("read-only filesystem");
+	});
+
 	test("migrate returns error when legacy config not found", async () => {
 		const fs = createFakeFilesystem();
 		const git = createFakeGit({ root: ROOT });

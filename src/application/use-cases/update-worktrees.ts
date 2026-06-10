@@ -7,6 +7,9 @@ import { findCherryPickedPrefix } from "./find-cherry-picked-prefix.ts";
 import { findSquashMergedPrefix } from "./find-squash-merged-prefix.ts";
 import { runHooks } from "./run-hooks.ts";
 
+const WIP_RESTORE_FAILED =
+	"failed to restore WIP commit — your changes are kept in a WIP commit (run 'git reset --soft HEAD~1' to unpack)";
+
 export interface UpdateWorktreesInput {
 	dryRun: boolean;
 	branch?: string;
@@ -18,9 +21,9 @@ export interface UpdateWorktreesInput {
 }
 
 export type WorktreeUpdateStatus =
-	| { status: "rebased" }
-	| { status: "rebased-dirty" }
-	| { status: "rebase-conflict"; message: string }
+	| { status: "rebased"; warning?: string }
+	| { status: "rebased-dirty"; warning?: string }
+	| { status: "rebase-conflict"; message: string; warning?: string }
 	| { status: "is-default-branch" }
 	| { status: "dry-run"; dirty: boolean }
 	| { status: "skipped"; reason: string };
@@ -361,8 +364,12 @@ export async function updateWorktrees(
 			? await git.rebase(wt.path, parent, { upstream: prefix.lastSkippedCommit, branch: wt.branch })
 			: await git.rebase(wt.path, parent);
 		if (rebaseResult.success) {
+			let warning: string | undefined;
 			if (isDirty) {
-				await git.resetLastCommit(wt.path);
+				const resetResult = await git.resetLastCommit(wt.path);
+				if (!resetResult.success) {
+					warning = WIP_RESTORE_FAILED;
+				}
 			}
 
 			let hookNotifications: Notification[] = [];
@@ -389,7 +396,7 @@ export async function updateWorktrees(
 				path: wt.path,
 				parent,
 				retargetedFrom: retargetMap[wt.branch],
-				result: { status: isDirty ? "rebased-dirty" : "rebased" },
+				result: { status: isDirty ? "rebased-dirty" : "rebased", warning },
 				hookNotifications,
 			});
 		} else {
@@ -416,8 +423,12 @@ export async function updateWorktrees(
 			}
 
 			if (conflictResolved) {
+				let warning: string | undefined;
 				if (isDirty) {
-					await git.resetLastCommit(wt.path);
+					const resetResult = await git.resetLastCommit(wt.path);
+					if (!resetResult.success) {
+						warning = WIP_RESTORE_FAILED;
+					}
 				}
 
 				let hookNotifications: Notification[] = [];
@@ -444,20 +455,31 @@ export async function updateWorktrees(
 					path: wt.path,
 					parent,
 					retargetedFrom: retargetMap[wt.branch],
-					result: { status: isDirty ? "rebased-dirty" : "rebased" },
+					result: { status: isDirty ? "rebased-dirty" : "rebased", warning },
 					hookNotifications,
 				});
 			} else {
-				await git.rebaseAbort(wt.path);
+				const warnings: string[] = [];
+				const abortResult = await git.rebaseAbort(wt.path);
+				if (!abortResult.success) {
+					warnings.push("rebase abort failed — worktree may be left mid-rebase");
+				}
 				if (isDirty) {
-					await git.resetLastCommit(wt.path);
+					const resetResult = await git.resetLastCommit(wt.path);
+					if (!resetResult.success) {
+						warnings.push(WIP_RESTORE_FAILED);
+					}
 				}
 				reports.push({
 					branch: wt.branch,
 					path: wt.path,
 					parent,
 					retargetedFrom: retargetMap[wt.branch],
-					result: { status: "rebase-conflict", message: rebaseResult.error.message },
+					result: {
+						status: "rebase-conflict",
+						message: rebaseResult.error.message,
+						warning: warnings.length > 0 ? warnings.join("; ") : undefined,
+					},
 					hookNotifications: [],
 				});
 				failedBranches.add(wt.branch);
