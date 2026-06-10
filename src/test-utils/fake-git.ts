@@ -71,6 +71,7 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 	const mergedBranchStore = new Set(mergedBranches);
 	const deletedBranches = new Set<string>();
 	const remoteStore = [...remotes];
+	const remoteBranchStore = new Set(remoteBranches);
 
 	return {
 		async isGitRepository(): Promise<Result<boolean, GitError>> {
@@ -109,7 +110,7 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 			if (!isRepo) {
 				return Result.err({ code: "NOT_A_REPO", message: "Not inside a git repository" });
 			}
-			return Result.ok([...remoteBranches]);
+			return Result.ok([...remoteBranchStore]);
 		},
 
 		async getDefaultBranch(): Promise<Result<string, GitError>> {
@@ -333,9 +334,20 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 			return Result.ok(undefined);
 		},
 
-		async deleteRemoteBranch(_branch: string, _remote?: string): Promise<Result<void, GitError>> {
+		async deleteRemoteBranch(branch: string, _remote?: string): Promise<Result<void, GitError>> {
 			if (options.deleteRemoteBranchFail !== undefined) {
 				return Result.err(options.deleteRemoteBranchFail);
+			}
+			// State-driven only when the option was provided: without it every
+			// delete succeeds, preserving the legacy permissive behavior.
+			if (options.remoteBranches !== undefined) {
+				if (!remoteBranchStore.has(branch)) {
+					return Result.err({
+						code: "REMOTE_REF_NOT_FOUND",
+						message: `Remote ref "${branch}" does not exist`,
+					});
+				}
+				remoteBranchStore.delete(branch);
 			}
 			return Result.ok(undefined);
 		},
