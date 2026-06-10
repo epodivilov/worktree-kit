@@ -61,10 +61,31 @@ export function cleanupCommand(container: Container) {
 					throw new CommandError(discoveryResult.error.message, EXIT_FAILURE);
 				}
 
-				const candidates = discoveryResult.data.reports;
+				const discoveryReports = discoveryResult.data.reports;
+				const candidates = discoveryReports.filter(
+					(r) => r.result.status === "dry-run" || r.result.status === "orphan-dry-run",
+				);
+				const skipped = discoveryReports.filter(
+					(r) =>
+						r.result.status === "skipped-dirty" ||
+						r.result.status === "skipped-unmerged" ||
+						r.result.status === "orphan-skipped-dirty",
+				);
+
+				const renderSkipped = () => {
+					for (const report of skipped) {
+						const name = report.branch || dp(report.worktreePath);
+						const reason =
+							report.result.status === "skipped-unmerged"
+								? "not fully merged, use --force"
+								: `uncommitted changes in ${dp(report.worktreePath)} — commit or stash them, or use --force to discard`;
+						ui.warn(`${name} — skipped (${reason})`);
+					}
+				};
 
 				if (candidates.length === 0) {
 					spinner.stop(pc.green("Up to date"));
+					renderSkipped();
 					ui.info("Nothing to clean up");
 					ui.outro("Done!");
 					return;
@@ -86,6 +107,8 @@ export function cleanupCommand(container: Container) {
 									: "";
 					ui.info(`  ${pc.bold(name)}${suffix}`);
 				}
+
+				renderSkipped();
 
 				if (dryRun) {
 					ui.outro("Dry run — no changes made");
@@ -117,11 +140,14 @@ export function cleanupCommand(container: Container) {
 					}
 				}
 
-				// Execute
+				// Execute — restricted to the gone branches the user just confirmed,
+				// so the action can never exceed the preview.
+				const confirmedBranches = candidates.filter((r) => r.result.status === "dry-run").map((r) => r.branch);
+
 				const execSpinner = ui.createSpinner();
 				execSpinner.start("Cleaning up...");
 
-				const execResult = await cleanupWorktrees({ force, dryRun: false }, { git });
+				const execResult = await cleanupWorktrees({ force, dryRun: false, branches: confirmedBranches }, { git });
 
 				if (Result.isErr(execResult)) {
 					execSpinner.stop(pc.red("Failed"));
