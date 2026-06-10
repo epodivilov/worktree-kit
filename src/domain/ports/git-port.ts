@@ -59,8 +59,8 @@ export interface GitPort {
 	resetLastCommit(worktreePath: string): Promise<Result<void, GitError>>;
 	getMergeBase(branchA: string, branchB: string): Promise<Result<string, GitError>>;
 	getCommitCount(from: string, to: string): Promise<Result<number, GitError>>;
-	isRebaseInProgress(worktreePath: string): Promise<boolean>;
-	isMergeInProgress(worktreePath: string): Promise<boolean>;
+	isRebaseInProgress(worktreePath: string): Promise<Result<boolean, GitError>>;
+	isMergeInProgress(worktreePath: string): Promise<Result<boolean, GitError>>;
 	getLastCommitMessage(worktreePath: string): Promise<Result<string, GitError>>;
 	isPathTracked(repoRoot: string, relativePath: string): Promise<Result<boolean, GitError>>;
 }

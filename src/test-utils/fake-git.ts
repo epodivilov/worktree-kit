@@ -298,15 +298,15 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 			return Result.ok(undefined);
 		},
 
-		async isRebaseInProgress(worktreePath: string): Promise<boolean> {
+		async isRebaseInProgress(worktreePath: string): Promise<Result<boolean, GitError>> {
 			if (rebaseConflicts?.has(worktreePath) && options.onConflictResolved?.has(worktreePath)) {
-				return false;
+				return Result.ok(false);
 			}
-			return rebaseConflicts?.has(worktreePath) ?? false;
+			return Result.ok(rebaseConflicts?.has(worktreePath) ?? false);
 		},
 
-		async isMergeInProgress(worktreePath: string): Promise<boolean> {
-			return options.mergeInProgress?.has(worktreePath) ?? false;
+		async isMergeInProgress(worktreePath: string): Promise<Result<boolean, GitError>> {
+			return Result.ok(options.mergeInProgress?.has(worktreePath) ?? false);
 		},
 
 		async isDirty(worktreePath: string): Promise<Result<boolean, GitError>> {

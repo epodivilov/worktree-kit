@@ -616,25 +616,39 @@ export function createBunGitAdapter(logger: LoggerPort): GitPort {
 			}
 		},
 
-		async isRebaseInProgress(worktreePath: string): Promise<boolean> {
-			const { stdout } = await runGit(["-C", worktreePath, "rev-parse", "--git-dir"]);
-			const gitDir = stdout.startsWith("/") ? stdout : `${worktreePath}/${stdout}`;
-			const dirExists = async (path: string): Promise<boolean> => {
-				try {
-					const s = await stat(path);
-					return s.isDirectory();
-				} catch {
-					return false;
+		async isRebaseInProgress(worktreePath: string): Promise<Result<boolean, GitError>> {
+			try {
+				const { exitCode, stdout } = await runGit(["-C", worktreePath, "rev-parse", "--git-dir"]);
+				if (exitCode !== 0) {
+					return Result.err({ code: "UNKNOWN", message: `Failed to resolve git directory for "${worktreePath}"` });
 				}
-			};
-			if (await dirExists(`${gitDir}/rebase-merge`)) return true;
-			return dirExists(`${gitDir}/rebase-apply`);
+				const gitDir = stdout.startsWith("/") ? stdout : `${worktreePath}/${stdout}`;
+				const dirExists = async (path: string): Promise<boolean> => {
+					try {
+						const s = await stat(path);
+						return s.isDirectory();
+					} catch {
+						return false;
+					}
+				};
+				if (await dirExists(`${gitDir}/rebase-merge`)) return Result.ok(true);
+				return Result.ok(await dirExists(`${gitDir}/rebase-apply`));
+			} catch {
+				return Result.err({ code: "UNKNOWN", message: `Failed to check rebase status for "${worktreePath}"` });
+			}
 		},
 
-		async isMergeInProgress(worktreePath: string): Promise<boolean> {
-			const { stdout } = await runGit(["-C", worktreePath, "rev-parse", "--git-dir"]);
-			const gitDir = stdout.startsWith("/") ? stdout : `${worktreePath}/${stdout}`;
-			return Bun.file(`${gitDir}/MERGE_HEAD`).exists();
+		async isMergeInProgress(worktreePath: string): Promise<Result<boolean, GitError>> {
+			try {
+				const { exitCode, stdout } = await runGit(["-C", worktreePath, "rev-parse", "--git-dir"]);
+				if (exitCode !== 0) {
+					return Result.err({ code: "UNKNOWN", message: `Failed to resolve git directory for "${worktreePath}"` });
+				}
+				const gitDir = stdout.startsWith("/") ? stdout : `${worktreePath}/${stdout}`;
+				return Result.ok(await Bun.file(`${gitDir}/MERGE_HEAD`).exists());
+			} catch {
+				return Result.err({ code: "UNKNOWN", message: `Failed to check merge status for "${worktreePath}"` });
+			}
 		},
 
 		async isDirty(worktreePath: string): Promise<Result<boolean, GitError>> {

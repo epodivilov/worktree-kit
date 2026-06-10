@@ -119,7 +119,8 @@ export async function runHealthCheck(deps: RunHealthCheckDeps): Promise<Result<H
 	}
 
 	for (const wt of worktrees) {
-		if (await git.isRebaseInProgress(wt.path)) {
+		const rebaseResult = await git.isRebaseInProgress(wt.path);
+		if (rebaseResult.success && rebaseResult.data) {
 			issues.push({
 				type: "rebase-in-progress",
 				severity: "error",
@@ -127,7 +128,8 @@ export async function runHealthCheck(deps: RunHealthCheckDeps): Promise<Result<H
 				branch: wt.branch,
 			});
 		}
-		if (await git.isMergeInProgress(wt.path)) {
+		const mergeResult = await git.isMergeInProgress(wt.path);
+		if (mergeResult.success && mergeResult.data) {
 			issues.push({
 				type: "merge-in-progress",
 				severity: "error",

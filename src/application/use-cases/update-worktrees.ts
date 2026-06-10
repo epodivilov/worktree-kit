@@ -409,8 +409,10 @@ export async function updateWorktrees(
 					{ shell: deps.shell },
 				);
 
+				// On check failure assume the conflict is unresolved: falsely reporting
+				// "resolved" would resetLastCommit in the middle of a rebase
 				const stillRebasing = await git.isRebaseInProgress(wt.path);
-				conflictResolved = !stillRebasing;
+				conflictResolved = stillRebasing.success && !stillRebasing.data;
 			}
 
 			if (conflictResolved) {

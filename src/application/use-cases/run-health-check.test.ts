@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { CONFIG_FILENAME } from "../../domain/constants.ts";
 import type { Worktree } from "../../domain/entities/worktree.ts";
+import { Result } from "../../shared/result.ts";
 import { expectOk } from "../../test-utils/assertions.ts";
 import { createFakeFilesystem } from "../../test-utils/fake-filesystem.ts";
 import { createFakeGit } from "../../test-utils/fake-git.ts";
@@ -139,6 +140,26 @@ describe("runHealthCheck", () => {
 			worktreePath: featureWt.path,
 			branch: "feature",
 		});
+	});
+
+	test("rebase/merge check failure — check skipped, report still produced", async () => {
+		const fs = createFakeFilesystem({
+			files: { [CONFIG_PATH]: configFile() },
+			directories: [ROOT, ROOT_DIR, featureWt.path],
+		});
+		const git = {
+			...createFakeGit({
+				root: ROOT,
+				worktrees: [mainWt, featureWt],
+			}),
+			isRebaseInProgress: async () => Result.err({ code: "UNKNOWN" as const, message: "boom" }),
+			isMergeInProgress: async () => Result.err({ code: "UNKNOWN" as const, message: "boom" }),
+		};
+
+		const report = expectOk(await runHealthCheck({ git, fs }));
+
+		expect(report.healthy).toBe(true);
+		expect(report.issues).toHaveLength(0);
 	});
 
 	test("dirty worktree — info severity, not error/warning", async () => {
