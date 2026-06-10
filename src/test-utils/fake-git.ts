@@ -38,6 +38,7 @@ export interface FakeGitOptions {
 	pruneCalls?: string[];
 	moveFailPaths?: Map<string, { code: GitError["code"]; message: string }>;
 	moveCalls?: { from: string; to: string }[];
+	deleteRemoteBranchFail?: { code: GitError["code"]; message: string };
 	rebaseCalls?: FakeRebaseCall[];
 	revListMap?: Map<string, string[]>;
 	revListCherryPickMap?: Map<string, string[]>;
@@ -325,6 +326,9 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 		},
 
 		async deleteRemoteBranch(_branch: string, _remote?: string): Promise<Result<void, GitError>> {
+			if (options.deleteRemoteBranchFail !== undefined) {
+				return Result.err(options.deleteRemoteBranchFail);
+			}
 			return Result.ok(undefined);
 		},
 

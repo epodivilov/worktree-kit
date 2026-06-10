@@ -288,6 +288,9 @@ export function removeCommand(container: Container) {
 											unmergedBranches.push(wt.branch);
 											branchStatus = " (branch kept — not fully merged)";
 										}
+									} else {
+										branchStatus = " (branch delete failed)";
+										warnings.push(`Failed to delete branch "${wt.branch}": ${deleteResult.error.message}`);
 									}
 								} else {
 									localDeleted = true;
@@ -296,9 +299,16 @@ export function removeCommand(container: Container) {
 								if (localDeleted && shouldDeleteRemoteBranches) {
 									ms.update(wt.path, "deleting remote branch");
 									const deleteRemoteResult = await git.deleteRemoteBranch(wt.branch);
-									branchStatus = Result.isOk(deleteRemoteResult)
-										? " + branch deleted (local & remote)"
-										: " + branch deleted (local)";
+									if (Result.isOk(deleteRemoteResult)) {
+										branchStatus = " + branch deleted (local & remote)";
+									} else {
+										branchStatus = " + branch deleted (local)";
+										if (deleteRemoteResult.error.code !== "REMOTE_REF_NOT_FOUND") {
+											warnings.push(
+												`Failed to delete remote branch "${wt.branch}": ${deleteRemoteResult.error.message}`,
+											);
+										}
+									}
 								} else if (localDeleted) {
 									branchStatus = " + branch deleted (local)";
 								}
@@ -326,11 +336,14 @@ export function removeCommand(container: Container) {
 									if (shouldDeleteRemoteBranches) {
 										spinner.message(`Deleting remote branch "${branch}"...`);
 										const remoteResult = await git.deleteRemoteBranch(branch);
-										spinner.stop(
-											Result.isOk(remoteResult)
-												? pc.green(`Branch "${branch}" deleted (local & remote)`)
-												: pc.green(`Branch "${branch}" deleted (local)`),
-										);
+										if (Result.isOk(remoteResult)) {
+											spinner.stop(pc.green(`Branch "${branch}" deleted (local & remote)`));
+										} else {
+											spinner.stop(pc.green(`Branch "${branch}" deleted (local)`));
+											if (remoteResult.error.code !== "REMOTE_REF_NOT_FOUND") {
+												ui.warn(`Failed to delete remote branch: ${remoteResult.error.message}`);
+											}
+										}
 									} else {
 										spinner.stop(pc.green(`Branch "${branch}" deleted (local)`));
 									}
