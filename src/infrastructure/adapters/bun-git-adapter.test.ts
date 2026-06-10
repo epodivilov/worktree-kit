@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { expectErr, expectOk } from "../../test-utils/assertions.ts";
-import { initTestRepo } from "../../test-utils/git-fixtures.ts";
+import { createRemoteFixture, initTestRepo, initUnbornRepo } from "../../test-utils/git-fixtures.ts";
 import { createNoopLogger } from "../../test-utils/noop-logger.ts";
 import { createTempDir } from "../../test-utils/temp-dir.ts";
 import { createBunGitAdapter } from "./bun-git-adapter.ts";
@@ -624,6 +624,389 @@ describe("BunGitAdapter", () => {
 			} finally {
 				process.chdir(originalCwd);
 			}
+		});
+	});
+
+	// === Local-repo coverage (cwd-based methods use withCwd) ===
+
+	async function withCwd<T>(path: string, fn: () => Promise<T>): Promise<T> {
+		const originalCwd = process.cwd();
+		process.chdir(path);
+		try {
+			return await fn();
+		} finally {
+			process.chdir(originalCwd);
+		}
+	}
+
+	/** Commit a file change on the given branch (checkout + commit + back to main). */
+	async function commitOnBranch(repoPath: string, branch: string, file: string, content: string): Promise<void> {
+		await Bun.$`git -C ${repoPath} checkout -q ${branch}`.quiet();
+		await Bun.write(join(repoPath, file), content);
+		await Bun.$`git -C ${repoPath} add .`.quiet();
+		await Bun.$`git -C ${repoPath} commit -m ${`edit ${file} on ${branch}`}`.quiet();
+		await Bun.$`git -C ${repoPath} checkout -q main`.quiet();
+	}
+
+	describe("WIP commit cycle", () => {
+		test("stageAll → commitWip → getLastCommitMessage → resetLastCommit restores dirty state", async () => {
+			await using tmp = await createTempDir();
+			const repoPath = await initTestRepo(tmp.path);
+			await Bun.write(join(repoPath, "work.txt"), "in progress");
+
+			expect(expectOk(await git.isDirty(repoPath))).toBe(true);
+			expectOk(await git.stageAll(repoPath));
+			expectOk(await git.commitWip(repoPath));
+			expect(expectOk(await git.getLastCommitMessage(repoPath))).toBe("WIP");
+			expect(expectOk(await git.isDirty(repoPath))).toBe(false);
+
+			expectOk(await git.resetLastCommit(repoPath));
+			expect(expectOk(await git.getLastCommitMessage(repoPath))).toBe("Initial commit");
+			expect(expectOk(await git.isDirty(repoPath))).toBe(true);
+		});
+	});
+
+	describe("isDirty", () => {
+		test("clean repo is not dirty", async () => {
+			await using tmp = await createTempDir();
+			const repoPath = await initTestRepo(tmp.path);
+			expect(expectOk(await git.isDirty(repoPath))).toBe(false);
+		});
+	});
+
+	describe("branch topology queries", () => {
+		test("getCommitCount counts commits ahead of a base", async () => {
+			await using tmp = await createTempDir();
+			const repoPath = await initTestRepo(tmp.path);
+			await Bun.$`git -C ${repoPath} branch feature`.quiet();
+			await commitOnBranch(repoPath, "feature", "a.txt", "a");
+			await commitOnBranch(repoPath, "feature", "b.txt", "b");
+
+			await withCwd(repoPath, async () => {
+				expect(expectOk(await git.getCommitCount("main", "feature"))).toBe(2);
+				expect(expectOk(await git.getCommitCount("feature", "main"))).toBe(0);
+			});
+		});
+
+		test("getMergeBase returns the fork point", async () => {
+			await using tmp = await createTempDir();
+			const repoPath = await initTestRepo(tmp.path);
+			const forkSha = (await Bun.$`git -C ${repoPath} rev-parse HEAD`.quiet().text()).trim();
+			await Bun.$`git -C ${repoPath} branch feature`.quiet();
+			await commitOnBranch(repoPath, "feature", "a.txt", "a");
+			await commitOnBranch(repoPath, "main", "m.txt", "m");
+
+			await withCwd(repoPath, async () => {
+				expect(expectOk(await git.getMergeBase("main", "feature"))).toBe(forkSha);
+			});
+		});
+
+		test("revListCherryPick excludes patch-equivalent commits", async () => {
+			await using tmp = await createTempDir();
+			const repoPath = await initTestRepo(tmp.path);
+			await Bun.$`git -C ${repoPath} branch feature`.quiet();
+			await commitOnBranch(repoPath, "feature", "picked.txt", "same content");
+			const pickedSha = (await Bun.$`git -C ${repoPath} rev-parse feature`.quiet().text()).trim();
+			await commitOnBranch(repoPath, "feature", "unique.txt", "only on feature");
+			// Cherry-pick the first feature commit onto main.
+			await Bun.$`git -C ${repoPath} cherry-pick ${pickedSha}`.quiet();
+
+			await withCwd(repoPath, async () => {
+				const remaining = expectOk(await git.revListCherryPick({ base: "main", feature: "feature" }));
+				expect(remaining).toHaveLength(1);
+				expect(remaining[0]).not.toBe(pickedSha);
+			});
+		});
+
+		test("listBranches returns all local branches", async () => {
+			await using tmp = await createTempDir();
+			const repoPath = await initTestRepo(tmp.path);
+			await Bun.$`git -C ${repoPath} branch feature-a`.quiet();
+			await Bun.$`git -C ${repoPath} branch feature-b`.quiet();
+
+			await withCwd(repoPath, async () => {
+				const branches = expectOk(await git.listBranches());
+				expect(branches.sort()).toEqual(["feature-a", "feature-b", "main"]);
+			});
+		});
+	});
+
+	describe("deleteBranch / deleteBranchForce", () => {
+		test("merged branch is deleted", async () => {
+			await using tmp = await createTempDir();
+			const repoPath = await initTestRepo(tmp.path);
+			await Bun.$`git -C ${repoPath} branch merged`.quiet();
+
+			await withCwd(repoPath, async () => {
+				expectOk(await git.deleteBranch("merged"));
+				expect(expectOk(await git.branchExists("merged"))).toBe(false);
+			});
+		});
+
+		test("unmerged branch fails with BRANCH_NOT_MERGED, force delete succeeds", async () => {
+			await using tmp = await createTempDir();
+			const repoPath = await initTestRepo(tmp.path);
+			await Bun.$`git -C ${repoPath} branch feature`.quiet();
+			await commitOnBranch(repoPath, "feature", "f.txt", "f");
+
+			await withCwd(repoPath, async () => {
+				const error = expectErr(await git.deleteBranch("feature"));
+				expect(error.code).toBe("BRANCH_NOT_MERGED");
+
+				expectOk(await git.deleteBranchForce("feature"));
+				expect(expectOk(await git.branchExists("feature"))).toBe(false);
+			});
+		});
+
+		test("nonexistent branch fails with BRANCH_NOT_FOUND", async () => {
+			await using tmp = await createTempDir();
+			const repoPath = await initTestRepo(tmp.path);
+
+			await withCwd(repoPath, async () => {
+				expect(expectErr(await git.deleteBranch("ghost")).code).toBe("BRANCH_NOT_FOUND");
+				expect(expectErr(await git.deleteBranchForce("ghost")).code).toBe("BRANCH_NOT_FOUND");
+			});
+		});
+	});
+
+	describe("rebase and merge state", () => {
+		/** Repo where rebasing feature onto main conflicts on README.md. */
+		async function initConflictRepo(parentDir: string): Promise<string> {
+			const repoPath = await initTestRepo(parentDir);
+			await Bun.$`git -C ${repoPath} branch feature`.quiet();
+			await commitOnBranch(repoPath, "feature", "README.md", "feature version");
+			await commitOnBranch(repoPath, "main", "README.md", "main version");
+			return repoPath;
+		}
+
+		test("isRebaseInProgress true mid-conflict, rebaseAbort clears it", async () => {
+			await using tmp = await createTempDir();
+			const repoPath = await initConflictRepo(tmp.path);
+			await Bun.$`git -C ${repoPath} checkout -q feature`.quiet();
+
+			const rebaseResult = await git.rebase(repoPath, "main");
+			expectErr(rebaseResult);
+			expect(expectOk(await git.isRebaseInProgress(repoPath))).toBe(true);
+
+			expectOk(await git.rebaseAbort(repoPath));
+			expect(expectOk(await git.isRebaseInProgress(repoPath))).toBe(false);
+			expect(expectOk(await git.getLastCommitMessage(repoPath))).toBe("edit README.md on feature");
+		});
+
+		test("isMergeInProgress true mid-conflict, false after abort", async () => {
+			await using tmp = await createTempDir();
+			const repoPath = await initConflictRepo(tmp.path);
+
+			expect(expectOk(await git.isMergeInProgress(repoPath))).toBe(false);
+			await Bun.$`git -C ${repoPath} merge feature`.quiet().nothrow();
+			expect(expectOk(await git.isMergeInProgress(repoPath))).toBe(true);
+
+			await Bun.$`git -C ${repoPath} merge --abort`.quiet();
+			expect(expectOk(await git.isMergeInProgress(repoPath))).toBe(false);
+		});
+	});
+
+	describe("moveWorktree", () => {
+		test("worktree is reachable at the new path after move", async () => {
+			await using tmp = await createTempDir();
+			const repoPath = await initTestRepo(tmp.path);
+			const fromPath = join(tmp.path, "wt-old");
+			const toPath = join(tmp.path, "wt-new");
+			await Bun.$`git -C ${repoPath} branch feature`.quiet();
+			await Bun.$`git -C ${repoPath} worktree add ${fromPath} feature`.quiet();
+
+			await withCwd(repoPath, async () => {
+				expectOk(await git.moveWorktree(fromPath, toPath));
+				const worktrees = expectOk(await git.listWorktrees());
+				const feature = worktrees.find((w) => w.branch === "feature");
+				expect(feature?.path).toContain("wt-new");
+			});
+			expect(expectOk(await git.isDirty(toPath))).toBe(false);
+		});
+	});
+
+	describe("isPathTracked", () => {
+		test("tracked file true, untracked file false", async () => {
+			await using tmp = await createTempDir();
+			const repoPath = await initTestRepo(tmp.path);
+			await Bun.write(join(repoPath, "untracked.txt"), "x");
+
+			expect(expectOk(await git.isPathTracked(repoPath, "README.md"))).toBe(true);
+			expect(expectOk(await git.isPathTracked(repoPath, "untracked.txt"))).toBe(false);
+		});
+	});
+
+	// === Remote-fixture coverage ===
+
+	/** Commit + push on the given clone (on its current branch). */
+	async function pushCommit(clonePath: string, file: string, content: string): Promise<string> {
+		await Bun.write(join(clonePath, file), content);
+		await Bun.$`git -C ${clonePath} add .`.quiet();
+		await Bun.$`git -C ${clonePath} commit -m ${`edit ${file}`}`.quiet();
+		await Bun.$`git -C ${clonePath} push`.quiet();
+		return (await Bun.$`git -C ${clonePath} rev-parse HEAD`.quiet().text()).trim();
+	}
+
+	describe("remote branch operations", () => {
+		test("listRemoteBranches returns names stripped of the origin/ prefix", async () => {
+			await using tmp = await createTempDir();
+			const fixture = await createRemoteFixture(tmp.path);
+			await fixture.addTrackedBranch("feat-a");
+			await fixture.addTrackedBranch("feat-b", { withCommit: true });
+
+			await withCwd(fixture.repoPath, async () => {
+				const branches = expectOk(await git.listRemoteBranches());
+				expect(branches.sort()).toEqual(["feat-a", "feat-b", "main"]);
+			});
+		});
+
+		test("deleteRemoteBranch removes the ref on the remote", async () => {
+			await using tmp = await createTempDir();
+			const fixture = await createRemoteFixture(tmp.path);
+			await fixture.addTrackedBranch("doomed");
+
+			await withCwd(fixture.repoPath, async () => {
+				expectOk(await git.deleteRemoteBranch("doomed"));
+				const remoteRefs = await Bun.$`git -C ${fixture.remotePath} branch --list doomed`.quiet().text();
+				expect(remoteRefs.trim()).toBe("");
+			});
+		});
+
+		test("deleteRemoteBranch on a missing ref fails with REMOTE_REF_NOT_FOUND", async () => {
+			await using tmp = await createTempDir();
+			const fixture = await createRemoteFixture(tmp.path);
+
+			await withCwd(fixture.repoPath, async () => {
+				const error = expectErr(await git.deleteRemoteBranch("never-existed"));
+				expect(error.code).toBe("REMOTE_REF_NOT_FOUND");
+			});
+		});
+
+		test("fetchAll picks up commits pushed from elsewhere", async () => {
+			await using tmp = await createTempDir();
+			const fixture = await createRemoteFixture(tmp.path);
+			const clonePath = await fixture.cloneSecond();
+			const pushedSha = await pushCommit(clonePath, "elsewhere.txt", "pushed from clone2");
+
+			await withCwd(fixture.repoPath, async () => {
+				expectOk(await git.fetchAll());
+				const originMain = (await Bun.$`git -C ${fixture.repoPath} rev-parse origin/main`.quiet().text()).trim();
+				expect(originMain).toBe(pushedSha);
+			});
+		});
+
+		test("getDefaultBranch resolves main for a cloned repo", async () => {
+			await using tmp = await createTempDir();
+			const fixture = await createRemoteFixture(tmp.path);
+
+			await withCwd(fixture.repoPath, async () => {
+				expect(expectOk(await git.getDefaultBranch())).toBe("main");
+			});
+		});
+
+		test("updateBranchRef fast-forwards a non-checked-out branch ref", async () => {
+			await using tmp = await createTempDir();
+			const fixture = await createRemoteFixture(tmp.path);
+			await fixture.addTrackedBranch("feat");
+			const clonePath = await fixture.cloneSecond();
+			await Bun.$`git -C ${clonePath} checkout -q feat`.quiet();
+			const pushedSha = await pushCommit(clonePath, "feat.txt", "remote moved ahead");
+
+			await withCwd(fixture.repoPath, async () => {
+				// main stays checked out; feat is updated by ref only.
+				expectOk(await git.updateBranchRef("feat"));
+				const localSha = (await Bun.$`git -C ${fixture.repoPath} rev-parse feat`.quiet().text()).trim();
+				expect(localSha).toBe(pushedSha);
+			});
+		});
+
+		test("mergeFFOnly fast-forwards when behind, fails when diverged", async () => {
+			await using tmp = await createTempDir();
+			const fixture = await createRemoteFixture(tmp.path);
+			const clonePath = await fixture.cloneSecond();
+			const pushedSha = await pushCommit(clonePath, "ff.txt", "remote ahead");
+
+			await Bun.$`git -C ${fixture.repoPath} fetch origin`.quiet();
+			expectOk(await git.mergeFFOnly(fixture.repoPath, "main"));
+			const localSha = (await Bun.$`git -C ${fixture.repoPath} rev-parse main`.quiet().text()).trim();
+			expect(localSha).toBe(pushedSha);
+
+			// Diverge: local commit + remote commit.
+			await Bun.write(join(fixture.repoPath, "local.txt"), "local");
+			await Bun.$`git -C ${fixture.repoPath} add .`.quiet();
+			await Bun.$`git -C ${fixture.repoPath} commit -m "local diverges"`.quiet();
+			await pushCommit(clonePath, "remote.txt", "remote diverges");
+			await Bun.$`git -C ${fixture.repoPath} fetch origin`.quiet();
+
+			const error = expectErr(await git.mergeFFOnly(fixture.repoPath, "main"));
+			expect(error.code).toBe("MERGE_FAILED");
+		});
+
+		test("createWorktreeFromRemote checks out a remote-only branch with tracking", async () => {
+			await using tmp = await createTempDir();
+			const fixture = await createRemoteFixture(tmp.path);
+			const clonePath = await fixture.cloneSecond();
+			await Bun.$`git -C ${clonePath} checkout -q -b remote-only`.quiet();
+			await Bun.$`git -C ${clonePath} push -u origin remote-only`.quiet();
+			const wtPath = join(tmp.path, "wt-remote");
+
+			await withCwd(fixture.repoPath, async () => {
+				expectOk(await git.fetchAll());
+				expect(expectOk(await git.branchExists("remote-only"))).toBe(false);
+
+				const worktree = expectOk(await git.createWorktreeFromRemote("remote-only", wtPath, "origin"));
+				expect(worktree.branch).toBe("remote-only");
+				expect(expectOk(await git.branchExists("remote-only"))).toBe(true);
+
+				const upstream = await Bun.$`git -C ${wtPath} rev-parse --abbrev-ref ${"remote-only@{upstream}"}`
+					.quiet()
+					.text();
+				expect(upstream.trim()).toBe("origin/remote-only");
+			});
+		});
+	});
+
+	// === Edge cases ===
+
+	describe("edge cases", () => {
+		test("unborn repo: default-branch and commit-count queries fail with Result errors", async () => {
+			await using tmp = await createTempDir();
+			const repoPath = await initUnbornRepo(tmp.path);
+
+			await withCwd(repoPath, async () => {
+				expectErr(await git.getDefaultBranch());
+				expectErr(await git.getCommitCount("main", "main"));
+			});
+		});
+
+		test("detached-HEAD worktree is listed with an empty branch", async () => {
+			await using tmp = await createTempDir();
+			const repoPath = await initTestRepo(tmp.path);
+			const headSha = (await Bun.$`git -C ${repoPath} rev-parse HEAD`.quiet().text()).trim();
+			const wtPath = join(tmp.path, "wt-detached");
+			await Bun.$`git -C ${repoPath} worktree add --detach ${wtPath} ${headSha}`.quiet();
+
+			await withCwd(repoPath, async () => {
+				const worktrees = expectOk(await git.listWorktrees());
+				const detached = worktrees.find((w) => w.path.includes("wt-detached"));
+				expect(detached).toBeDefined();
+				expect(detached?.branch).toBe("");
+				expect(detached?.head).toBe(headSha);
+			});
+		});
+
+		test("branch names with slashes survive the full gone-branch flow", async () => {
+			await using tmp = await createTempDir();
+			const fixture = await createRemoteFixture(tmp.path);
+			await fixture.addTrackedBranch("feature/nested-x", { withCommit: true });
+			await fixture.deleteRemoteBranch("feature/nested-x");
+
+			await withCwd(fixture.repoPath, async () => {
+				expectOk(await git.fetchPrune());
+				expect(expectOk(await git.listGoneBranches())).toEqual(["feature/nested-x"]);
+				expectOk(await git.deleteBranchForce("feature/nested-x"));
+				expect(expectOk(await git.branchExists("feature/nested-x"))).toBe(false);
+			});
 		});
 	});
 });
