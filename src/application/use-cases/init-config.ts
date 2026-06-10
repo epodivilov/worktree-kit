@@ -36,6 +36,7 @@ export interface InitConfigInput {
 
 export interface InitConfigOutput {
 	configPath: string;
+	warnings: string[];
 }
 
 export interface InitConfigDeps {
@@ -71,14 +72,18 @@ export async function initConfig(
 			return R.err(new Error(`Failed to rename config: ${renameResult.error.message}`));
 		}
 
+		const warnings: string[] = [];
 		const readResult = await fs.readFile(configPath);
 		if (readResult.success && !readResult.data.includes('"$schema"')) {
 			const schemaLine = `\t"$schema": "${SCHEMA_URL}",`;
 			const updated = readResult.data.replace(/\{/, `{\n${schemaLine}`);
-			await fs.writeFile(configPath, updated);
+			const writeResult = await fs.writeFile(configPath, updated);
+			if (!writeResult.success) {
+				warnings.push(`Failed to inject $schema into ${configPath}: ${writeResult.error.message}`);
+			}
 		}
 
-		return R.ok({ configPath });
+		return R.ok({ configPath, warnings });
 	}
 
 	const targetPath = input.local ? join(rootResult.data, LOCAL_CONFIG_FILENAME) : configPath;
@@ -119,5 +124,5 @@ export async function initConfig(
 		return R.err(new Error(`Failed to write config: ${writeResult.error.message}`));
 	}
 
-	return R.ok({ configPath: targetPath });
+	return R.ok({ configPath: targetPath, warnings: [] });
 }

@@ -152,10 +152,9 @@ export function createCommand(container: Container) {
 				for (const { src, dest, isDirectory } of filesToCopy) {
 					const name = src.split("/").pop();
 					spinner.message(`Copying ${name}...`);
-					if (isDirectory) {
-						await fs.copyDirectory(src, dest);
-					} else {
-						await fs.copyFile(src, dest);
+					const copyResult = isDirectory ? await fs.copyDirectory(src, dest) : await fs.copyFile(src, dest);
+					if (!copyResult.success) {
+						ui.warn(`Failed to copy ${name}: ${copyResult.error.message}`);
 					}
 				}
 

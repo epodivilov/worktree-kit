@@ -101,10 +101,16 @@ export function updateCommand(container: Container) {
 					for (const wt of worktrees.data) {
 						const rebasing = await git.isRebaseInProgress(wt.path);
 						if (rebasing.success && rebasing.data) {
-							await git.rebaseAbort(wt.path);
+							const abortResult = await git.rebaseAbort(wt.path);
+							if (!abortResult.success) {
+								ui.warn(`Failed to abort rebase in "${wt.path}": ${abortResult.error.message}`);
+							}
 							const msg = await git.getLastCommitMessage(wt.path);
 							if (msg.success && msg.data === "WIP") {
-								await git.resetLastCommit(wt.path);
+								const resetResult = await git.resetLastCommit(wt.path);
+								if (!resetResult.success) {
+									ui.warn(`Failed to restore WIP commit in "${wt.path}": ${resetResult.error.message}`);
+								}
 							}
 						}
 					}
@@ -157,11 +163,17 @@ export function updateCommand(container: Container) {
 							} else {
 								ui.success(`${report.branch} rebased onto ${onto}${suffix}`);
 							}
+							if (report.result.warning) {
+								ui.warn(`${report.branch}: ${report.result.warning}`);
+							}
 							break;
 						}
 						case "rebase-conflict": {
 							const reparent = report.retargetedFrom ? ` (re-parented from ${report.retargetedFrom})` : "";
 							ui.warn(`${report.branch} has conflicts, rebase aborted${reparent}`);
+							if (report.result.warning) {
+								ui.warn(`${report.branch}: ${report.result.warning}`);
+							}
 							break;
 						}
 						case "dry-run": {
