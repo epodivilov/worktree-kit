@@ -1,20 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { expectErr, expectOk } from "../../test-utils/assertions.ts";
+import { initTestRepo } from "../../test-utils/git-fixtures.ts";
 import { createNoopLogger } from "../../test-utils/noop-logger.ts";
 import { createTempDir } from "../../test-utils/temp-dir.ts";
 import { createBunGitAdapter } from "./bun-git-adapter.ts";
-
-async function initTestRepo(parentDir: string): Promise<string> {
-	const repoPath = join(parentDir, "repo");
-	await Bun.$`git init ${repoPath}`.quiet();
-	await Bun.$`git -C ${repoPath} config user.name "Test"`.quiet();
-	await Bun.$`git -C ${repoPath} config user.email "test@test.com"`.quiet();
-	await Bun.write(join(repoPath, "README.md"), "test");
-	await Bun.$`git -C ${repoPath} add .`.quiet();
-	await Bun.$`git -C ${repoPath} commit -m "Initial commit"`.quiet();
-	return repoPath;
-}
 
 describe("BunGitAdapter", () => {
 	const git = createBunGitAdapter(createNoopLogger());
