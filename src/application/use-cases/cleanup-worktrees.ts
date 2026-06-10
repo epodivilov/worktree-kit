@@ -83,11 +83,7 @@ export async function cleanupWorktrees(
 			const worktree = worktreeByBranch.get(branch);
 			const worktreePath = worktree?.path ?? null;
 
-			if (input.dryRun) {
-				reports.push({ branch, worktreePath, result: { status: "dry-run" } });
-				continue;
-			}
-
+			// Classify before the dry-run gate so the preview predicts the real outcome.
 			const classification = await classifyGoneBranch(
 				{ branch, defaultBranch, worktreePath, force: input.force },
 				{ git },
@@ -104,6 +100,11 @@ export async function cleanupWorktrees(
 			}
 
 			// "merged" and "empty" both proceed to removal in cleanup.
+			if (input.dryRun) {
+				reports.push({ branch, worktreePath, result: { status: "dry-run" } });
+				continue;
+			}
+
 			if (worktree) {
 				const removeResult = await git.removeWorktree(worktree.path, { force: input.force });
 				if (!removeResult.success) {
@@ -157,21 +158,22 @@ export async function cleanupWorktrees(
 				if (!exists.success || exists.data) continue;
 			}
 
-			if (input.dryRun) {
-				reports.push({
-					branch: worktree.branch,
-					worktreePath: worktree.path,
-					result: { status: "orphan-dry-run" },
-				});
-				continue;
-			}
-
+			// Check dirtiness before the dry-run gate so the preview predicts the real outcome.
 			const dirtyResult = await git.isDirty(worktree.path);
 			if (dirtyResult.success && dirtyResult.data && !input.force) {
 				reports.push({
 					branch: worktree.branch,
 					worktreePath: worktree.path,
 					result: { status: "orphan-skipped-dirty" },
+				});
+				continue;
+			}
+
+			if (input.dryRun) {
+				reports.push({
+					branch: worktree.branch,
+					worktreePath: worktree.path,
+					result: { status: "orphan-dry-run" },
 				});
 				continue;
 			}

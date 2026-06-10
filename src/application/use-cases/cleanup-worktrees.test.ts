@@ -265,6 +265,7 @@ describe("cleanupWorktrees", () => {
 			branches: ["main", "feature-a"],
 			goneBranches: ["feature-a"],
 			mergedBranches: ["feature-a"],
+			commitCountMap: new Map([["main..feature-a", 0]]),
 		});
 		const output = expectOk(await cleanupWorktrees({ force: false, dryRun: true }, { git }));
 
@@ -277,6 +278,56 @@ describe("cleanupWorktrees", () => {
 		// worktree still exists
 		const remaining = await git.listWorktrees();
 		expect(remaining.success && remaining.data).toHaveLength(2);
+	});
+
+	test("dry-run — classification predicts the real outcome per branch", async () => {
+		const dirtyWt: Worktree = { path: "/wt/dirty-b", branch: "dirty-b", head: "ddd", isMain: false, isPrunable: false };
+		const git = createFakeGit({
+			worktrees: [mainWt, featureA, dirtyWt],
+			branches: ["main", "feature-a", "unmerged-b", "dirty-b"],
+			goneBranches: ["feature-a", "unmerged-b", "dirty-b"],
+			mergedBranches: ["feature-a"],
+			dirtyWorktrees: new Set(["/wt/dirty-b"]),
+			commitCountMap: new Map([
+				["main..feature-a", 0],
+				["main..unmerged-b", 2],
+			]),
+			revListMap: new Map([["main..unmerged-b", ["sha1", "sha2"]]]),
+			revListCherryPickMap: new Map([["main...unmerged-b", ["sha1", "sha2"]]]),
+			mergeBaseMap: new Map([["main:unmerged-b", "merge-base"]]),
+		});
+		const output = expectOk(await cleanupWorktrees({ force: false, dryRun: true, skipOrphans: true }, { git }));
+
+		const byBranch = new Map(output.reports.map((r) => [r.branch, r.result.status]));
+		expect(byBranch.get("feature-a")).toBe("dry-run");
+		expect(byBranch.get("unmerged-b")).toBe("skipped-unmerged");
+		expect(byBranch.get("dirty-b")).toBe("skipped-dirty");
+		// Nothing was deleted.
+		expect(expectOk(await git.branchExists("feature-a"))).toBe(true);
+		expect(expectOk(await git.branchExists("unmerged-b"))).toBe(true);
+	});
+
+	test("dry-run — dirty orphaned worktree predicted as skipped", async () => {
+		const orphanWt: Worktree = {
+			path: "/wt/orphan",
+			branch: "gone-branch",
+			head: "eee",
+			isMain: false,
+			isPrunable: false,
+		};
+		const git = createFakeGit({
+			worktrees: [mainWt, orphanWt],
+			branches: ["main"],
+			goneBranches: [],
+			dirtyWorktrees: new Set(["/wt/orphan"]),
+		});
+		const output = expectOk(await cleanupWorktrees({ force: false, dryRun: true }, { git }));
+
+		expect(output.reports).toHaveLength(1);
+		expect(output.reports[0]).toMatchObject({
+			branch: "gone-branch",
+			result: { status: "orphan-skipped-dirty" },
+		});
 	});
 
 	test("default branch is never cleaned", async () => {
