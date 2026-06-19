@@ -193,7 +193,17 @@ export function updateCommand(container: Container) {
 				const goneResult = await git.listGoneBranches();
 				const staleBranches = Result.isOk(goneResult) ? goneResult.data.filter((b) => b !== defaultBranch) : [];
 
-				if (staleBranches.length === 0) {
+				// Branches whose rebase phase proved them fully merged (cherry-pick / squash
+				// detection found all commits in defaultBranch). These are positively merged
+				// regardless of whether the remote ref still exists, so they're cleanup
+				// candidates too.
+				const rebaseMerged = reports
+					.filter(
+						(r) => r.result.status === "skipped" && r.result.reason === "fully merged" && r.branch !== defaultBranch,
+					)
+					.map((r) => r.branch);
+
+				if (staleBranches.length === 0 && rebaseMerged.length === 0) {
 					ui.outro(outroMessage);
 					return;
 				}
@@ -210,16 +220,22 @@ export function updateCommand(container: Container) {
 
 				// Only prompt for branches with positive proof of merge.
 				// "empty" (ahead=0 without merge proof) and unmerged/dirty are kept.
-				const merged: string[] = [];
+				const mergedSet = new Set<string>();
 				const kept: string[] = [];
 				for (const b of staleBranches) {
 					const classification = await classifyGoneBranch(
 						{ branch: b, defaultBranch, worktreePath: worktreePathByBranch.get(b) ?? null, force: false },
 						{ git },
 					);
-					if (classification === "merged") merged.push(b);
+					if (classification === "merged") mergedSet.add(b);
 					else kept.push(b);
 				}
+				// Rebase-merged branches are positively merged via patch-id / subject+files.
+				// Dedupe against the gone-branch set so a branch in both lists appears once.
+				for (const b of rebaseMerged) {
+					mergedSet.add(b);
+				}
+				const merged = [...mergedSet];
 
 				const keptMessage = `${kept.length} branch(es) kept (active worktree or unmerged)`;
 
