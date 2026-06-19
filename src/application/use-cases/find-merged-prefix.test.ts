@@ -100,6 +100,67 @@ describe("findMergedPrefix", () => {
 		});
 	});
 
+	test("partial cherry-pick + full squash: option toggles which result wins", async () => {
+		// Scenario: cherry-pick detects 2 of 5 commits (patch-id matched the tail), but a squash
+		// of all 5 also landed on base. Each call site needs a different answer:
+		//   - update-worktrees wants the cherry-pick partial (rebase --upstream boundary)
+		//   - is-fully-merged wants the squash full (proof the branch is entirely covered)
+		const git = createFakeGit({
+			revListMap: new Map([
+				// base..feature: 5 commits (newest first)
+				["base..feature", ["f5", "f4", "f3", "f2", "f1"]],
+				// feature..base: one squash commit on base
+				["feature..base", ["S"]],
+			]),
+			// cherry-pick filter keeps f5, f4, f3 ahead → tail f2, f1 are the "skipped prefix" (2 of 5)
+			revListCherryPickMap: new Map([["base...feature", ["f5", "f4", "f3"]]]),
+			// Squash detection needs file fingerprints + diff equality.
+			// Cumulative files prefix-by-prefix: f1={a}, f1+f2={a,b}, f1+f2+f3={a,b,c},
+			// f1+f2+f3+f4={a,b,c,d}, f1+f2+f3+f4+f5={a,b,c,d,e}. The squash S touches all 5.
+			mergeBaseMap: new Map([["base:feature", "MB"]]),
+			diffTreeFilesMap: new Map([
+				["f1", ["a"]],
+				["f2", ["b"]],
+				["f3", ["c"]],
+				["f4", ["d"]],
+				["f5", ["e"]],
+				["S", ["a", "b", "c", "d", "e"]],
+			]),
+			diffNormalizedMap: new Map([
+				// Squash diff equals the full-prefix diff (mergeBase..f5), so squash detection
+				// returns skippedCount=5, totalCount=5.
+				["MB..f5", "DIFF_FULL"],
+				["S^..S", "DIFF_FULL"],
+			]),
+		});
+
+		const rich = await findMergedPrefix(
+			{ git },
+			{ base: "base", feature: "feature" },
+			{ trySquashOnPartialCherryPick: true },
+		);
+		expect(rich).toEqual({
+			lastSkippedCommit: "f5",
+			skippedCount: 5,
+			totalCount: 5,
+			fully: true,
+			method: "squash",
+		});
+
+		const simple = await findMergedPrefix(
+			{ git },
+			{ base: "base", feature: "feature" },
+			{ trySquashOnPartialCherryPick: false },
+		);
+		expect(simple).toEqual({
+			lastSkippedCommit: "f2",
+			skippedCount: 2,
+			totalCount: 5,
+			fully: false,
+			method: "patch-id",
+		});
+	});
+
 	test("no cherry-pick, no squash match → null", async () => {
 		const git = createFakeGit({
 			revListMap: new Map([
