@@ -39,13 +39,19 @@ export interface RemoteFixture {
 }
 
 /** Bare remote + tracking clone: the minimal setup for fetch/prune/gone-branch scenarios. */
-export async function createRemoteFixture(parentDir: string): Promise<RemoteFixture> {
+export async function createRemoteFixture(
+	parentDir: string,
+	opts: { remoteName?: string } = {},
+): Promise<RemoteFixture> {
+	const remoteName = opts.remoteName ?? "origin";
 	const remoteDir = join(parentDir, "remote.git");
 	await Bun.$`git init --bare -b main ${remoteDir}`.quiet();
 	const remotePath = await realpath(remoteDir);
 
 	const repoDir = join(parentDir, "repo");
-	await Bun.$`git clone ${remotePath} ${repoDir}`.quiet();
+	// `git clone -o <name>` names the remote during clone — produces a working
+	// tracking setup with a non-default remote name in one step.
+	await Bun.$`git clone -o ${remoteName} ${remotePath} ${repoDir}`.quiet();
 	const repoPath = await realpath(repoDir);
 	await configureUser(repoPath);
 	// A clone of an empty remote starts on an unborn HEAD named after the
@@ -54,7 +60,7 @@ export async function createRemoteFixture(parentDir: string): Promise<RemoteFixt
 	await Bun.write(join(repoPath, "README.md"), "test");
 	await Bun.$`git -C ${repoPath} add .`.quiet();
 	await Bun.$`git -C ${repoPath} commit -m "Initial commit"`.quiet();
-	await Bun.$`git -C ${repoPath} push -u origin main`.quiet();
+	await Bun.$`git -C ${repoPath} push -u ${remoteName} main`.quiet();
 
 	return {
 		remotePath,
@@ -68,14 +74,14 @@ export async function createRemoteFixture(parentDir: string): Promise<RemoteFixt
 				await Bun.$`git -C ${repoPath} commit -m ${`commit on ${name}`}`.quiet();
 				await Bun.$`git -C ${repoPath} checkout main`.quiet();
 			}
-			await Bun.$`git -C ${repoPath} push -u origin ${name}`.quiet();
+			await Bun.$`git -C ${repoPath} push -u ${remoteName} ${name}`.quiet();
 		},
 		async deleteRemoteBranch(name: string): Promise<void> {
-			await Bun.$`git -C ${repoPath} push origin --delete ${name}`.quiet();
+			await Bun.$`git -C ${repoPath} push ${remoteName} --delete ${name}`.quiet();
 		},
 		async cloneSecond(): Promise<string> {
 			const cloneDir = join(parentDir, "clone2");
-			await Bun.$`git clone ${remotePath} ${cloneDir}`.quiet();
+			await Bun.$`git clone -o ${remoteName} ${remotePath} ${cloneDir}`.quiet();
 			const clonePath = await realpath(cloneDir);
 			await configureUser(clonePath);
 			return clonePath;
