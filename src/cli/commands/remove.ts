@@ -183,15 +183,15 @@ export function removeCommand(container: Container) {
 							spinner.start(`Deleting branch "${wt.branch}"...`);
 
 							let outcome = await deleteBranch(
-								{ branch: wt.branch, force: force || yes, deleteRemote: shouldDeleteRemoteBranches },
+								{ branch: wt.branch, force: false, deleteRemote: shouldDeleteRemoteBranches },
 								{ git },
 							);
 
 							if (outcome.status === "not-merged") {
 								spinner.stop(pc.yellow(`Branch "${wt.branch}" not merged`));
 
-								let shouldForce = false;
-								if (!ui.nonInteractive) {
+								let shouldForce = force || yes;
+								if (!shouldForce && !ui.nonInteractive) {
 									const forceConfirm = await ui.confirm({
 										message: `Branch "${wt.branch}" is not merged. Force delete?`,
 										initialValue: false,
@@ -327,9 +327,7 @@ export function removeCommand(container: Container) {
 							}
 						};
 
-						if (yes) {
-							await forceDeleteUnmerged();
-						} else if (!ui.nonInteractive) {
+						if (!ui.nonInteractive) {
 							const confirmMessage =
 								unmergedBranches.length === 1
 									? `Branch "${unmergedBranches[0]}" is not fully merged. Force delete?`

@@ -27,13 +27,21 @@ interface FakeMultiSpinnerLog {
 	fail: MultiSpinnerCall[];
 }
 
+interface FakeSpinnerLog {
+	start: string[];
+	message: string[];
+	stop: string[];
+}
+
 function createFakeUi(opts: { nonInteractive?: boolean; confirm?: boolean; multiselectResult?: string[] } = {}): {
 	ui: UiPort;
 	log: FakeUiLog;
 	multiSpinnerLog: FakeMultiSpinnerLog;
+	spinnerLog: FakeSpinnerLog;
 } {
 	const log: FakeUiLog = { info: [], success: [], warn: [], error: [], outro: [] };
 	const multiSpinnerLog: FakeMultiSpinnerLog = { complete: [], fail: [] };
+	const spinnerLog: FakeSpinnerLog = { start: [], message: [], stop: [] };
 
 	const ui = {
 		nonInteractive: opts.nonInteractive ?? false,
@@ -57,7 +65,17 @@ function createFakeUi(opts: { nonInteractive?: boolean; confirm?: boolean; multi
 			return fn();
 		},
 		createSpinner() {
-			return { start() {}, message() {}, stop() {} };
+			return {
+				start(message: string) {
+					spinnerLog.start.push(message);
+				},
+				message(message: string) {
+					spinnerLog.message.push(message);
+				},
+				stop(message?: string) {
+					if (message !== undefined) spinnerLog.stop.push(message);
+				},
+			};
 		},
 		createMultiSpinner(_keys: string[]) {
 			return {
@@ -89,7 +107,7 @@ function createFakeUi(opts: { nonInteractive?: boolean; confirm?: boolean; multi
 		cancel() {},
 	} satisfies UiPort;
 
-	return { ui, log, multiSpinnerLog };
+	return { ui, log, multiSpinnerLog, spinnerLog };
 }
 
 function buildContainer(
@@ -247,6 +265,45 @@ describe("remove — multi path branch delete failures", () => {
 		expect(featureComplete).toBeDefined();
 		expect(featureComplete?.message).toContain("branch deleted (local)");
 		expect(featureComplete?.message).not.toContain("& remote");
+
+		expect(code).toBe(0);
+	});
+});
+
+describe("remove — single path force on unmerged branch", () => {
+	// Regression for the branch-deletion-policy extraction: with --force/--yes on an
+	// unmerged branch the CLI must still surface the "not merged" warning and the
+	// "Force deleting" step before deleting, not silently force on the first attempt.
+	test("--yes on unmerged branch → shows 'not merged' + 'Force deleting', then deletes", async () => {
+		const fs = createFakeFilesystem({
+			files: { [`${ROOT}/${CONFIG_FILENAME}`]: JSON.stringify({ rootDir: ".worktrees" }) },
+			directories: [ROOT, `${ROOT}/.worktrees`, featureWt.path],
+		});
+		const git = createFakeGit({
+			root: ROOT,
+			mainRoot: ROOT,
+			worktrees: [mainWt, featureWt],
+			branches: ["main", "feature"],
+			mergedBranches: [], // "feature" not merged → BRANCH_NOT_MERGED on the normal delete
+		});
+		const { ui, spinnerLog } = createFakeUi();
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runRemove(container, {
+			branch: "feature",
+			"delete-branch": true,
+			"delete-remote-branch": false,
+			yes: true,
+			force: false,
+			"dry-run": false,
+		});
+
+		expect(spinnerLog.stop.some((m) => m.includes("not merged"))).toBe(true);
+		expect(spinnerLog.start.some((m) => m.includes("Force deleting"))).toBe(true);
+		expect(spinnerLog.stop.some((m) => m.includes("deleted (local)"))).toBe(true);
+
+		const branches = await git.listBranches();
+		expect(branches.success && branches.data.includes("feature")).toBe(false);
 
 		expect(code).toBe(0);
 	});

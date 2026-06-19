@@ -18,16 +18,16 @@ export type RemoteDeletionOutcome =
 /**
  * Typed outcome of the delete-branch policy.
  *
- * - `deleted`     — local branch was removed. `mode` records whether the normal
- *                   delete succeeded or whether the force fallback was used.
- *                   `remote` carries the remote-deletion sub-outcome.
+ * - `deleted`     — local branch was removed (either by the normal delete or by
+ *                   the force fallback). `remote` carries the remote-deletion
+ *                   sub-outcome.
  * - `not-merged`  — `deleteBranch` reported BRANCH_NOT_MERGED and the caller did
  *                   not request force; no remote deletion was attempted.
  * - `failed`      — local deletion failed for any other reason, including a force
  *                   fallback that itself failed. `message` is the git error message.
  */
 export type DeleteBranchOutcome =
-	| { status: "deleted"; mode: "normal" | "forced"; remote: RemoteDeletionOutcome }
+	| { status: "deleted"; remote: RemoteDeletionOutcome }
 	| { status: "not-merged" }
 	| { status: "failed"; message: string };
 
@@ -49,10 +49,10 @@ export async function deleteBranch(input: DeleteBranchInput, deps: DeleteBranchD
 
 	const deleteResult = await git.deleteBranch(branch);
 
-	let mode: "normal" | "forced";
-	if (Result.isOk(deleteResult)) {
-		mode = "normal";
-	} else if (deleteResult.error.code === "BRANCH_NOT_MERGED") {
+	if (Result.isErr(deleteResult)) {
+		if (deleteResult.error.code !== "BRANCH_NOT_MERGED") {
+			return { status: "failed", message: deleteResult.error.message };
+		}
 		if (!force) {
 			return { status: "not-merged" };
 		}
@@ -60,13 +60,10 @@ export async function deleteBranch(input: DeleteBranchInput, deps: DeleteBranchD
 		if (Result.isErr(forceResult)) {
 			return { status: "failed", message: forceResult.error.message };
 		}
-		mode = "forced";
-	} else {
-		return { status: "failed", message: deleteResult.error.message };
 	}
 
 	const remote = deleteRemote ? await deleteRemoteBranch(branch, git) : ({ status: "skipped" } as const);
-	return { status: "deleted", mode, remote };
+	return { status: "deleted", remote };
 }
 
 async function deleteRemoteBranch(branch: string, git: GitPort): Promise<RemoteDeletionOutcome> {
