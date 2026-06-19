@@ -20,6 +20,53 @@ export function createBunGitAdapter(logger: LoggerPort): GitPort {
 		return { exitCode, stdout: stdout.trim(), stderr: stderr.trim() };
 	}
 
+	// Cached primary-remote resolution. Looked up lazily from git's own
+	// configuration so that the user's `upstream` (or any non-"origin" name)
+	// flows naturally without changing port signatures.
+	let cachedRemoteName: string | null = null;
+
+	async function getTrackingRemote(branch: string): Promise<string | null> {
+		const { exitCode, stdout } = await runGit(["config", "--get", `branch.${branch}.remote`]);
+		return exitCode === 0 && stdout ? stdout : null;
+	}
+
+	async function resolveRemoteName(): Promise<string> {
+		if (cachedRemoteName !== null) return cachedRemoteName;
+
+		// 1. Tracking remote of the currently checked-out branch.
+		const head = await runGit(["symbolic-ref", "--quiet", "--short", "HEAD"]);
+		if (head.exitCode === 0 && head.stdout) {
+			const remote = await getTrackingRemote(head.stdout);
+			if (remote) {
+				cachedRemoteName = remote;
+				return remote;
+			}
+		}
+
+		// 2. Tracking remote of the conventional default branches.
+		for (const branch of ["main", "master"]) {
+			const remote = await getTrackingRemote(branch);
+			if (remote) {
+				cachedRemoteName = remote;
+				return remote;
+			}
+		}
+
+		// 3. Single remote present → it has to be the one.
+		const remotes = await runGit(["remote"]);
+		if (remotes.exitCode === 0) {
+			const names = remotes.stdout.split("\n").filter(Boolean);
+			if (names.length === 1 && names[0]) {
+				cachedRemoteName = names[0];
+				return names[0];
+			}
+		}
+
+		// 4. Final fallback to git's own historical default.
+		cachedRemoteName = "origin";
+		return "origin";
+	}
+
 	return {
 		async isGitRepository(): Promise<Result<boolean, GitError>> {
 			try {
@@ -133,11 +180,13 @@ export function createBunGitAdapter(logger: LoggerPort): GitPort {
 						message: "Not inside a git repository",
 					});
 				}
+				const remoteName = await resolveRemoteName();
+				const prefix = `${remoteName}/`;
 				const branches = stdout
 					.split("\n")
 					.filter(Boolean)
 					.filter((b) => !b.includes("HEAD"))
-					.map((b) => b.replace(/^origin\//, ""));
+					.map((b) => (b.startsWith(prefix) ? b.slice(prefix.length) : b));
 				return Result.ok(branches);
 			} catch {
 				return Result.err({
@@ -161,9 +210,11 @@ export function createBunGitAdapter(logger: LoggerPort): GitPort {
 
 		async getDefaultBranch(): Promise<Result<string, GitError>> {
 			try {
-				const { exitCode, stdout } = await runGit(["symbolic-ref", "refs/remotes/origin/HEAD"]);
+				const remoteName = await resolveRemoteName();
+				const remoteHeadRef = `refs/remotes/${remoteName}/HEAD`;
+				const { exitCode, stdout } = await runGit(["symbolic-ref", remoteHeadRef]);
 				if (exitCode === 0 && stdout) {
-					const branch = stdout.replace("refs/remotes/origin/", "");
+					const branch = stdout.replace(`refs/remotes/${remoteName}/`, "");
 					return Result.ok(branch);
 				}
 
@@ -478,9 +529,10 @@ export function createBunGitAdapter(logger: LoggerPort): GitPort {
 			}
 		},
 
-		async mergeFFOnly(worktreePath: string, branch: string, remote = "origin"): Promise<Result<void, GitError>> {
+		async mergeFFOnly(worktreePath: string, branch: string, remote?: string): Promise<Result<void, GitError>> {
 			try {
-				const { exitCode, stderr } = await runGit(["-C", worktreePath, "merge", "--ff-only", `${remote}/${branch}`]);
+				const resolved = remote ?? (await resolveRemoteName());
+				const { exitCode, stderr } = await runGit(["-C", worktreePath, "merge", "--ff-only", `${resolved}/${branch}`]);
 				if (exitCode !== 0) {
 					return Result.err({ code: "MERGE_FAILED", message: stderr || `Failed to fast-forward ${branch}` });
 				}
@@ -492,7 +544,8 @@ export function createBunGitAdapter(logger: LoggerPort): GitPort {
 
 		async updateBranchRef(branch: string): Promise<Result<void, GitError>> {
 			try {
-				const { exitCode, stderr } = await runGit(["fetch", "origin", `${branch}:${branch}`]);
+				const remoteName = await resolveRemoteName();
+				const { exitCode, stderr } = await runGit(["fetch", remoteName, `${branch}:${branch}`]);
 				if (exitCode !== 0) {
 					return Result.err({ code: "MERGE_FAILED", message: stderr || `Failed to update ref for ${branch}` });
 				}
@@ -699,9 +752,10 @@ export function createBunGitAdapter(logger: LoggerPort): GitPort {
 			}
 		},
 
-		async deleteRemoteBranch(branch: string, remote = "origin"): Promise<Result<void, GitError>> {
+		async deleteRemoteBranch(branch: string, remote?: string): Promise<Result<void, GitError>> {
 			try {
-				const { exitCode, stderr } = await runGit(["push", "--delete", remote, branch]);
+				const resolved = remote ?? (await resolveRemoteName());
+				const { exitCode, stderr } = await runGit(["push", "--delete", resolved, branch]);
 				if (exitCode !== 0) {
 					if (stderr?.includes("remote ref does not exist")) {
 						return Result.err({

@@ -966,6 +966,123 @@ describe("BunGitAdapter", () => {
 		});
 	});
 
+	// === Non-origin remote resolution ===
+	//
+	// The adapter resolves the primary remote name lazily from git's own
+	// configuration (tracking branch of HEAD / main / master, or a sole
+	// remote), with "origin" only as the final fallback. These tests use
+	// fresh adapter instances because the per-instance remote-name cache
+	// would otherwise be locked by an earlier test running against "origin".
+
+	describe("non-origin remote name", () => {
+		test("listRemoteBranches strips the resolved remote prefix when remote is 'upstream'", async () => {
+			await using tmp = await createTempDir();
+			const fixture = await createRemoteFixture(tmp.path, { remoteName: "upstream" });
+			await fixture.addTrackedBranch("feat-a");
+			await fixture.addTrackedBranch("feat-b", { withCommit: true });
+
+			await withCwd(fixture.repoPath, async () => {
+				const localGit = createBunGitAdapter(createNoopLogger());
+				const branches = expectOk(await localGit.listRemoteBranches());
+				expect(branches.sort()).toEqual(["feat-a", "feat-b", "main"]);
+			});
+		});
+
+		test("getDefaultBranch resolves HEAD via the non-origin remote", async () => {
+			await using tmp = await createTempDir();
+			const fixture = await createRemoteFixture(tmp.path, { remoteName: "upstream" });
+
+			await withCwd(fixture.repoPath, async () => {
+				const localGit = createBunGitAdapter(createNoopLogger());
+				expect(expectOk(await localGit.getDefaultBranch())).toBe("main");
+			});
+		});
+
+		test("mergeFFOnly without an explicit remote uses the resolved non-origin remote", async () => {
+			await using tmp = await createTempDir();
+			const fixture = await createRemoteFixture(tmp.path, { remoteName: "upstream" });
+			const clonePath = await fixture.cloneSecond();
+			const pushedSha = await pushCommit(clonePath, "ff.txt", "remote ahead");
+
+			await Bun.$`git -C ${fixture.repoPath} fetch upstream`.quiet();
+			await withCwd(fixture.repoPath, async () => {
+				const localGit = createBunGitAdapter(createNoopLogger());
+				expectOk(await localGit.mergeFFOnly(fixture.repoPath, "main"));
+				const localSha = (await Bun.$`git -C ${fixture.repoPath} rev-parse main`.quiet().text()).trim();
+				expect(localSha).toBe(pushedSha);
+			});
+		});
+
+		test("updateBranchRef fetches from the resolved non-origin remote", async () => {
+			await using tmp = await createTempDir();
+			const fixture = await createRemoteFixture(tmp.path, { remoteName: "upstream" });
+			await fixture.addTrackedBranch("feat");
+			const clonePath = await fixture.cloneSecond();
+			await Bun.$`git -C ${clonePath} checkout -q feat`.quiet();
+			const pushedSha = await pushCommit(clonePath, "feat.txt", "remote moved ahead");
+
+			await withCwd(fixture.repoPath, async () => {
+				const localGit = createBunGitAdapter(createNoopLogger());
+				expectOk(await localGit.updateBranchRef("feat"));
+				const localSha = (await Bun.$`git -C ${fixture.repoPath} rev-parse feat`.quiet().text()).trim();
+				expect(localSha).toBe(pushedSha);
+			});
+		});
+
+		test("deleteRemoteBranch without an explicit remote pushes the delete to the resolved remote", async () => {
+			await using tmp = await createTempDir();
+			const fixture = await createRemoteFixture(tmp.path, { remoteName: "upstream" });
+			await fixture.addTrackedBranch("doomed");
+
+			await withCwd(fixture.repoPath, async () => {
+				const localGit = createBunGitAdapter(createNoopLogger());
+				expectOk(await localGit.deleteRemoteBranch("doomed"));
+				const remoteRefs = await Bun.$`git -C ${fixture.remotePath} branch --list doomed`.quiet().text();
+				expect(remoteRefs.trim()).toBe("");
+			});
+		});
+
+		test("multiple remotes: the one tracking the default branch wins over the disambiguation fallbacks", async () => {
+			await using tmp = await createTempDir();
+			const fixture = await createRemoteFixture(tmp.path, { remoteName: "upstream" });
+			// Second remote, pushed to and fetched so it produces remote-tracking
+			// refs. A naive "single remote or alphabetical" picker would prefer
+			// "aaa" — but branch.main.remote points to "upstream".
+			const otherBare = join(tmp.path, "other.git");
+			await Bun.$`git init --bare -b main ${otherBare}`.quiet();
+			await Bun.$`git -C ${fixture.repoPath} remote add aaa ${otherBare}`.quiet();
+			await Bun.$`git -C ${fixture.repoPath} push aaa main`.quiet();
+			await Bun.$`git -C ${fixture.repoPath} fetch aaa`.quiet();
+
+			await withCwd(fixture.repoPath, async () => {
+				const localGit = createBunGitAdapter(createNoopLogger());
+				// Both remotes now have a main ref. listRemoteBranches strips
+				// only "upstream/", so the "aaa/main" entry survives — proving
+				// resolution followed branch.main.remote rather than picking aaa.
+				const branches = expectOk(await localGit.listRemoteBranches());
+				expect(branches).toContain("main");
+				expect(branches).toContain("aaa/main");
+				expect(branches).not.toContain("upstream/main");
+			});
+		});
+
+		test("repo with no remote configured: methods fall back to 'origin' and fail with MERGE_FAILED, not silently", async () => {
+			await using tmp = await createTempDir();
+			const repoPath = await initTestRepo(tmp.path);
+
+			await withCwd(repoPath, async () => {
+				const localGit = createBunGitAdapter(createNoopLogger());
+				// No remote exists at all — the operation must surface a typed
+				// error rather than crashing or returning a misleading success.
+				const result = await localGit.updateBranchRef("main");
+				expect(result.success).toBe(false);
+				if (!result.success) {
+					expect(result.error.code).toBe("MERGE_FAILED");
+				}
+			});
+		});
+	});
+
 	// === Edge cases ===
 
 	describe("edge cases", () => {
