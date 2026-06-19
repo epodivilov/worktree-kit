@@ -3,8 +3,7 @@ import type { GitPort } from "../../domain/ports/git-port.ts";
 import type { ShellPort } from "../../domain/ports/shell-port.ts";
 import type { Notification } from "../../shared/notification.ts";
 import { Result as R, type Result } from "../../shared/result.ts";
-import { findCherryPickedPrefix } from "./find-cherry-picked-prefix.ts";
-import { findSquashMergedPrefix } from "./find-squash-merged-prefix.ts";
+import { findMergedPrefix } from "./find-merged-prefix.ts";
 import { runHooks } from "./run-hooks.ts";
 
 const WIP_RESTORE_FAILED =
@@ -130,6 +129,28 @@ function buildRebaseOrder(worktrees: Worktree[], parentMap: Record<string, strin
 
 	const wtMap = new Map(worktrees.filter((w) => w.branch).map((w) => [w.branch, w]));
 	return ordered.filter((b) => wtMap.has(b)).map((b) => wtMap.get(b) as Worktree);
+}
+
+async function runPostUpdateHooks(
+	wt: Worktree,
+	parent: string,
+	input: UpdateWorktreesInput,
+	deps: UpdateWorktreesDeps,
+): Promise<Notification[]> {
+	if (!input.postUpdateHooks?.length || !deps.shell) return [];
+	const hookResult = await runHooks(
+		{
+			commands: input.postUpdateHooks,
+			context: {
+				worktreePath: wt.path,
+				branch: wt.branch,
+				repoRoot: input.repoRoot ?? "",
+				baseBranch: parent,
+			},
+		},
+		{ shell: deps.shell },
+	);
+	return hookResult.success ? hookResult.data.notifications : [];
 }
 
 function filterDescendants(
@@ -327,13 +348,9 @@ export async function updateWorktrees(
 			}
 		}
 
-		const cherryPickPrefix = await findCherryPickedPrefix({ git }, { base: parent, feature: wt.branch });
-		const squashPrefix = cherryPickPrefix
-			? null
-			: await findSquashMergedPrefix({ git }, { base: parent, feature: wt.branch });
-		const prefix = cherryPickPrefix ?? squashPrefix;
+		const prefix = await findMergedPrefix({ git }, { base: parent, feature: wt.branch });
 
-		if (prefix && prefix.skippedCount === prefix.totalCount) {
+		if (prefix?.fully) {
 			if (isDirty) {
 				const resetResult = await git.resetLastCommit(wt.path);
 				if (!resetResult.success) {
@@ -372,24 +389,7 @@ export async function updateWorktrees(
 				}
 			}
 
-			let hookNotifications: Notification[] = [];
-			if (input.postUpdateHooks?.length && deps.shell) {
-				const hookResult = await runHooks(
-					{
-						commands: input.postUpdateHooks,
-						context: {
-							worktreePath: wt.path,
-							branch: wt.branch,
-							repoRoot: input.repoRoot ?? "",
-							baseBranch: parent,
-						},
-					},
-					{ shell: deps.shell },
-				);
-				if (hookResult.success) {
-					hookNotifications = hookResult.data.notifications;
-				}
-			}
+			const hookNotifications = await runPostUpdateHooks(wt, parent, input, deps);
 
 			reports.push({
 				branch: wt.branch,
@@ -431,24 +431,7 @@ export async function updateWorktrees(
 					}
 				}
 
-				let hookNotifications: Notification[] = [];
-				if (input.postUpdateHooks?.length && deps.shell) {
-					const hookResult = await runHooks(
-						{
-							commands: input.postUpdateHooks,
-							context: {
-								worktreePath: wt.path,
-								branch: wt.branch,
-								repoRoot: input.repoRoot ?? "",
-								baseBranch: parent,
-							},
-						},
-						{ shell: deps.shell },
-					);
-					if (hookResult.success) {
-						hookNotifications = hookResult.data.notifications;
-					}
-				}
+				const hookNotifications = await runPostUpdateHooks(wt, parent, input, deps);
 
 				reports.push({
 					branch: wt.branch,
