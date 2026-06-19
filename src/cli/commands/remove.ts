@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import { defineCommand } from "citty";
 import pc from "picocolors";
 import * as v from "valibot";
+import { deleteBranch } from "../../application/use-cases/delete-branch.ts";
 import { listWorktrees } from "../../application/use-cases/list-worktrees.ts";
 import { loadConfig } from "../../application/use-cases/load-config.ts";
 import { removeWorktree } from "../../application/use-cases/remove-worktree.ts";
@@ -181,53 +182,45 @@ export function removeCommand(container: Container) {
 						if (shouldDeleteBranches && wt.branch) {
 							spinner.start(`Deleting branch "${wt.branch}"...`);
 
-							let localDeleted = false;
-							const deleteResult = await git.deleteBranch(wt.branch);
+							let outcome = await deleteBranch(
+								{ branch: wt.branch, force: force || yes, deleteRemote: shouldDeleteRemoteBranches },
+								{ git },
+							);
 
-							if (Result.isErr(deleteResult)) {
-								if (deleteResult.error.code === "BRANCH_NOT_MERGED") {
-									spinner.stop(pc.yellow(`Branch "${wt.branch}" not merged`));
+							if (outcome.status === "not-merged") {
+								spinner.stop(pc.yellow(`Branch "${wt.branch}" not merged`));
 
-									let shouldForce = force || yes;
-									if (!shouldForce && !ui.nonInteractive) {
-										const forceConfirm = await ui.confirm({
-											message: `Branch "${wt.branch}" is not merged. Force delete?`,
-											initialValue: false,
-										});
-										shouldForce = !ui.isCancel(forceConfirm) && forceConfirm;
-									}
-
-									if (shouldForce) {
-										spinner.start(`Force deleting branch "${wt.branch}"...`);
-										const forceResult = await git.deleteBranchForce(wt.branch);
-										if (Result.isErr(forceResult)) {
-											spinner.stop(pc.red(`Failed to delete branch "${wt.branch}"`));
-										} else {
-											localDeleted = true;
-										}
-									} else {
-										ui.info(`Branch "${wt.branch}" was not deleted`);
-									}
-								} else {
-									spinner.stop(pc.red(`Failed to delete branch "${wt.branch}"`));
+								let shouldForce = false;
+								if (!ui.nonInteractive) {
+									const forceConfirm = await ui.confirm({
+										message: `Branch "${wt.branch}" is not merged. Force delete?`,
+										initialValue: false,
+									});
+									shouldForce = !ui.isCancel(forceConfirm) && forceConfirm;
 								}
-							} else {
-								localDeleted = true;
+
+								if (shouldForce) {
+									spinner.start(`Force deleting branch "${wt.branch}"...`);
+									outcome = await deleteBranch(
+										{ branch: wt.branch, force: true, deleteRemote: shouldDeleteRemoteBranches },
+										{ git },
+									);
+								} else {
+									ui.info(`Branch "${wt.branch}" was not deleted`);
+								}
 							}
 
-							if (localDeleted && shouldDeleteRemoteBranches) {
-								spinner.message(`Deleting remote branch "${wt.branch}"...`);
-								const deleteRemoteResult = await git.deleteRemoteBranch(wt.branch);
-								if (Result.isErr(deleteRemoteResult)) {
-									spinner.stop(pc.green(`Branch "${wt.branch}" deleted (local)`));
-									if (deleteRemoteResult.error.code !== "REMOTE_REF_NOT_FOUND") {
-										ui.warn(`Failed to delete remote branch: ${deleteRemoteResult.error.message}`);
-									}
-								} else {
+							if (outcome.status === "deleted") {
+								if (outcome.remote.status === "deleted") {
 									spinner.stop(pc.green(`Branch "${wt.branch}" deleted (local & remote)`));
+								} else {
+									spinner.stop(pc.green(`Branch "${wt.branch}" deleted (local)`));
+									if (outcome.remote.status === "failed") {
+										ui.warn(`Failed to delete remote branch: ${outcome.remote.message}`);
+									}
 								}
-							} else if (localDeleted) {
-								spinner.stop(pc.green(`Branch "${wt.branch}" deleted (local)`));
+							} else if (outcome.status === "failed") {
+								spinner.stop(pc.red(`Failed to delete branch "${wt.branch}"`));
 							}
 						}
 					}
@@ -275,42 +268,26 @@ export function removeCommand(container: Container) {
 							let branchStatus = "";
 							if (shouldDeleteBranches && wt.branch) {
 								ms.update(wt.path, "deleting branch");
-								let localDeleted = false;
-								const deleteResult = await git.deleteBranch(wt.branch);
+								const outcome = await deleteBranch(
+									{ branch: wt.branch, force: force || yes, deleteRemote: shouldDeleteRemoteBranches },
+									{ git },
+								);
 
-								if (Result.isErr(deleteResult)) {
-									if (deleteResult.error.code === "BRANCH_NOT_MERGED") {
-										if (force || yes) {
-											const forceResult = await git.deleteBranchForce(wt.branch);
-											localDeleted = Result.isOk(forceResult);
-										}
-										if (!localDeleted) {
-											unmergedBranches.push(wt.branch);
-											branchStatus = " (branch kept — not fully merged)";
-										}
-									} else {
-										branchStatus = " (branch delete failed)";
-										warnings.push(`Failed to delete branch "${wt.branch}": ${deleteResult.error.message}`);
-									}
-								} else {
-									localDeleted = true;
-								}
-
-								if (localDeleted && shouldDeleteRemoteBranches) {
-									ms.update(wt.path, "deleting remote branch");
-									const deleteRemoteResult = await git.deleteRemoteBranch(wt.branch);
-									if (Result.isOk(deleteRemoteResult)) {
+								if (outcome.status === "deleted") {
+									if (outcome.remote.status === "deleted") {
 										branchStatus = " + branch deleted (local & remote)";
 									} else {
 										branchStatus = " + branch deleted (local)";
-										if (deleteRemoteResult.error.code !== "REMOTE_REF_NOT_FOUND") {
-											warnings.push(
-												`Failed to delete remote branch "${wt.branch}": ${deleteRemoteResult.error.message}`,
-											);
+										if (outcome.remote.status === "failed") {
+											warnings.push(`Failed to delete remote branch "${wt.branch}": ${outcome.remote.message}`);
 										}
 									}
-								} else if (localDeleted) {
-									branchStatus = " + branch deleted (local)";
+								} else if (outcome.status === "not-merged") {
+									unmergedBranches.push(wt.branch);
+									branchStatus = " (branch kept — not fully merged)";
+								} else {
+									branchStatus = " (branch delete failed)";
+									warnings.push(`Failed to delete branch "${wt.branch}": ${outcome.message}`);
 								}
 							}
 
@@ -331,21 +308,18 @@ export function removeCommand(container: Container) {
 							for (const branch of unmergedBranches) {
 								const spinner = ui.createSpinner();
 								spinner.start(`Force deleting branch "${branch}"...`);
-								const forceResult = await git.deleteBranchForce(branch);
-								if (Result.isOk(forceResult)) {
-									if (shouldDeleteRemoteBranches) {
-										spinner.message(`Deleting remote branch "${branch}"...`);
-										const remoteResult = await git.deleteRemoteBranch(branch);
-										if (Result.isOk(remoteResult)) {
-											spinner.stop(pc.green(`Branch "${branch}" deleted (local & remote)`));
-										} else {
-											spinner.stop(pc.green(`Branch "${branch}" deleted (local)`));
-											if (remoteResult.error.code !== "REMOTE_REF_NOT_FOUND") {
-												ui.warn(`Failed to delete remote branch: ${remoteResult.error.message}`);
-											}
-										}
+								const outcome = await deleteBranch(
+									{ branch, force: true, deleteRemote: shouldDeleteRemoteBranches },
+									{ git },
+								);
+								if (outcome.status === "deleted") {
+									if (outcome.remote.status === "deleted") {
+										spinner.stop(pc.green(`Branch "${branch}" deleted (local & remote)`));
 									} else {
 										spinner.stop(pc.green(`Branch "${branch}" deleted (local)`));
+										if (outcome.remote.status === "failed") {
+											ui.warn(`Failed to delete remote branch: ${outcome.remote.message}`);
+										}
 									}
 								} else {
 									spinner.stop(pc.red(`Failed to delete branch "${branch}"`));
