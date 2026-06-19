@@ -16,7 +16,8 @@ export type { FileToCopy, SymlinkToCreate };
 export interface CreateWorktreeInput {
 	branch: string;
 	baseBranch?: string;
-	fromRemote?: string;
+	/** When true, check the branch out from the adapter's resolved remote with tracking. */
+	fromRemote?: boolean;
 	dryRun?: boolean;
 }
 
@@ -102,7 +103,7 @@ export async function createWorktree(
 		worktree = { path: worktreePath, branch: input.branch, head: "", isMain: false, isPrunable: false };
 	} else {
 		const createResult = input.fromRemote
-			? await git.createWorktreeFromRemote(input.branch, worktreePath, input.fromRemote)
+			? await git.createWorktreeFromRemote(input.branch, worktreePath)
 			: await git.createWorktree(input.branch, worktreePath, input.baseBranch);
 		if (!createResult.success) {
 			return R.err(new Error(createResult.error.message));

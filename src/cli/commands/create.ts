@@ -78,7 +78,7 @@ export function createCommand(container: Container) {
 				spinner.start("Creating worktree...");
 
 				const createResult = await createWorktree(
-					{ branch, baseBranch, fromRemote: isRemoteBranch ? "origin" : undefined, dryRun },
+					{ branch, baseBranch, fromRemote: isRemoteBranch, dryRun },
 					{ git, fs },
 				);
 

@@ -1042,6 +1042,29 @@ describe("BunGitAdapter", () => {
 			});
 		});
 
+		test("createWorktreeFromRemote without an explicit remote checks out via the resolved non-origin remote", async () => {
+			await using tmp = await createTempDir();
+			const fixture = await createRemoteFixture(tmp.path, { remoteName: "upstream" });
+			const clonePath = await fixture.cloneSecond();
+			await Bun.$`git -C ${clonePath} checkout -q -b remote-only`.quiet();
+			await Bun.$`git -C ${clonePath} push -u upstream remote-only`.quiet();
+			const wtPath = join(tmp.path, "wt-remote");
+
+			await withCwd(fixture.repoPath, async () => {
+				const localGit = createBunGitAdapter(createNoopLogger());
+				expectOk(await localGit.fetchAll());
+				expect(expectOk(await localGit.branchExists("remote-only"))).toBe(false);
+
+				const worktree = expectOk(await localGit.createWorktreeFromRemote("remote-only", wtPath));
+				expect(worktree.branch).toBe("remote-only");
+
+				const upstream = await Bun.$`git -C ${wtPath} rev-parse --abbrev-ref ${"remote-only@{upstream}"}`
+					.quiet()
+					.text();
+				expect(upstream.trim()).toBe("upstream/remote-only");
+			});
+		});
+
 		test("multiple remotes: the one tracking the default branch wins over the disambiguation fallbacks", async () => {
 			await using tmp = await createTempDir();
 			const fixture = await createRemoteFixture(tmp.path, { remoteName: "upstream" });
