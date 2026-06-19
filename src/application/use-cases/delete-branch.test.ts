@@ -3,13 +3,13 @@ import { createFakeGit } from "../../test-utils/fake-git.ts";
 import { deleteBranch } from "./delete-branch.ts";
 
 describe("deleteBranch", () => {
-	test("clean delete → deleted/normal, remote skipped", async () => {
+	test("clean delete → deleted, remote skipped", async () => {
 		const git = createFakeGit({
 			branches: ["main", "feature"],
 			mergedBranches: ["feature"],
 		});
 		const outcome = await deleteBranch({ branch: "feature", force: false, deleteRemote: false }, { git });
-		expect(outcome).toEqual({ status: "deleted", mode: "normal", remote: { status: "skipped" } });
+		expect(outcome).toEqual({ status: "deleted", remote: { status: "skipped" } });
 	});
 
 	test("not-merged + force=false → not-merged (no force fallback)", async () => {
@@ -25,12 +25,12 @@ describe("deleteBranch", () => {
 		expect(branches.success && branches.data.includes("feature")).toBe(true);
 	});
 
-	test("not-merged + force=true → deleted/forced", async () => {
+	test("not-merged + force=true → deleted (force fallback)", async () => {
 		const git = createFakeGit({
 			branches: ["main", "feature"],
 		});
 		const outcome = await deleteBranch({ branch: "feature", force: true, deleteRemote: false }, { git });
-		expect(outcome).toEqual({ status: "deleted", mode: "forced", remote: { status: "skipped" } });
+		expect(outcome).toEqual({ status: "deleted", remote: { status: "skipped" } });
 
 		const branches = await git.listBranches();
 		expect(branches.success && branches.data.includes("feature")).toBe(false);
@@ -58,10 +58,9 @@ describe("deleteBranch", () => {
 	});
 
 	test("force fallback fails → failed with force error message", async () => {
-		// Branch exists but is not merged; force-delete will also fail because
-		// after deleteBranch the branch is "marked" but still in branchStore;
-		// to force a failure we use a branch that doesn't exist for force.
-		// Simpler: stub a git where deleteBranchForce fails.
+		// "feature" is not merged, so the normal delete returns BRANCH_NOT_MERGED and
+		// triggers the force fallback. Stub deleteBranchForce to fail so we exercise the
+		// "force fallback itself failed → failed" path.
 		const baseGit = createFakeGit({ branches: ["main", "feature"] });
 		const git = {
 			...baseGit,
@@ -80,7 +79,7 @@ describe("deleteBranch", () => {
 			remoteBranches: ["feature"],
 		});
 		const outcome = await deleteBranch({ branch: "feature", force: false, deleteRemote: true }, { git });
-		expect(outcome).toEqual({ status: "deleted", mode: "normal", remote: { status: "deleted" } });
+		expect(outcome).toEqual({ status: "deleted", remote: { status: "deleted" } });
 	});
 
 	test("deleted + remote delete requested + remote ref missing → remote=not-found", async () => {
@@ -90,7 +89,7 @@ describe("deleteBranch", () => {
 			remoteBranches: [], // empty, but state-tracking is enabled because the option is provided
 		});
 		const outcome = await deleteBranch({ branch: "feature", force: false, deleteRemote: true }, { git });
-		expect(outcome).toEqual({ status: "deleted", mode: "normal", remote: { status: "not-found" } });
+		expect(outcome).toEqual({ status: "deleted", remote: { status: "not-found" } });
 	});
 
 	test("deleted + remote delete fails with other error → remote=failed", async () => {
@@ -106,14 +105,14 @@ describe("deleteBranch", () => {
 		}
 	});
 
-	test("force fallback + remote delete → deleted/forced + remote=deleted", async () => {
+	test("force fallback + remote delete → deleted + remote=deleted", async () => {
 		const git = createFakeGit({
 			branches: ["main", "feature"],
 			// not merged → force fallback
 			remoteBranches: ["feature"],
 		});
 		const outcome = await deleteBranch({ branch: "feature", force: true, deleteRemote: true }, { git });
-		expect(outcome).toEqual({ status: "deleted", mode: "forced", remote: { status: "deleted" } });
+		expect(outcome).toEqual({ status: "deleted", remote: { status: "deleted" } });
 	});
 
 	test("not-merged outcome must not attempt remote deletion", async () => {
