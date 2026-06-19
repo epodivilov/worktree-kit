@@ -133,7 +133,11 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 			return Result.ok(wt);
 		},
 
-		async createWorktreeFromRemote(branch: string, path: string, _remote: string): Promise<Result<Worktree, GitError>> {
+		async createWorktreeFromRemote(
+			branch: string,
+			path: string,
+			_remote?: string,
+		): Promise<Result<Worktree, GitError>> {
 			if (store.some((w) => w.branch === branch)) {
 				return Result.err({ code: "BRANCH_EXISTS", message: `Branch ${branch} already exists` });
 			}
