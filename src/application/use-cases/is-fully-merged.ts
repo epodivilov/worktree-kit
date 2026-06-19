@@ -23,6 +23,10 @@ export async function isFullyMerged(input: IsFullyMergedInput, deps: IsFullyMerg
 	const ahead = await git.getCommitCount(defaultBranch, branch);
 	if (!ahead.success || ahead.data === 0) return false;
 
-	const prefix = await findMergedPrefix({ git }, { base: defaultBranch, feature: branch });
+	const prefix = await findMergedPrefix(
+		{ git },
+		{ base: defaultBranch, feature: branch },
+		{ trySquashOnPartialCherryPick: true },
+	);
 	return prefix?.fully ?? false;
 }

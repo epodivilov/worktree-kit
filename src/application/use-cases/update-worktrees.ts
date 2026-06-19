@@ -348,7 +348,11 @@ export async function updateWorktrees(
 			}
 		}
 
-		const prefix = await findMergedPrefix({ git }, { base: parent, feature: wt.branch });
+		const prefix = await findMergedPrefix(
+			{ git },
+			{ base: parent, feature: wt.branch },
+			{ trySquashOnPartialCherryPick: false },
+		);
 
 		if (prefix?.fully) {
 			if (isDirty) {
