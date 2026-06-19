@@ -21,7 +21,7 @@
 		"@biomejs/biome": "^2.5.0",
 		"@types/bun": "latest",
 		"bun-types": "1.3.14",
-		"typescript": "^5"
+		"typescript": "^6"
 	},
 	"dependencies": {
 		"@clack/prompts": "^1.6.0",
