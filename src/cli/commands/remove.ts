@@ -27,13 +27,12 @@ export function removeCommand(container: Container) {
 			},
 			"delete-branch": {
 				type: "boolean",
-				description:
-					"Delete the branch after removing worktree (defaults to false in --yes/--non-interactive/--dry-run)",
+				description: "Delete the branch after removing worktree",
 				required: false,
 			},
 			"delete-remote-branch": {
 				type: "boolean",
-				description: "Delete the remote branch (defaults to false in --yes/--non-interactive/--dry-run)",
+				description: "Delete the remote branch",
 				required: false,
 			},
 			force: {
@@ -43,8 +42,7 @@ export function removeCommand(container: Container) {
 			},
 			yes: {
 				type: "boolean",
-				description:
-					"Skip confirmation prompts. Safe defaults: branch/remote-branch deletion stays off unless explicitly opted in via flag or config",
+				description: "Skip confirmation prompts (branch deletion stays off unless opted in via flag or config)",
 				required: false,
 			},
 			"dry-run": {
