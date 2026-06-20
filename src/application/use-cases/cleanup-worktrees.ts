@@ -1,6 +1,7 @@
 import type { GitPort } from "../../domain/ports/git-port.ts";
 import { Result as R, type Result } from "../../shared/result.ts";
 import { classifyGoneBranch } from "./classify-gone-branch.ts";
+import { deleteBranch } from "./delete-branch.ts";
 import { isFullyMerged } from "./is-fully-merged.ts";
 
 export interface CleanupWorktreesInput {
@@ -86,26 +87,14 @@ export async function cleanupWorktrees(
 			}
 		}
 
-		const deleteResult = await git.deleteBranch(branch);
-		if (!deleteResult.success) {
-			if (deleteResult.error.code === "BRANCH_NOT_MERGED") {
-				const forceResult = await git.deleteBranchForce(branch);
-				if (!forceResult.success) {
-					reports.push({
-						branch,
-						worktreePath,
-						result: { status: "error", message: forceResult.error.message },
-					});
-					return;
-				}
-			} else {
-				reports.push({
-					branch,
-					worktreePath,
-					result: { status: "error", message: deleteResult.error.message },
-				});
-				return;
-			}
+		const outcome = await deleteBranch({ branch, force: true, deleteRemote: false }, { git });
+		if (outcome.status === "failed") {
+			reports.push({
+				branch,
+				worktreePath,
+				result: { status: "error", message: outcome.message },
+			});
+			return;
 		}
 
 		reports.push({
