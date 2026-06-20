@@ -330,6 +330,31 @@ describe("cleanupWorktrees", () => {
 		});
 	});
 
+	test("branch deletion failure surfaces as error report", async () => {
+		// Unmerged branch → force fallback. Stub deleteBranchForce to fail so the
+		// delete-branch use case returns `failed`, which cleanup must surface as
+		// an `error` report.
+		const baseGit = createFakeGit({
+			worktrees: [mainWt, featureA],
+			branches: ["main", "feature-a"],
+			goneBranches: ["feature-a"],
+			mergedBranches: [],
+			commitCountMap: new Map([["main..feature-a", 3]]),
+		});
+		const git = {
+			...baseGit,
+			async deleteBranchForce(_branch: string) {
+				return { success: false as const, error: { code: "UNKNOWN" as const, message: "force boom" } };
+			},
+		};
+		const output = expectOk(await cleanupWorktrees({ force: true, dryRun: false }, { git }));
+
+		expect(output.reports[0]).toMatchObject({
+			branch: "feature-a",
+			result: { status: "error", message: "force boom" },
+		});
+	});
+
 	test("default branch is never cleaned", async () => {
 		const git = createFakeGit({
 			worktrees: [mainWt],
