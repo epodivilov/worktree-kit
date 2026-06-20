@@ -166,7 +166,16 @@ wt list
 |------|-------------|
 | `--json` | Output as JSON array |
 
-Output shows each worktree with its path. Badges: `(main)` for the main worktree, `(current)` for the active one.
+Output shows each worktree with its path. Badges: `(main)` for the main worktree, `(current)` for the active one, `⚠ dir≠branch` when the worktree directory name does not match its branch name (drift — usually a leftover from a branch rename or a directory moved by hand). The drift badge only appears when a config defines `rootDir` and the worktree lives under it.
+
+**JSON output** — `--json` writes a single-line JSON array to stdout (no intro/outro), suitable for scripting and AI agents:
+
+```json
+[
+  { "branch": "main", "path": "/repo", "isMain": true, "isCurrent": false, "drifted": false },
+  { "branch": "feature/x", "path": "/worktrees/feature/x", "isMain": false, "isCurrent": true, "drifted": false }
+]
+```
 
 ### `wt remove`
 
@@ -225,6 +234,7 @@ wt update [branch] [options]
 | Flag | Description |
 |------|-------------|
 | `--dry-run` | Show what would be done without making changes |
+| `--cleanup` | Automatically clean up branches with gone remotes after update |
 
 **Examples:**
 
@@ -237,6 +247,9 @@ wt update feature/parent
 
 # Preview what would happen
 wt update --dry-run
+
+# Fetch, rebase, and drop branches whose remote was deleted — no prompts
+wt update --cleanup
 ```
 
 **How it works:**
@@ -278,7 +291,7 @@ After each successful rebase, `post-update` hooks are executed for that branch. 
 }
 ```
 
-After update completes, if any worktrees have branches that were deleted on the remote, an interactive prompt offers to clean them up.
+After update completes, if any worktrees have branches that were deleted on the remote, an interactive prompt offers to clean them up. Pass `--cleanup` to skip the prompt and run the cleanup automatically — convenient as a single end-of-day or CI command (`wt update --cleanup`) that combines fetch, rebase, and stale-branch removal, in place of `wt update` followed by `wt cleanup`. In non-interactive mode, `--cleanup` is required to actually drop branches; otherwise `wt update` just reports that stale branches exist.
 
 ### `wt doctor`
 
@@ -363,6 +376,18 @@ wt config show [options]
 
 Each field shows its origin: `global`, `repo`, `local`, or `default`. The sources header lists all config file paths (or hints where to create missing ones).
 
+### `wt self-update`
+
+Replace the running `wt` binary in place with the latest release from GitHub.
+
+```bash
+wt self-update
+```
+
+Checks the latest release, downloads the matching prebuilt binary, and atomically replaces the current executable. Supported on Linux and macOS (x64 and arm64); on macOS the `com.apple.quarantine` attribute is stripped after install. On Windows, re-run the PowerShell installer from the [Installation](#installation) section instead.
+
+The binary is replaced in place at `process.execPath`, so the current user must have write access to that location. If you installed `wt` to a system directory (e.g. `/usr/local/bin`), re-run with elevated permissions; otherwise install to a user-writable directory such as `~/.local/bin`.
+
 ## Exit codes
 
 | Code | Meaning |
@@ -430,6 +455,7 @@ Create a `.worktreekit.jsonc` file in the project root (or use `wt init`). JSONC
 | `hooks.pre-remove` | `string[]` | `[]` | Commands to run before removing a worktree |
 | `hooks.post-update` | `string[]` | `[]` | Commands to run after each branch is successfully rebased |
 | `hooks.on-conflict` | `string[]` | `[]` | Commands to run when rebase hits a conflict. Expected to resolve and complete the rebase |
+| `hooks.post-sync` | `string[]` | `[]` | Commands to run after `wt sync` applies copy/symlink changes to a worktree |
 
 ### Local Config Overrides
 
