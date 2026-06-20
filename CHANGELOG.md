@@ -3,6 +3,45 @@
 
 ## Bug Fixes
 
+- propose deletion for fully-merged branches without [gone] marker
+- wire create-from-remote through resolved remote, harden resolution
+- suppress remote-delete prompt for --yes/--non-interactive/--dry-run
+
+## Documentation
+
+- document missing commands and features
+- address review
+
+## Features
+
+- support non-origin remotes by resolving remote name from git config
+
+## Miscellaneous
+
+- upgrade actions to Node 24-compatible versions
+- update non-major dependencies
+- upgrade TypeScript to v6
+- surface Windows hint and warn on xattr failure
+- address review — guard sync throws, tighten tests
+
+## Refactoring
+
+- dedup hook execution and merge-prefix detection
+- preserve divergent fallback per call site
+- extract branch-deletion policy into a use case with typed outcomes
+- address review — preserve single-path messaging, drop dead surface
+- use deleteBranch use case instead of hand-rolled ladder
+- handle delete-branch outcomes exhaustively
+- address review — cover yes-gate, tighten help text
+
+## Testing
+
+- add real-remote git fixtures (bare remote, tracking clone, unborn HEAD)
+- cover every GitPort method with real-git integration tests
+- add fake-vs-adapter contract suite for git error codes
+
+## Bug Fixes
+
 - report branch-deletion failures in multi-worktree path
 - return Result from isRebaseInProgress and isMergeInProgress
 - surface ignored Result failures in destructive paths
