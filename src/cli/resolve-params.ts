@@ -243,19 +243,27 @@ export async function resolveWorktreesToRemove(
 	});
 }
 
+// Resolution order for both resolvers below:
+//   1. explicit CLI flag (--delete-branch / --delete-remote-branch) wins
+//   2. config value (remove.deleteBranch / remove.deleteRemoteBranch)
+//   3. non-interactive contexts (`--yes`, global `--non-interactive`, `--dry-run`)
+//      → default to `false`. Destructive defaults must require explicit opt-in,
+//      so agents and CI never accidentally delete branches or remote refs.
+//   4. interactive fallback: prompt the user.
+
 export async function resolveDeleteRemoteBranch(
 	flag: boolean | undefined,
 	configValue: boolean | undefined,
-	deps: { ui: UiPort },
+	deps: { ui: UiPort; yes: boolean; dryRun: boolean },
 	context: { branches: string[] },
 ): Promise<boolean> {
 	if (flag !== undefined) return flag;
 
 	if (configValue !== undefined) return configValue;
 
-	const { ui } = deps;
+	const { ui, yes, dryRun } = deps;
 
-	if (ui.nonInteractive) return false;
+	if (ui.nonInteractive || yes || dryRun) return false;
 
 	const message =
 		context.branches.length > 1
@@ -268,16 +276,16 @@ export async function resolveDeleteRemoteBranch(
 export async function resolveDeleteBranch(
 	flag: boolean | undefined,
 	configValue: boolean | undefined,
-	deps: { ui: UiPort },
+	deps: { ui: UiPort; yes: boolean; dryRun: boolean },
 	context: { branches: string[] },
 ): Promise<boolean> {
 	if (flag !== undefined) return flag;
 
 	if (configValue !== undefined) return configValue;
 
-	const { ui } = deps;
+	const { ui, yes, dryRun } = deps;
 
-	if (ui.nonInteractive) return false;
+	if (ui.nonInteractive || yes || dryRun) return false;
 
 	const message =
 		context.branches.length > 1

@@ -38,10 +38,12 @@ function createFakeUi(opts: { nonInteractive?: boolean; confirm?: boolean; multi
 	log: FakeUiLog;
 	multiSpinnerLog: FakeMultiSpinnerLog;
 	spinnerLog: FakeSpinnerLog;
+	confirmMessages: string[];
 } {
 	const log: FakeUiLog = { info: [], success: [], warn: [], error: [], outro: [] };
 	const multiSpinnerLog: FakeMultiSpinnerLog = { complete: [], fail: [] };
 	const spinnerLog: FakeSpinnerLog = { start: [], message: [], stop: [] };
+	const confirmMessages: string[] = [];
 
 	const ui = {
 		nonInteractive: opts.nonInteractive ?? false,
@@ -92,7 +94,8 @@ function createFakeUi(opts: { nonInteractive?: boolean; confirm?: boolean; multi
 		async text() {
 			return "";
 		},
-		async confirm() {
+		async confirm(options: { message: string }) {
+			confirmMessages.push(options.message);
 			return opts.confirm ?? true;
 		},
 		async select() {
@@ -107,7 +110,7 @@ function createFakeUi(opts: { nonInteractive?: boolean; confirm?: boolean; multi
 		cancel() {},
 	} satisfies UiPort;
 
-	return { ui, log, multiSpinnerLog, spinnerLog };
+	return { ui, log, multiSpinnerLog, spinnerLog, confirmMessages };
 }
 
 function buildContainer(
@@ -266,6 +269,117 @@ describe("remove — multi path branch delete failures", () => {
 		expect(featureComplete?.message).toContain("branch deleted (local)");
 		expect(featureComplete?.message).not.toContain("& remote");
 
+		expect(code).toBe(0);
+	});
+});
+
+describe("remove — non-interactive suppression of remote-delete prompt", () => {
+	// Regression for Vikunja #49: `wt remove <branch> --delete-branch --force --yes`
+	// must NOT prompt "Also delete remote branch?". The same applies to global
+	// --non-interactive and to --dry-run. Default decision in all these cases:
+	// do NOT delete the remote branch (explicit opt-in required via flag or config).
+
+	function singleRemoveFs() {
+		return createFakeFilesystem({
+			files: { [`${ROOT}/${CONFIG_FILENAME}`]: JSON.stringify({ rootDir: ".worktrees" }) },
+			directories: [ROOT, `${ROOT}/.worktrees`, featureWt.path],
+		});
+	}
+
+	function singleRemoveGit() {
+		return createFakeGit({
+			root: ROOT,
+			mainRoot: ROOT,
+			worktrees: [mainWt, featureWt],
+			branches: ["main", "feature"],
+			mergedBranches: ["feature"],
+		});
+	}
+
+	test("--yes with --delete-branch but no --delete-remote-branch → no prompt, remote NOT deleted", async () => {
+		const fs = singleRemoveFs();
+		const git = singleRemoveGit();
+		const { ui, spinnerLog, confirmMessages } = createFakeUi();
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runRemove(container, {
+			branch: "feature",
+			"delete-branch": true,
+			// "delete-remote-branch" intentionally omitted
+			yes: true,
+			force: false,
+			"dry-run": false,
+		});
+
+		// No prompt of any kind.
+		expect(confirmMessages.length).toBe(0);
+		// Local branch deleted, remote NOT touched.
+		expect(spinnerLog.stop.some((m) => m.includes("deleted (local)"))).toBe(true);
+		expect(spinnerLog.stop.some((m) => m.includes("local & remote"))).toBe(false);
+		expect(code).toBe(0);
+	});
+
+	test("--non-interactive with --delete-branch but no --delete-remote-branch → no prompt, remote NOT deleted", async () => {
+		const fs = singleRemoveFs();
+		const git = singleRemoveGit();
+		const { ui, spinnerLog, confirmMessages } = createFakeUi({ nonInteractive: true });
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runRemove(container, {
+			branch: "feature",
+			"delete-branch": true,
+			yes: false,
+			force: false,
+			"dry-run": false,
+		});
+
+		expect(confirmMessages.length).toBe(0);
+		expect(spinnerLog.stop.some((m) => m.includes("deleted (local)"))).toBe(true);
+		expect(spinnerLog.stop.some((m) => m.includes("local & remote"))).toBe(false);
+		expect(code).toBe(0);
+	});
+
+	test("--dry-run with --delete-branch (no --delete-remote-branch) → no prompt, plan reflects local-only", async () => {
+		const fs = singleRemoveFs();
+		const git = singleRemoveGit();
+		const { ui, log, confirmMessages } = createFakeUi();
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runRemove(container, {
+			branch: "feature",
+			"delete-branch": true,
+			yes: false,
+			force: false,
+			"dry-run": true,
+		});
+
+		expect(confirmMessages.length).toBe(0);
+		// Plan: local-only, not "local & remote".
+		const planLine = log.info.find((m) => m.includes("Would delete branch"));
+		expect(planLine).toBeDefined();
+		expect(planLine).toContain("local");
+		expect(planLine).not.toContain("local & remote");
+		expect(log.outro.some((m) => m.includes("Dry run"))).toBe(true);
+		expect(code).toBe(0);
+	});
+
+	test("--yes with explicit --delete-remote-branch=true → no prompt, remote DELETED", async () => {
+		const fs = singleRemoveFs();
+		const git = singleRemoveGit();
+		const { ui, spinnerLog, confirmMessages } = createFakeUi();
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runRemove(container, {
+			branch: "feature",
+			"delete-branch": true,
+			"delete-remote-branch": true,
+			yes: true,
+			force: false,
+			"dry-run": false,
+		});
+
+		expect(confirmMessages.length).toBe(0);
+		expect(spinnerLog.stop.some((m) => m.includes("local & remote"))).toBe(true);
 		expect(code).toBe(0);
 	});
 });
