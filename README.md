@@ -166,7 +166,7 @@ wt list
 |------|-------------|
 | `--json` | Output as JSON array |
 
-Output shows each worktree with its path. Badges: `(main)` for the main worktree, `(current)` for the active one, `⚠ dir≠branch` when the worktree directory name does not match its branch name (drift — usually a leftover from a branch rename or a directory moved by hand). The drift badge only appears when a config defines `rootDir` and the worktree lives under it.
+Output shows each worktree with its path. Badges: `(main)` for the main worktree, `(current)` for the active one, `⚠ dir≠branch` when the worktree's path does not match `<rootDir>/<branch>` (drift — usually a leftover from a branch rename, a directory moved by hand, or a worktree placed outside `rootDir`). The drift badge requires a loadable config; without one (e.g. before `wt init`), drift is not computed.
 
 **JSON output** — `--json` writes a single-line JSON array to stdout (no intro/outro), suitable for scripting and AI agents:
 
@@ -248,7 +248,7 @@ wt update feature/parent
 # Preview what would happen
 wt update --dry-run
 
-# Fetch, rebase, and drop branches whose remote was deleted — no prompts
+# Fetch, rebase, and drop merged branches whose remote was deleted — no prompts
 wt update --cleanup
 ```
 
