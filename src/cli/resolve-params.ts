@@ -247,8 +247,9 @@ export async function resolveWorktreesToRemove(
 //   1. explicit CLI flag (--delete-branch / --delete-remote-branch) wins
 //   2. config value (remove.deleteBranch / remove.deleteRemoteBranch)
 //   3. non-interactive contexts (`--yes`, global `--non-interactive`, `--dry-run`)
-//      → default to `false`. Destructive defaults must require explicit opt-in,
-//      so agents and CI never accidentally delete branches or remote refs.
+//      → return `false` and skip the prompt. Destructive defaults must require
+//      explicit opt-in, so agents and CI never accidentally delete branches or
+//      remote refs.
 //   4. interactive fallback: prompt the user.
 
 export async function resolveDeleteRemoteBranch(

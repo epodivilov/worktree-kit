@@ -382,6 +382,80 @@ describe("remove — non-interactive suppression of remote-delete prompt", () =>
 		expect(spinnerLog.stop.some((m) => m.includes("local & remote"))).toBe(true);
 		expect(code).toBe(0);
 	});
+
+	test("--yes alone (no --delete-branch flag, no config) → no prompt, branch NOT deleted", async () => {
+		// Exercises the new yes-gate in resolveDeleteBranch: with neither flag nor config,
+		// --yes must default to false instead of prompting "Also delete branch?".
+		const fs = singleRemoveFs();
+		const git = singleRemoveGit();
+		const { ui, spinnerLog, confirmMessages } = createFakeUi();
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runRemove(container, {
+			branch: "feature",
+			// "delete-branch" omitted on purpose
+			yes: true,
+			force: false,
+			"dry-run": false,
+		});
+
+		expect(confirmMessages.length).toBe(0);
+		// Worktree removed, but no branch-delete spinner fired.
+		expect(spinnerLog.stop.some((m) => m.includes("removed"))).toBe(true);
+		expect(spinnerLog.start.some((m) => m.includes("Deleting branch"))).toBe(false);
+		expect(code).toBe(0);
+	});
+
+	test("--yes with explicit --delete-remote-branch=false → no prompt, remote NOT deleted", async () => {
+		// Explicit opt-out must beat the yes-gate (step 1 of resolution order).
+		const fs = singleRemoveFs();
+		const git = singleRemoveGit();
+		const { ui, spinnerLog, confirmMessages } = createFakeUi();
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runRemove(container, {
+			branch: "feature",
+			"delete-branch": true,
+			"delete-remote-branch": false,
+			yes: true,
+			force: false,
+			"dry-run": false,
+		});
+
+		expect(confirmMessages.length).toBe(0);
+		expect(spinnerLog.stop.some((m) => m.includes("deleted (local)"))).toBe(true);
+		expect(spinnerLog.stop.some((m) => m.includes("local & remote"))).toBe(false);
+		expect(code).toBe(0);
+	});
+
+	test("--yes with config remove.deleteRemoteBranch=true → no prompt, remote DELETED", async () => {
+		// Config opt-in (step 2) must beat the yes-gate (step 3).
+		const fs = createFakeFilesystem({
+			files: {
+				[`${ROOT}/${CONFIG_FILENAME}`]: JSON.stringify({
+					rootDir: ".worktrees",
+					remove: { deleteRemoteBranch: true },
+				}),
+			},
+			directories: [ROOT, `${ROOT}/.worktrees`, featureWt.path],
+		});
+		const git = singleRemoveGit();
+		const { ui, spinnerLog, confirmMessages } = createFakeUi();
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runRemove(container, {
+			branch: "feature",
+			"delete-branch": true,
+			// "delete-remote-branch" omitted — config decides
+			yes: true,
+			force: false,
+			"dry-run": false,
+		});
+
+		expect(confirmMessages.length).toBe(0);
+		expect(spinnerLog.stop.some((m) => m.includes("local & remote"))).toBe(true);
+		expect(code).toBe(0);
+	});
 });
 
 describe("remove — single path force on unmerged branch", () => {
