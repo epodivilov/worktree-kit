@@ -87,21 +87,37 @@ export async function cleanupWorktrees(
 			}
 		}
 
+		// Mapping:
+		// - `deleted`     → existing `cleaned` / `branch-only` report.
+		// - `failed`      → `error` report carrying the git error message.
+		// - `not-merged`  → unreachable because we pass `force: true`. Handled
+		//                   defensively so a future contract change in
+		//                   `deleteBranch` doesn't silently report a non-deleted
+		//                   branch as `cleaned`.
 		const outcome = await deleteBranch({ branch, force: true, deleteRemote: false }, { git });
-		if (outcome.status === "failed") {
-			reports.push({
-				branch,
-				worktreePath,
-				result: { status: "error", message: outcome.message },
-			});
-			return;
+		switch (outcome.status) {
+			case "deleted":
+				reports.push({
+					branch,
+					worktreePath,
+					result: { status: worktree ? "cleaned" : "branch-only" },
+				});
+				return;
+			case "failed":
+				reports.push({
+					branch,
+					worktreePath,
+					result: { status: "error", message: outcome.message },
+				});
+				return;
+			case "not-merged":
+				reports.push({
+					branch,
+					worktreePath,
+					result: { status: "error", message: `Branch "${branch}" is not fully merged` },
+				});
+				return;
 		}
-
-		reports.push({
-			branch,
-			worktreePath,
-			result: { status: worktree ? "cleaned" : "branch-only" },
-		});
 	};
 
 	if (goneBranches.length > 0) {
