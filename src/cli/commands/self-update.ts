@@ -13,9 +13,12 @@ import { UPDATE_CHECK_FILENAME } from "../update-notifier.ts";
 
 const REPO = "epodivilov/worktree-kit";
 
-function detectBinaryName(): Result<string> {
-	const platform = process.platform;
-	const arch = process.arch;
+export const WINDOWS_UNSUPPORTED_MESSAGE = "Windows is not supported by self-update; reinstall via install.ps1";
+
+export function detectBinaryName(platform: NodeJS.Platform, arch: string): Result<string> {
+	if (platform === "win32") {
+		return R.err(new Error(WINDOWS_UNSUPPORTED_MESSAGE));
+	}
 
 	const os = platform === "darwin" ? "darwin" : platform === "linux" ? "linux" : null;
 	const cpu = arch === "arm64" ? "arm64" : arch === "x64" ? "x64" : null;
@@ -27,16 +30,57 @@ function detectBinaryName(): Result<string> {
 	return R.ok(`wt-${os}-${cpu}`);
 }
 
+/**
+ * Best-effort removal of the macOS quarantine attribute from a freshly
+ * downloaded binary. Failures (missing `xattr`, non-zero exit, or no
+ * attribute present) must NOT fail the self-update — they only surface
+ * as a warning so the user knows why the binary might be Gatekeeper-blocked.
+ */
+export type QuarantineRemover = (targetPath: string) => Result<void>;
+
+export const defaultQuarantineRemover: QuarantineRemover = (targetPath) => {
+	try {
+		const proc = Bun.spawnSync(["xattr", "-d", "com.apple.quarantine", targetPath]);
+		if (proc.exitCode !== 0) {
+			const stderr = proc.stderr?.toString().trim();
+			return R.err(new Error(stderr || `xattr exited with code ${proc.exitCode}`));
+		}
+		return R.ok(undefined);
+	} catch (err) {
+		return R.err(err instanceof Error ? err : new Error(String(err)));
+	}
+};
+
+export function tryRemoveMacosQuarantine(
+	targetPath: string,
+	deps: { remover: QuarantineRemover; warn: (message: string) => void },
+): void {
+	const result = deps.remover(targetPath);
+	if (R.isErr(result)) {
+		deps.warn(
+			`Could not remove macOS quarantine attribute (${result.error.message}); macOS Gatekeeper may block the new binary until you run \`xattr -d com.apple.quarantine ${targetPath}\` manually.`,
+		);
+	}
+}
+
 function formatMb(bytes: number): string {
 	return (bytes / 1024 / 1024).toFixed(1);
+}
+
+interface DownloadBinaryDeps {
+	platform: NodeJS.Platform;
+	quarantineRemover: QuarantineRemover;
+	warn: (message: string) => void;
+	onProgress?: (downloaded: number, total: number) => void;
 }
 
 async function downloadBinary(
 	tag: string,
 	binaryName: string,
 	targetPath: string,
-	onProgress?: (downloaded: number, total: number) => void,
+	deps: DownloadBinaryDeps,
 ): Promise<Result<void>> {
+	const { platform, quarantineRemover, warn, onProgress } = deps;
 	const url = `https://github.com/${REPO}/releases/download/${tag}/${binaryName}`;
 
 	let res: Response;
@@ -86,12 +130,8 @@ async function downloadBinary(
 		await chmod(tmpPath, 0o755);
 		await rename(tmpPath, targetPath);
 
-		if (process.platform === "darwin") {
-			try {
-				Bun.spawnSync(["xattr", "-d", "com.apple.quarantine", targetPath]);
-			} catch {
-				// ignore — quarantine attribute may not exist
-			}
+		if (platform === "darwin") {
+			tryRemoveMacosQuarantine(targetPath, { remover: quarantineRemover, warn });
 		}
 	} catch (err) {
 		return R.err(new Error(`Post-download setup failed: ${err instanceof Error ? err.message : String(err)}`));
@@ -133,7 +173,7 @@ export function selfUpdateCommand(container: Container) {
 
 				spinner.message(`Downloading ${latest.tag}...`);
 
-				const binaryResult = detectBinaryName();
+				const binaryResult = detectBinaryName(process.platform, process.arch);
 				if (R.isErr(binaryResult)) {
 					spinner.stop(pc.red("Failed"));
 					throw new CommandError(binaryResult.error.message, EXIT_FAILURE);
@@ -143,16 +183,21 @@ export function selfUpdateCommand(container: Container) {
 				const execPath = process.execPath;
 
 				let lastRender = 0;
-				const downloadResult = await downloadBinary(latest.tag, binaryName, execPath, (downloaded, total) => {
-					const now = Date.now();
-					if (now - lastRender < 200) return;
-					lastRender = now;
-					const current = formatMb(downloaded);
-					const message =
-						total > 0
-							? `Downloading ${latest.tag}... ${current}/${formatMb(total)} MB`
-							: `Downloading ${latest.tag}... ${current} MB`;
-					spinner.message(message);
+				const downloadResult = await downloadBinary(latest.tag, binaryName, execPath, {
+					platform: process.platform,
+					quarantineRemover: defaultQuarantineRemover,
+					warn: (message) => ui.warn(message),
+					onProgress: (downloaded, total) => {
+						const now = Date.now();
+						if (now - lastRender < 200) return;
+						lastRender = now;
+						const current = formatMb(downloaded);
+						const message =
+							total > 0
+								? `Downloading ${latest.tag}... ${current}/${formatMb(total)} MB`
+								: `Downloading ${latest.tag}... ${current} MB`;
+						spinner.message(message);
+					},
 				});
 				if (R.isErr(downloadResult)) {
 					spinner.stop(pc.red("Failed"));
