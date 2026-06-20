@@ -51,6 +51,14 @@ describe("detectBinaryName", () => {
 		}
 	});
 
+	test("darwin/x64 → wt-darwin-x64", () => {
+		const result = detectBinaryName("darwin", "x64");
+		expect(R.isOk(result)).toBe(true);
+		if (R.isOk(result)) {
+			expect(result.data).toBe("wt-darwin-x64");
+		}
+	});
+
 	test("linux/x64 → wt-linux-x64", () => {
 		const result = detectBinaryName("linux", "x64");
 		expect(R.isOk(result)).toBe(true);
@@ -89,16 +97,38 @@ describe("tryRemoveMacosQuarantine", () => {
 		expect(warnings[0]).toContain("/path/to/wt");
 	});
 
-	test("remover errs with non-Error → message still surfaces", () => {
+	test("remover throws synchronously → warning logged, no throw", () => {
 		const warnings: string[] = [];
-		const remover: QuarantineRemover = () => R.err(new Error("exited with code 1"));
+		const remover: QuarantineRemover = () => {
+			throw new Error("boom from a buggy remover");
+		};
 
-		tryRemoveMacosQuarantine("/usr/local/bin/wt", {
-			remover,
-			warn: (m) => warnings.push(m),
-		});
+		expect(() =>
+			tryRemoveMacosQuarantine("/usr/local/bin/wt", {
+				remover,
+				warn: (m) => warnings.push(m),
+			}),
+		).not.toThrow();
 
-		expect(warnings[0]).toContain("exited with code 1");
+		expect(warnings).toHaveLength(1);
+		expect(warnings[0]).toContain("boom from a buggy remover");
 		expect(warnings[0]).toContain("/usr/local/bin/wt");
+	});
+
+	test("remover throws a non-Error → message still surfaces", () => {
+		const warnings: string[] = [];
+		const remover: QuarantineRemover = () => {
+			throw "raw string failure";
+		};
+
+		expect(() =>
+			tryRemoveMacosQuarantine("/usr/local/bin/wt", {
+				remover,
+				warn: (m) => warnings.push(m),
+			}),
+		).not.toThrow();
+
+		expect(warnings).toHaveLength(1);
+		expect(warnings[0]).toContain("raw string failure");
 	});
 });

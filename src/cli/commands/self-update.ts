@@ -55,7 +55,15 @@ export function tryRemoveMacosQuarantine(
 	targetPath: string,
 	deps: { remover: QuarantineRemover; warn: (message: string) => void },
 ): void {
-	const result = deps.remover(targetPath);
+	let result: Result<void>;
+	try {
+		result = deps.remover(targetPath);
+	} catch (err) {
+		// Defensive: the contract says the remover returns a Result, but if an
+		// injected/buggy remover throws synchronously, we must still degrade to
+		// a warning rather than fail the update.
+		result = R.err(err instanceof Error ? err : new Error(String(err)));
+	}
 	if (R.isErr(result)) {
 		deps.warn(
 			`Could not remove macOS quarantine attribute (${result.error.message}); macOS Gatekeeper may block the new binary until you run \`xattr -d com.apple.quarantine ${targetPath}\` manually.`,
