@@ -3,6 +3,10 @@
 
 ## Bug Fixes
 
+- suppress stale update notice during self-update
+
+## Bug Fixes
+
 - propose deletion for fully-merged branches without [gone] marker
 - wire create-from-remote through resolved remote, harden resolution
 - suppress remote-delete prompt for --yes/--non-interactive/--dry-run
