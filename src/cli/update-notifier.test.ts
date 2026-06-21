@@ -71,6 +71,11 @@ describe("runUpdateNotifier", () => {
 		await runUpdateNotifier(makeBombContainer(), "1.0.0");
 	});
 
+	test("skips when argv contains self-update command", async () => {
+		process.argv = ["bun", "wt", "self-update"];
+		await runUpdateNotifier(makeBombContainer(), "1.0.0");
+	});
+
 	test("calls checkForUpdates on normal TTY invocation", async () => {
 		let readFileCalled = false;
 
