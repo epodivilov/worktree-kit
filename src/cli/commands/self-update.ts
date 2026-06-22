@@ -32,20 +32,41 @@ export function detectBinaryName(platform: NodeJS.Platform, arch: string): Resul
 
 /**
  * Best-effort removal of the macOS quarantine attribute from a freshly
- * downloaded binary. Failures (missing `xattr`, non-zero exit, or no
- * attribute present) must NOT fail the self-update — they only surface
- * as a warning so the user knows why the binary might be Gatekeeper-blocked.
+ * downloaded binary. Real failures (missing `xattr`, unexpected non-zero exit)
+ * must NOT fail the self-update — they only surface as a warning so the user
+ * knows why the binary might be Gatekeeper-blocked.
  */
 export type QuarantineRemover = (targetPath: string) => Result<void>;
+
+/**
+ * Interpret the outcome of `xattr -d com.apple.quarantine`.
+ *
+ * A missing attribute is NOT a failure: the binary is fetched over HTTP, so
+ * macOS never stamps it with `com.apple.quarantine` in the first place and
+ * Gatekeeper has nothing to block. `xattr` reports this with a non-zero exit
+ * and a "No such xattr" message, which we treat as success to avoid a
+ * misleading warning that tells the user to re-run a command that would fail
+ * the same way.
+ */
+export function interpretXattrRemoval(exitCode: number, stderr: string): Result<void> {
+	if (exitCode === 0) {
+		return R.ok(undefined);
+	}
+	const normalized = stderr.toLowerCase();
+	if (
+		normalized.includes("no such xattr") ||
+		normalized.includes("attribute not found") ||
+		normalized.includes("enoattr")
+	) {
+		return R.ok(undefined);
+	}
+	return R.err(new Error(stderr.trim() || `xattr exited with code ${exitCode}`));
+}
 
 export const defaultQuarantineRemover: QuarantineRemover = (targetPath) => {
 	try {
 		const proc = Bun.spawnSync(["xattr", "-d", "com.apple.quarantine", targetPath]);
-		if (proc.exitCode !== 0) {
-			const stderr = proc.stderr?.toString().trim();
-			return R.err(new Error(stderr || `xattr exited with code ${proc.exitCode}`));
-		}
-		return R.ok(undefined);
+		return interpretXattrRemoval(proc.exitCode, proc.stderr?.toString() ?? "");
 	} catch (err) {
 		return R.err(err instanceof Error ? err : new Error(String(err)));
 	}

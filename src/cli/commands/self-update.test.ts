@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Result as R } from "../../shared/result.ts";
 import {
 	detectBinaryName,
+	interpretXattrRemoval,
 	type QuarantineRemover,
 	tryRemoveMacosQuarantine,
 	WINDOWS_UNSUPPORTED_MESSAGE,
@@ -64,6 +65,44 @@ describe("detectBinaryName", () => {
 		expect(R.isOk(result)).toBe(true);
 		if (R.isOk(result)) {
 			expect(result.data).toBe("wt-linux-x64");
+		}
+	});
+});
+
+describe("interpretXattrRemoval", () => {
+	test("exit 0 → ok", () => {
+		expect(R.isOk(interpretXattrRemoval(0, ""))).toBe(true);
+	});
+
+	test("missing attribute (No such xattr) → ok, not a failure", () => {
+		// The binary is fetched over HTTP, so macOS never stamps it with the
+		// quarantine attribute. `xattr -d` then exits non-zero with this message,
+		// which must NOT surface as a warning.
+		const stderr = "xattr: /Users/me/.local/bin/wt: No such xattr: com.apple.quarantine";
+		expect(R.isOk(interpretXattrRemoval(1, stderr))).toBe(true);
+	});
+
+	test("missing attribute (ENOATTR) → ok", () => {
+		expect(R.isOk(interpretXattrRemoval(1, "xattr: [Errno 93] ENOATTR"))).toBe(true);
+	});
+
+	test("missing attribute (Attribute not found) → ok", () => {
+		expect(R.isOk(interpretXattrRemoval(1, "Attribute not found"))).toBe(true);
+	});
+
+	test("genuine failure → err with stderr message", () => {
+		const result = interpretXattrRemoval(1, "xattr: command not found");
+		expect(R.isErr(result)).toBe(true);
+		if (R.isErr(result)) {
+			expect(result.error.message).toBe("xattr: command not found");
+		}
+	});
+
+	test("non-zero exit with empty stderr → err mentions the exit code", () => {
+		const result = interpretXattrRemoval(2, "");
+		expect(R.isErr(result)).toBe(true);
+		if (R.isErr(result)) {
+			expect(result.error.message).toBe("xattr exited with code 2");
 		}
 	});
 });
