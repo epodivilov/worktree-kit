@@ -105,6 +105,51 @@ describe("runHooks", () => {
 		expect(shell.calls[0]?.options.cwd).toBe("/worktrees/feature");
 	});
 
+	test("warns once and skips remaining commands when no shell is available", async () => {
+		const shell = createFakeShell({
+			defaultResult: Result.err({ code: "SHELL_UNAVAILABLE", message: "no POSIX shell on PATH" }),
+		});
+
+		const result = await runHooks(
+			{
+				commands: ["pnpm install", "cp .env.example .env", "echo done"],
+				context: defaultContext,
+			},
+			{ shell },
+		);
+
+		expect(result.success).toBe(true);
+		if (result.success) {
+			expect(result.data.notifications).toHaveLength(1);
+			expect(result.data.notifications[0]?.level).toBe("warn");
+			expect(result.data.notifications[0]?.message).toBe("Skipped 3 hook(s): no POSIX shell on PATH");
+			expect(result.data.failedCommands).toEqual(["pnpm install", "cp .env.example .env", "echo done"]);
+		}
+		// Stops after the first attempt — no shell means no command can run.
+		expect(shell.calls).toHaveLength(1);
+	});
+
+	test("reports only the unrun commands when the shell disappears mid-run", async () => {
+		const results = new Map();
+		results.set("second", Result.err({ code: "SHELL_UNAVAILABLE", message: "no POSIX shell on PATH" }));
+
+		const shell = createFakeShell({ results });
+		const result = await runHooks(
+			{
+				commands: ["first", "second", "third"],
+				context: defaultContext,
+			},
+			{ shell },
+		);
+
+		expect(result.success).toBe(true);
+		if (result.success) {
+			expect(result.data.failedCommands).toEqual(["second", "third"]);
+			expect(result.data.notifications.map((n) => n.level)).toEqual(["info", "warn"]);
+			expect(result.data.notifications[1]?.message).toBe("Skipped 2 hook(s): no POSIX shell on PATH");
+		}
+	});
+
 	test("returns empty results for empty commands", async () => {
 		const shell = createFakeShell();
 		const result = await runHooks(
