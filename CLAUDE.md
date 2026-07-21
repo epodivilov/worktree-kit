@@ -46,3 +46,9 @@ src/
 - Ports & Adapters: interfaces in `domain/ports/`, implementations in `infrastructure/adapters/`
 - External libraries (clack, picocolors) only in `infrastructure/`
 - Exception: valibot in `domain/schemas/` (declarative type definitions)
+
+### Result handling
+
+- Every `Result` from a port call must be checked (`.success` / `Result.isOk` / `Result.isErr`) before the code moves on
+- A deliberately discarded `Result` is marked with `// ignored: <reason>` so review can tell intent from oversight
+- Mechanical enforcement was considered and deferred: Biome 2.x GritQL has no type information, so a syntactic rule would need a hand-maintained list of ~42 port method names, and a second type-aware linter is disproportionate for a bug class with no live instances
