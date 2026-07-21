@@ -6,6 +6,13 @@ on:
   push:
     branches: [main]
 
+# Supersede in-flight runs for the same pull request: a new push makes the
+# previous run's result obsolete, and letting it finish only delays feedback.
+# On push to main every run must complete, so the branch always has a verified state.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   check:
     runs-on: ubuntu-latest
