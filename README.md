@@ -260,7 +260,7 @@ wt update --cleanup
 3. Detects parent branches via merge-base
 4. Rebases feature branches in correct order — parents before children
 
-**Fork workflow** — when `upstream` is set in config (see `wt init --upstream`), the default branch is fast-forwarded from `<upstream>/<default>` instead of `origin/<default>`. After a successful upstream sync, `post-update` hooks also run for the default branch (so you can, for example, push the synced default branch back to your fork).
+**Fork workflow** — when `upstream` is set in config (see `wt init --upstream`), the default branch is synced from `<upstream>/<default>` instead of `origin/<default>`, whether it is fast-forwarded in its own worktree or updated by ref because no worktree has it checked out. After a successful upstream sync, `post-update` hooks also run for the default branch (so you can, for example, push the synced default branch back to your fork); with no worktree for the default branch they run in the repository root.
 
 When `upstream` is **not** configured, an interactive `wt update` auto-detects candidate remotes (every remote except `origin`) the same way `wt init` does, and offers to save your choice:
 

@@ -34,7 +34,7 @@ const main = defineCommand({
 		},
 	},
 	async setup({ args }) {
-		container = createContainer({
+		container = await createContainer({
 			verbose: args.verbose || process.env.WT_VERBOSE === "1",
 			nonInteractive: args["non-interactive"] || process.env.WT_NON_INTERACTIVE === "1",
 		});

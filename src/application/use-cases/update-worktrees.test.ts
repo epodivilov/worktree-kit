@@ -1079,3 +1079,89 @@ describe("updateWorktrees — upstream sync", () => {
 		expect(shell.calls.find((c) => c.options.cwd === "/repo")).toBeUndefined();
 	});
 });
+
+// Whether the default branch happens to be checked out decides how it is updated
+// (fast-forward vs. ref fetch) — it must not decide which remote it is updated
+// from, nor whether post-update hooks run for it.
+describe("updateWorktrees — upstream sync without a default-branch worktree", () => {
+	test("upstream set — updates the default branch ref from the upstream remote", async () => {
+		const updateBranchRefCalls: { branch: string; remote: string }[] = [];
+		const git = createFakeGit({
+			worktrees: [featureA],
+			updateBranchRefCalls,
+			...flatBranchesConfig([featureA]),
+		});
+
+		const result = await updateWorktrees({ dryRun: false, upstream: "upstream" }, { git });
+
+		const output = expectOk(result);
+		expect(output.defaultBranchUpdate).toBe("ref-updated");
+		expect(output.syncedFromUpstream).toBe("upstream");
+		expect(updateBranchRefCalls).toEqual([{ branch: "main", remote: "upstream" }]);
+	});
+
+	test("upstream unset — updates the default branch ref from the primary remote", async () => {
+		const updateBranchRefCalls: { branch: string; remote: string }[] = [];
+		const git = createFakeGit({
+			worktrees: [featureA],
+			updateBranchRefCalls,
+			...flatBranchesConfig([featureA]),
+		});
+
+		const result = await updateWorktrees({ dryRun: false }, { git });
+
+		const output = expectOk(result);
+		expect(output.syncedFromUpstream).toBeUndefined();
+		expect(updateBranchRefCalls).toEqual([{ branch: "main", remote: "origin" }]);
+	});
+
+	test("upstream set with post-update hook — runs the hook for the default branch in the repo root", async () => {
+		const git = createFakeGit({ worktrees: [featureA], ...flatBranchesConfig([featureA]) });
+		const shell = createFakeShell();
+
+		const result = await updateWorktrees(
+			{ dryRun: false, upstream: "upstream", postUpdateHooks: ["git push origin main"], repoRoot: "/repo" },
+			{ git, shell },
+		);
+
+		const output = expectOk(result);
+		const mainReport = output.reports.find((r) => r.branch === "main");
+		expect(mainReport?.result).toMatchObject({ status: "is-default-branch" });
+		expect(mainReport?.hookNotifications).toHaveLength(1);
+
+		// The default branch has no worktree, so the hook runs in the repo root.
+		const mainHookCall = shell.calls.find((c) => c.options.env?.WORKTREE_BRANCH === "main");
+		expect(mainHookCall?.options.cwd).toBe("/repo");
+		expect(mainHookCall?.options.env).toMatchObject({
+			WORKTREE_PATH: "/repo",
+			BASE_BRANCH: "upstream/main",
+		});
+	});
+
+	test("upstream unset — no hook runs for the default branch and it is not reported", async () => {
+		const git = createFakeGit({ worktrees: [featureA], ...flatBranchesConfig([featureA]) });
+		const shell = createFakeShell();
+
+		const result = await updateWorktrees(
+			{ dryRun: false, postUpdateHooks: ["git push"], repoRoot: "/repo" },
+			{ git, shell },
+		);
+
+		const output = expectOk(result);
+		expect(output.reports.find((r) => r.branch === "main")).toBeUndefined();
+		expect(shell.calls.find((c) => c.options.env?.WORKTREE_BRANCH === "main")).toBeUndefined();
+	});
+
+	test("dry run with upstream — no hook runs for the default branch", async () => {
+		const git = createFakeGit({ worktrees: [featureA], ...flatBranchesConfig([featureA]) });
+		const shell = createFakeShell();
+
+		const result = await updateWorktrees(
+			{ dryRun: true, upstream: "upstream", postUpdateHooks: ["git push origin main"], repoRoot: "/repo" },
+			{ git, shell },
+		);
+
+		expectOk(result);
+		expect(shell.calls).toEqual([]);
+	});
+});
