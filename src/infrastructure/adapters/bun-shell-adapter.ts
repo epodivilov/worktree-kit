@@ -4,7 +4,23 @@ import { Result } from "../../shared/result.ts";
 
 const DEFAULT_TIMEOUT = 5 * 60 * 1000; // 5 minutes
 
-export function createBunShellAdapter(logger: LoggerPort): ShellPort {
+const SHELL_UNAVAILABLE_MESSAGE =
+	"no POSIX shell on PATH — commands are shell strings run via `sh -c`, which native Windows does not provide (run wt from Git Bash or WSL)";
+
+/** Resolves an executable to its absolute path, or `null` when it is not on PATH. */
+export type WhichFn = (command: string) => string | null;
+
+export function createBunShellAdapter(logger: LoggerPort, which: WhichFn = (cmd) => Bun.which(cmd)): ShellPort {
+	let shellPath: string | null | undefined;
+
+	function resolveShell(): string | null {
+		if (shellPath === undefined) {
+			shellPath = which("sh");
+			logger.debug("shell", `sh -> ${shellPath ?? "not found"}`);
+		}
+		return shellPath;
+	}
+
 	return {
 		async execute(command: string, options: ShellExecuteOptions): Promise<Result<ShellExecuteResult, ShellError>> {
 			const { cwd, env = {}, timeout = DEFAULT_TIMEOUT } = options;
@@ -12,10 +28,19 @@ export function createBunShellAdapter(logger: LoggerPort): ShellPort {
 			logger.debug("shell", command);
 			logger.debug("shell", `cwd: ${cwd}`);
 
+			const sh = resolveShell();
+			if (sh === null) {
+				logger.debug("shell", "-> SHELL_UNAVAILABLE");
+				return Result.err({
+					code: "SHELL_UNAVAILABLE",
+					message: SHELL_UNAVAILABLE_MESSAGE,
+				});
+			}
+
 			const startTime = Date.now();
 
 			try {
-				const proc = Bun.spawn(["sh", "-c", command], {
+				const proc = Bun.spawn([sh, "-c", command], {
 					cwd,
 					env: { ...process.env, ...env },
 					stdout: "pipe",

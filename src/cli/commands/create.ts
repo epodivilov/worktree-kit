@@ -186,6 +186,8 @@ export function createCommand(container: Container) {
 						env.BASE_BRANCH = hookContext.baseBranch;
 					}
 
+					let shellUnavailable: { message: string; skipped: number } | undefined;
+
 					for (const [i, command] of hookCommands.entries()) {
 						const message = `Running hook ${i + 1}/${total}: ${command}...`;
 
@@ -201,11 +203,20 @@ export function createCommand(container: Container) {
 						});
 
 						if (!result.success) {
+							if (result.error.code === "SHELL_UNAVAILABLE") {
+								shellUnavailable = { message: result.error.message, skipped: total - i };
+								break;
+							}
 							ui.warn(`Hook failed: "${command}" - ${result.error.message}`);
 						}
 					}
 
-					hooksSpinner.stop(pc.green("Hooks completed"));
+					if (shellUnavailable) {
+						hooksSpinner.stop(pc.yellow("Hooks skipped"));
+						ui.warn(`Skipped ${shellUnavailable.skipped} hook(s): ${shellUnavailable.message}`);
+					} else {
+						hooksSpinner.stop(pc.green("Hooks completed"));
+					}
 				}
 
 				ui.success(`Created worktree for branch: ${branch} at ${createResult.data.worktree.path}`);

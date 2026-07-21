@@ -528,6 +528,24 @@ All hooks receive the following environment variables:
 | `REPO_ROOT` | Repository root path | all |
 | `BASE_BRANCH` | Base branch (create: `--base` value; update: parent branch) | `post-create`, `post-update`, `on-conflict` |
 
+### Hook Execution Model
+
+Hooks are shell strings, not argument arrays. Each command is executed as `sh -c "<command>"` with the worktree as the working directory, so pipes, redirects, `&&`, globs, and variable expansion all work as they do in a terminal:
+
+```jsonc
+{
+  "hooks": {
+    "post-create": ["pnpm install --frozen-lockfile && cp ../../.env.shared .env"]
+  }
+}
+```
+
+This is deliberate. Hook commands come from your own repo config (`.worktreekit.jsonc`, `.worktreekit.local.jsonc`, or the global config), which is the same trust level as a `package.json` script or a git hook — worktree-kit does not escape, sandbox, or validate them. Treat a config file from an untrusted repo the way you would treat its build scripts.
+
+Each command inherits the parent environment plus the hook variables above. A non-zero exit code is reported as a warning and does not abort the command (except `on-conflict`, which is expected to resolve the rebase). Commands time out after 5 minutes.
+
+**Windows:** hooks require `sh` on `PATH`. Under Git Bash or WSL they work normally; under native `cmd.exe` / PowerShell there is no `sh`, so worktree-kit warns that hooks were skipped and continues with the rest of the command. Running hooks through `cmd.exe` or PowerShell is not supported — a config written for `sh` would not survive the translation, and the alternative shells are not interchangeable enough to pick one automatically.
+
 ## Migration from `.worktreekitrc`
 
 If you have an existing `.worktreekitrc` config, run:

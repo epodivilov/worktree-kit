@@ -141,6 +141,8 @@ export function removeCommand(container: Container) {
 							REPO_ROOT: repoRoot,
 						};
 
+						let shellUnavailable: { message: string; skipped: number } | undefined;
+
 						for (const [i, command] of preRemoveHooks.entries()) {
 							const message = `Running pre-remove hook ${i + 1}/${total}: ${command}...`;
 							if (i === 0) {
@@ -155,10 +157,20 @@ export function removeCommand(container: Container) {
 							});
 
 							if (!hookResult.success) {
+								if (hookResult.error.code === "SHELL_UNAVAILABLE") {
+									shellUnavailable = { message: hookResult.error.message, skipped: total - i };
+									break;
+								}
 								ui.warn(`Pre-remove hook failed: "${command}" - ${hookResult.error.message}`);
 							}
 						}
-						hooksSpinner.stop(pc.green("Pre-remove hooks completed"));
+
+						if (shellUnavailable) {
+							hooksSpinner.stop(pc.yellow("Pre-remove hooks skipped"));
+							ui.warn(`Skipped ${shellUnavailable.skipped} pre-remove hook(s): ${shellUnavailable.message}`);
+						} else {
+							hooksSpinner.stop(pc.green("Pre-remove hooks completed"));
+						}
 					}
 
 					// Remove worktree
@@ -231,6 +243,7 @@ export function removeCommand(container: Container) {
 					const ms = ui.createMultiSpinner(keys);
 					const warnings: string[] = [];
 					const unmergedBranches: string[] = [];
+					let shellUnavailableMessage: string | undefined;
 
 					await Promise.all(
 						worktreesToRemove.map(async (wt) => {
@@ -251,6 +264,10 @@ export function removeCommand(container: Container) {
 										env,
 									});
 									if (!hookResult.success) {
+										if (hookResult.error.code === "SHELL_UNAVAILABLE") {
+											shellUnavailableMessage = hookResult.error.message;
+											break;
+										}
 										warnings.push(`Hook failed for "${displayLabel}": ${command}`);
 									}
 								}
@@ -297,6 +314,10 @@ export function removeCommand(container: Container) {
 					);
 
 					ms.stop();
+
+					if (shellUnavailableMessage) {
+						warnings.push(`Pre-remove hooks skipped: ${shellUnavailableMessage}`);
+					}
 
 					for (const warning of warnings) {
 						ui.warn(warning);

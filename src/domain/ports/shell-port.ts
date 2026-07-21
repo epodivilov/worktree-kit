@@ -1,7 +1,11 @@
 import type { Result } from "../../shared/result.ts";
 
 export interface ShellError {
-	readonly code: "EXECUTION_FAILED" | "TIMEOUT" | "UNKNOWN";
+	/**
+	 * `SHELL_UNAVAILABLE` — the platform provides no POSIX shell to run the command with.
+	 * Commands are shell strings, so there is no fallback: callers should report and skip.
+	 */
+	readonly code: "EXECUTION_FAILED" | "TIMEOUT" | "SHELL_UNAVAILABLE" | "UNKNOWN";
 	readonly message: string;
 	readonly exitCode?: number;
 	readonly stderr?: string;
