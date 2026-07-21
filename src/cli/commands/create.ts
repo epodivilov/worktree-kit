@@ -127,6 +127,8 @@ export function createCommand(container: Container) {
 
 				const cleanup = new CleanupHandle();
 				cleanup.register(async () => {
+					// ignored: best-effort rollback on an already-failing path — a failed cleanup
+					// has no useful handling and must not mask the original error
 					await git.removeWorktree(createResult.data.worktree.path, { force: true });
 				});
 
