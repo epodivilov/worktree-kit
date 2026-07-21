@@ -18,6 +18,7 @@ worktree-kit fills these gaps with a single CLI.
 - Interactive branch selection with local and remote branch support
 - Automatic file and directory copying with glob patterns
 - Symlinks from root repo for sharing gitignored content across worktrees
+- Propagation of later `copy`/`symlinks` config changes into existing worktrees (`wt sync`)
 - Post-create, pre-remove, post-update, and on-conflict hooks with environment variables
 - Smart update: fetch, fast-forward default branch, rebase feature branches in correct order
 - Parent branch detection via merge-base for proper rebase ordering
@@ -292,6 +293,41 @@ After each successful rebase, `post-update` hooks are executed for that branch. 
 ```
 
 After update completes, if any worktrees have branches that were deleted on the remote, an interactive prompt offers to clean them up. Pass `--cleanup` to skip the prompt and run the cleanup automatically — convenient as a single end-of-day or CI command (`wt update --cleanup`) that combines fetch, rebase, and stale-branch removal, in place of `wt update` followed by `wt cleanup`. In non-interactive mode, `--cleanup` is required to actually drop branches; otherwise `wt update` just reports that stale branches exist.
+
+### `wt sync`
+
+Apply `copy` and `symlinks` config changes to worktrees that already exist.
+
+```bash
+wt sync [branch] [options]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--dry-run` | Show what would change without applying |
+| `--force` | Overwrite existing files at copy destinations |
+
+**Examples:**
+
+```bash
+# Sync every worktree
+wt sync
+
+# Sync a single worktree
+wt sync feature/my-feature
+
+# Preview what would change
+wt sync --dry-run
+
+# Overwrite files that already exist at the copy destinations
+wt sync --force
+```
+
+`wt create` resolves `copy` and `symlinks` once, at creation time. When you edit those config options later, worktrees created earlier keep the old set — `wt sync` is what pushes the new entries into them. Omit `branch` to sync every worktree; pass a branch to sync only its worktree (an error if no worktree exists for it).
+
+For each worktree, sync creates missing symlinks, recreates broken ones, and copies missing files. Files that already exist at the destination are reported and left untouched — pass `--force` to overwrite them. A path that exists but is not a symlink is skipped with a warning; remove it manually to let sync recreate it.
+
+After a worktree is synced, its `post-sync` hooks run (see [Options](#options)). `--dry-run` only reports the plan: nothing is written and no hooks run.
 
 ### `wt doctor`
 
