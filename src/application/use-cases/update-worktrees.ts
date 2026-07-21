@@ -132,7 +132,7 @@ function buildRebaseOrder(worktrees: Worktree[], parentMap: Record<string, strin
 }
 
 async function runPostUpdateHooks(
-	wt: Worktree,
+	wt: { path: string; branch: string },
 	parent: string,
 	input: UpdateWorktreesInput,
 	deps: UpdateWorktreesDeps,
@@ -197,6 +197,9 @@ export async function updateWorktrees(
 	const goneSet = new Set(goneResult.success ? goneResult.data.filter((b) => b !== defaultBranch) : []);
 
 	const mainWorktree = worktrees.find((w) => w.branch === defaultBranch);
+	// Where default-branch work happens: its own worktree when it has one, else the
+	// repo root — the branch is then updated by ref and is checked out nowhere.
+	const defaultBranchPath = mainWorktree?.path ?? input.repoRoot ?? "";
 	let defaultBranchUpdate: "ff-updated" | "ref-updated";
 	let defaultBranchHookNotifications: Notification[] = [];
 	let syncedFromUpstream: string | undefined;
@@ -209,36 +212,31 @@ export async function updateWorktrees(
 			return R.err(new Error(`Failed to fast-forward ${defaultBranch}: ${ffResult.error.message}`));
 		}
 		defaultBranchUpdate = "ff-updated";
-
-		// When syncing the default branch from an upstream remote, run post-update hooks
-		// for the default branch too (mirrors the feature-branch path).
-		if (input.upstream) {
-			syncedFromUpstream = input.upstream;
-			if (!input.dryRun && input.postUpdateHooks?.length && deps.shell) {
-				const baseRef = `${input.upstream}/${defaultBranch}`;
-				const hookResult = await runHooks(
-					{
-						commands: input.postUpdateHooks,
-						context: {
-							worktreePath: mainWorktree.path,
-							branch: defaultBranch,
-							repoRoot: input.repoRoot ?? "",
-							baseBranch: baseRef,
-						},
-					},
-					{ shell: deps.shell },
-				);
-				if (hookResult.success) {
-					defaultBranchHookNotifications = hookResult.data.notifications;
-				}
-			}
-		}
 	} else {
-		const refResult = await git.updateBranchRef(defaultBranch);
+		// Same remote as the fast-forward path above: which remote is authoritative for
+		// the default branch must not depend on whether it happens to be checked out.
+		const refResult = input.upstream
+			? await git.updateBranchRef(defaultBranch, input.upstream)
+			: await git.updateBranchRef(defaultBranch);
 		if (!refResult.success) {
 			return R.err(new Error(`Failed to update ${defaultBranch} ref: ${refResult.error.message}`));
 		}
 		defaultBranchUpdate = "ref-updated";
+	}
+
+	// When syncing the default branch from an upstream remote, run post-update hooks
+	// for the default branch too (mirrors the feature-branch path). The branch was
+	// synced either way, so this does not depend on how it was updated.
+	if (input.upstream) {
+		syncedFromUpstream = input.upstream;
+		if (!input.dryRun && defaultBranchPath) {
+			defaultBranchHookNotifications = await runPostUpdateHooks(
+				{ path: defaultBranchPath, branch: defaultBranch },
+				`${input.upstream}/${defaultBranch}`,
+				input,
+				deps,
+			);
+		}
 	}
 
 	const parentMap: Record<string, string> = {};
@@ -266,10 +264,12 @@ export async function updateWorktrees(
 	const reports: WorktreeReport[] = [];
 	const failedBranches = new Set<string>();
 
-	if (mainWorktree) {
+	// The default branch is reported when it has a worktree; without one there is
+	// nothing to rebase, but hook results still need somewhere to surface.
+	if (mainWorktree || defaultBranchHookNotifications.length > 0) {
 		reports.push({
 			branch: defaultBranch,
-			path: mainWorktree.path,
+			path: defaultBranchPath,
 			result: { status: "is-default-branch" },
 			hookNotifications: defaultBranchHookNotifications,
 		});

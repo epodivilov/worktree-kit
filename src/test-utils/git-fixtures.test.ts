@@ -8,7 +8,7 @@ import { createTempDir } from "./temp-dir.ts";
 // Self-tests: prove the fixtures produce the git states the adapter
 // integration tests (and the fake-vs-adapter contract suite) depend on.
 describe("git fixtures", () => {
-	const git = createBunGitAdapter(createNoopLogger());
+	const git = createBunGitAdapter(createNoopLogger(), "origin");
 
 	test("remote fixture supports the full gone-branch flow", async () => {
 		await using tmp = await createTempDir();

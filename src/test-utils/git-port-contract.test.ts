@@ -49,7 +49,7 @@ async function openRealSession(): Promise<GitPortSession> {
 	const originalCwd = process.cwd();
 	process.chdir(repo);
 	return {
-		git: createBunGitAdapter(createNoopLogger()),
+		git: createBunGitAdapter(createNoopLogger(), "origin"),
 		async [Symbol.asyncDispose]() {
 			process.chdir(originalCwd);
 			await tmp[Symbol.asyncDispose]();

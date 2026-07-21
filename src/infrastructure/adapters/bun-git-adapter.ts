@@ -5,72 +5,70 @@ import type { GitError, GitPort } from "../../domain/ports/git-port.ts";
 import type { LoggerPort } from "../../domain/ports/logger-port.ts";
 import { Result } from "../../shared/result.ts";
 
-export function createBunGitAdapter(logger: LoggerPort): GitPort {
-	async function runGit(args: string[]): Promise<{ exitCode: number; stdout: string; stderr: string }> {
-		const command = `git ${args.join(" ")}`;
-		logger.debug("git", command);
+async function execGit(
+	logger: LoggerPort,
+	args: string[],
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+	const command = `git ${args.join(" ")}`;
+	logger.debug("git", command);
 
-		const proc = Bun.spawn(["git", ...args], { stdout: "pipe", stderr: "pipe" });
-		const exitCode = await proc.exited;
-		const stdout = await new Response(proc.stdout).text();
-		const stderr = await new Response(proc.stderr).text();
+	const proc = Bun.spawn(["git", ...args], { stdout: "pipe", stderr: "pipe" });
+	const exitCode = await proc.exited;
+	const stdout = await new Response(proc.stdout).text();
+	const stderr = await new Response(proc.stderr).text();
 
-		logger.debug("git", `-> exit ${exitCode}${stderr.trim() ? ` (${stderr.trim()})` : ""}`);
+	logger.debug("git", `-> exit ${exitCode}${stderr.trim() ? ` (${stderr.trim()})` : ""}`);
 
-		return { exitCode, stdout: stdout.trim(), stderr: stderr.trim() };
-	}
+	return { exitCode, stdout: stdout.trim(), stderr: stderr.trim() };
+}
 
-	// Cached primary-remote resolution. Looked up lazily from git's own
-	// configuration so that the user's `upstream` (or any non-"origin" name)
-	// flows naturally without changing port signatures.
-	let cachedRemoteName: string | null = null;
-
-	async function getTrackingRemote(branch: string): Promise<string | null> {
-		const { exitCode, stdout } = await runGit(["config", "--get", `branch.${branch}.remote`]);
+/**
+ * Name of the repository's primary remote, read from git's own configuration so
+ * that a user's non-"origin" naming flows naturally without changing port
+ * signatures. Resolved once at composition time and injected into the adapter —
+ * keeping it out of the adapter means no per-instance cache to go stale.
+ */
+export async function resolvePrimaryRemote(logger: LoggerPort): Promise<string> {
+	const getTrackingRemote = async (branch: string): Promise<string | null> => {
+		const { exitCode, stdout } = await execGit(logger, ["config", "--get", `branch.${branch}.remote`]);
 		// A literal "." is git's sentinel for "this repository" (a branch tracking
 		// another local branch); treat it as "no remote" so resolution falls through.
 		return exitCode === 0 && stdout && stdout !== "." ? stdout : null;
+	};
+
+	// 1. Tracking remote of the conventional default branches — the most
+	// reliable signal for the repository's canonical remote.
+	for (const branch of ["main", "master"]) {
+		const remote = await getTrackingRemote(branch);
+		if (remote) return remote;
 	}
 
-	async function resolveRemoteName(): Promise<string> {
-		if (cachedRemoteName !== null) return cachedRemoteName;
-
-		// 1. Tracking remote of the conventional default branches — the most
-		// reliable signal for the repository's canonical remote.
-		for (const branch of ["main", "master"]) {
-			const remote = await getTrackingRemote(branch);
-			if (remote) {
-				cachedRemoteName = remote;
-				return remote;
-			}
-		}
-
-		// 2. Tracking remote of the currently checked-out branch. Consulted after
-		// the default branches because the current branch may track a side remote
-		// (e.g. a fork), which is the wrong answer for these repo-level queries.
-		const head = await runGit(["symbolic-ref", "--quiet", "--short", "HEAD"]);
-		if (head.exitCode === 0 && head.stdout) {
-			const remote = await getTrackingRemote(head.stdout);
-			if (remote) {
-				cachedRemoteName = remote;
-				return remote;
-			}
-		}
-
-		// 3. Single remote present → it has to be the one.
-		const remotes = await runGit(["remote"]);
-		if (remotes.exitCode === 0) {
-			const names = remotes.stdout.split("\n").filter(Boolean);
-			if (names.length === 1 && names[0]) {
-				cachedRemoteName = names[0];
-				return names[0];
-			}
-		}
-
-		// 4. Final fallback to git's own historical default.
-		cachedRemoteName = "origin";
-		return "origin";
+	// 2. Tracking remote of the currently checked-out branch. Consulted after
+	// the default branches because the current branch may track a side remote
+	// (e.g. a fork), which is the wrong answer for these repo-level queries.
+	const head = await execGit(logger, ["symbolic-ref", "--quiet", "--short", "HEAD"]);
+	if (head.exitCode === 0 && head.stdout) {
+		const remote = await getTrackingRemote(head.stdout);
+		if (remote) return remote;
 	}
+
+	// 3. Single remote present → it has to be the one.
+	const remotes = await execGit(logger, ["remote"]);
+	if (remotes.exitCode === 0) {
+		const names = remotes.stdout.split("\n").filter(Boolean);
+		if (names.length === 1 && names[0]) return names[0];
+	}
+
+	// 4. Final fallback to git's own historical default.
+	return "origin";
+}
+
+/**
+ * @param primaryRemote name of the repository's primary remote, used by every
+ * operation that does not receive an explicit remote (see `resolvePrimaryRemote`).
+ */
+export function createBunGitAdapter(logger: LoggerPort, primaryRemote: string): GitPort {
+	const runGit = (args: string[]) => execGit(logger, args);
 
 	return {
 		async isGitRepository(): Promise<Result<boolean, GitError>> {
@@ -185,8 +183,7 @@ export function createBunGitAdapter(logger: LoggerPort): GitPort {
 						message: "Not inside a git repository",
 					});
 				}
-				const remoteName = await resolveRemoteName();
-				const prefix = `${remoteName}/`;
+				const prefix = `${primaryRemote}/`;
 				const branches = stdout
 					.split("\n")
 					.filter(Boolean)
@@ -215,8 +212,7 @@ export function createBunGitAdapter(logger: LoggerPort): GitPort {
 
 		async getDefaultBranch(): Promise<Result<string, GitError>> {
 			try {
-				const remoteName = await resolveRemoteName();
-				const remotePrefix = `refs/remotes/${remoteName}/`;
+				const remotePrefix = `refs/remotes/${primaryRemote}/`;
 				const { exitCode, stdout } = await runGit(["symbolic-ref", `${remotePrefix}HEAD`]);
 				if (exitCode === 0 && stdout) {
 					const branch = stdout.replace(remotePrefix, "");
@@ -278,7 +274,7 @@ export function createBunGitAdapter(logger: LoggerPort): GitPort {
 
 		async createWorktreeFromRemote(branch: string, path: string, remote?: string): Promise<Result<Worktree, GitError>> {
 			try {
-				const remoteName = remote ?? (await resolveRemoteName());
+				const remoteName = remote ?? primaryRemote;
 				// git worktree add --track -b <branch> <path> <remote>/<branch>
 				const args = ["worktree", "add", "--track", "-b", branch, path, `${remoteName}/${branch}`];
 
@@ -537,7 +533,7 @@ export function createBunGitAdapter(logger: LoggerPort): GitPort {
 
 		async mergeFFOnly(worktreePath: string, branch: string, remote?: string): Promise<Result<void, GitError>> {
 			try {
-				const remoteName = remote ?? (await resolveRemoteName());
+				const remoteName = remote ?? primaryRemote;
 				const { exitCode, stderr } = await runGit([
 					"-C",
 					worktreePath,
@@ -554,9 +550,9 @@ export function createBunGitAdapter(logger: LoggerPort): GitPort {
 			}
 		},
 
-		async updateBranchRef(branch: string): Promise<Result<void, GitError>> {
+		async updateBranchRef(branch: string, remote?: string): Promise<Result<void, GitError>> {
 			try {
-				const remoteName = await resolveRemoteName();
+				const remoteName = remote ?? primaryRemote;
 				const { exitCode, stderr } = await runGit(["fetch", remoteName, `${branch}:${branch}`]);
 				if (exitCode !== 0) {
 					return Result.err({ code: "MERGE_FAILED", message: stderr || `Failed to update ref for ${branch}` });
@@ -766,7 +762,7 @@ export function createBunGitAdapter(logger: LoggerPort): GitPort {
 
 		async deleteRemoteBranch(branch: string, remote?: string): Promise<Result<void, GitError>> {
 			try {
-				const remoteName = remote ?? (await resolveRemoteName());
+				const remoteName = remote ?? primaryRemote;
 				const { exitCode, stderr } = await runGit(["push", "--delete", remoteName, branch]);
 				if (exitCode !== 0) {
 					if (stderr?.includes("remote ref does not exist")) {

@@ -4,10 +4,10 @@ import { expectErr, expectOk } from "../../test-utils/assertions.ts";
 import { createRemoteFixture, initTestRepo, initUnbornRepo } from "../../test-utils/git-fixtures.ts";
 import { createNoopLogger } from "../../test-utils/noop-logger.ts";
 import { createTempDir } from "../../test-utils/temp-dir.ts";
-import { createBunGitAdapter } from "./bun-git-adapter.ts";
+import { createBunGitAdapter, resolvePrimaryRemote } from "./bun-git-adapter.ts";
 
 describe("BunGitAdapter", () => {
-	const git = createBunGitAdapter(createNoopLogger());
+	const git = createBunGitAdapter(createNoopLogger(), "origin");
 
 	test("isGitRepository returns true when run inside a git repo", async () => {
 		const isRepo = expectOk(await git.isGitRepository());
@@ -966,39 +966,37 @@ describe("BunGitAdapter", () => {
 		});
 	});
 
-	// === Non-origin remote resolution ===
+	// === Injected remote name ===
 	//
-	// The adapter resolves the primary remote name lazily from git's own
-	// configuration (tracking branch of HEAD / main / master, or a sole
-	// remote), with "origin" only as the final fallback. These tests use
-	// fresh adapter instances because the per-instance remote-name cache
-	// would otherwise be locked by an earlier test running against "origin".
+	// The adapter never resolves the remote itself: the primary remote name is
+	// resolved once at composition time (see `resolvePrimaryRemote`) and injected,
+	// so a repository whose remote is not "origin" only needs a different injection.
 
 	describe("non-origin remote name", () => {
-		test("listRemoteBranches strips the resolved remote prefix when remote is 'upstream'", async () => {
+		const upstreamGit = createBunGitAdapter(createNoopLogger(), "upstream");
+
+		test("listRemoteBranches strips the injected remote prefix", async () => {
 			await using tmp = await createTempDir();
 			const fixture = await createRemoteFixture(tmp.path, { remoteName: "upstream" });
 			await fixture.addTrackedBranch("feat-a");
 			await fixture.addTrackedBranch("feat-b", { withCommit: true });
 
 			await withCwd(fixture.repoPath, async () => {
-				const localGit = createBunGitAdapter(createNoopLogger());
-				const branches = expectOk(await localGit.listRemoteBranches());
+				const branches = expectOk(await upstreamGit.listRemoteBranches());
 				expect(branches.sort()).toEqual(["feat-a", "feat-b", "main"]);
 			});
 		});
 
-		test("getDefaultBranch resolves HEAD via the non-origin remote", async () => {
+		test("getDefaultBranch resolves HEAD via the injected remote", async () => {
 			await using tmp = await createTempDir();
 			const fixture = await createRemoteFixture(tmp.path, { remoteName: "upstream" });
 
 			await withCwd(fixture.repoPath, async () => {
-				const localGit = createBunGitAdapter(createNoopLogger());
-				expect(expectOk(await localGit.getDefaultBranch())).toBe("main");
+				expect(expectOk(await upstreamGit.getDefaultBranch())).toBe("main");
 			});
 		});
 
-		test("mergeFFOnly without an explicit remote uses the resolved non-origin remote", async () => {
+		test("mergeFFOnly without an explicit remote uses the injected remote", async () => {
 			await using tmp = await createTempDir();
 			const fixture = await createRemoteFixture(tmp.path, { remoteName: "upstream" });
 			const clonePath = await fixture.cloneSecond();
@@ -1006,14 +1004,13 @@ describe("BunGitAdapter", () => {
 
 			await Bun.$`git -C ${fixture.repoPath} fetch upstream`.quiet();
 			await withCwd(fixture.repoPath, async () => {
-				const localGit = createBunGitAdapter(createNoopLogger());
-				expectOk(await localGit.mergeFFOnly(fixture.repoPath, "main"));
+				expectOk(await upstreamGit.mergeFFOnly(fixture.repoPath, "main"));
 				const localSha = (await Bun.$`git -C ${fixture.repoPath} rev-parse main`.quiet().text()).trim();
 				expect(localSha).toBe(pushedSha);
 			});
 		});
 
-		test("updateBranchRef fetches from the resolved non-origin remote", async () => {
+		test("updateBranchRef without an explicit remote fetches from the injected remote", async () => {
 			await using tmp = await createTempDir();
 			const fixture = await createRemoteFixture(tmp.path, { remoteName: "upstream" });
 			await fixture.addTrackedBranch("feat");
@@ -1022,27 +1019,42 @@ describe("BunGitAdapter", () => {
 			const pushedSha = await pushCommit(clonePath, "feat.txt", "remote moved ahead");
 
 			await withCwd(fixture.repoPath, async () => {
-				const localGit = createBunGitAdapter(createNoopLogger());
-				expectOk(await localGit.updateBranchRef("feat"));
+				expectOk(await upstreamGit.updateBranchRef("feat"));
 				const localSha = (await Bun.$`git -C ${fixture.repoPath} rev-parse feat`.quiet().text()).trim();
 				expect(localSha).toBe(pushedSha);
 			});
 		});
 
-		test("deleteRemoteBranch without an explicit remote pushes the delete to the resolved remote", async () => {
+		test("updateBranchRef with an explicit remote fetches from that remote, not the injected one", async () => {
+			await using tmp = await createTempDir();
+			const fixture = await createRemoteFixture(tmp.path);
+			await fixture.addTrackedBranch("feat");
+			const clonePath = await fixture.cloneSecond();
+			await Bun.$`git -C ${clonePath} checkout -q feat`.quiet();
+			const pushedSha = await pushCommit(clonePath, "feat.txt", "remote moved ahead");
+
+			await withCwd(fixture.repoPath, async () => {
+				// The injected remote is "upstream", which does not exist in this
+				// repo — the explicitly passed remote has to win over it.
+				expectOk(await upstreamGit.updateBranchRef("feat", "origin"));
+				const localSha = (await Bun.$`git -C ${fixture.repoPath} rev-parse feat`.quiet().text()).trim();
+				expect(localSha).toBe(pushedSha);
+			});
+		});
+
+		test("deleteRemoteBranch without an explicit remote pushes the delete to the injected remote", async () => {
 			await using tmp = await createTempDir();
 			const fixture = await createRemoteFixture(tmp.path, { remoteName: "upstream" });
 			await fixture.addTrackedBranch("doomed");
 
 			await withCwd(fixture.repoPath, async () => {
-				const localGit = createBunGitAdapter(createNoopLogger());
-				expectOk(await localGit.deleteRemoteBranch("doomed"));
+				expectOk(await upstreamGit.deleteRemoteBranch("doomed"));
 				const remoteRefs = await Bun.$`git -C ${fixture.remotePath} branch --list doomed`.quiet().text();
 				expect(remoteRefs.trim()).toBe("");
 			});
 		});
 
-		test("createWorktreeFromRemote without an explicit remote checks out via the resolved non-origin remote", async () => {
+		test("createWorktreeFromRemote without an explicit remote checks out via the injected remote", async () => {
 			await using tmp = await createTempDir();
 			const fixture = await createRemoteFixture(tmp.path, { remoteName: "upstream" });
 			const clonePath = await fixture.cloneSecond();
@@ -1051,11 +1063,10 @@ describe("BunGitAdapter", () => {
 			const wtPath = join(tmp.path, "wt-remote");
 
 			await withCwd(fixture.repoPath, async () => {
-				const localGit = createBunGitAdapter(createNoopLogger());
-				expectOk(await localGit.fetchAll());
-				expect(expectOk(await localGit.branchExists("remote-only"))).toBe(false);
+				expectOk(await upstreamGit.fetchAll());
+				expect(expectOk(await upstreamGit.branchExists("remote-only"))).toBe(false);
 
-				const worktree = expectOk(await localGit.createWorktreeFromRemote("remote-only", wtPath));
+				const worktree = expectOk(await upstreamGit.createWorktreeFromRemote("remote-only", wtPath));
 				expect(worktree.branch).toBe("remote-only");
 
 				const upstream = await Bun.$`git -C ${wtPath} rev-parse --abbrev-ref ${"remote-only@{upstream}"}`
@@ -1065,7 +1076,31 @@ describe("BunGitAdapter", () => {
 			});
 		});
 
-		test("multiple remotes: the one tracking the default branch wins over the disambiguation fallbacks", async () => {
+		test("repo with no remote configured: updateBranchRef fails with MERGE_FAILED, not silently", async () => {
+			await using tmp = await createTempDir();
+			const repoPath = await initTestRepo(tmp.path);
+
+			await withCwd(repoPath, async () => {
+				// No remote exists at all — the operation must surface a typed
+				// error rather than crashing or returning a misleading success.
+				const result = await git.updateBranchRef("main");
+				expect(result.success).toBe(false);
+				if (!result.success) {
+					expect(result.error.code).toBe("MERGE_FAILED");
+				}
+			});
+		});
+	});
+
+	// === Primary-remote resolution ===
+	//
+	// Resolution runs once at composition time instead of inside the adapter, so
+	// it is exercised directly rather than through a port method.
+
+	describe("resolvePrimaryRemote", () => {
+		const logger = createNoopLogger();
+
+		test("prefers the tracking remote of the default branch over other remotes", async () => {
 			await using tmp = await createTempDir();
 			const fixture = await createRemoteFixture(tmp.path, { remoteName: "upstream" });
 			// Second remote, pushed to and fetched so it produces remote-tracking
@@ -1078,30 +1113,50 @@ describe("BunGitAdapter", () => {
 			await Bun.$`git -C ${fixture.repoPath} fetch aaa`.quiet();
 
 			await withCwd(fixture.repoPath, async () => {
-				const localGit = createBunGitAdapter(createNoopLogger());
-				// Both remotes now have a main ref. listRemoteBranches strips
-				// only "upstream/", so the "aaa/main" entry survives — proving
-				// resolution followed branch.main.remote rather than picking aaa.
-				const branches = expectOk(await localGit.listRemoteBranches());
-				expect(branches).toContain("main");
-				expect(branches).toContain("aaa/main");
-				expect(branches).not.toContain("upstream/main");
+				expect(await resolvePrimaryRemote(logger)).toBe("upstream");
 			});
 		});
 
-		test("repo with no remote configured: methods fall back to 'origin' and fail with MERGE_FAILED, not silently", async () => {
+		test("falls back to the current branch's tracking remote when the default branch has none", async () => {
+			await using tmp = await createTempDir();
+			const repoPath = await initTestRepo(tmp.path);
+			await Bun.$`git -C ${repoPath} remote add aaa ${join(tmp.path, "aaa.git")}`.quiet();
+			await Bun.$`git -C ${repoPath} remote add fork ${join(tmp.path, "fork.git")}`.quiet();
+			await Bun.$`git -C ${repoPath} checkout -q -b feat`.quiet();
+			await Bun.$`git -C ${repoPath} config branch.feat.remote fork`.quiet();
+
+			await withCwd(repoPath, async () => {
+				expect(await resolvePrimaryRemote(logger)).toBe("fork");
+			});
+		});
+
+		test("a branch tracking the local repository ('.') does not count as a remote", async () => {
+			await using tmp = await createTempDir();
+			const repoPath = await initTestRepo(tmp.path);
+			await Bun.$`git -C ${repoPath} remote add solo ${join(tmp.path, "solo.git")}`.quiet();
+			await Bun.$`git -C ${repoPath} config branch.main.remote .`.quiet();
+
+			await withCwd(repoPath, async () => {
+				expect(await resolvePrimaryRemote(logger)).toBe("solo");
+			});
+		});
+
+		test("falls back to the sole configured remote when no branch tracks one", async () => {
+			await using tmp = await createTempDir();
+			const repoPath = await initTestRepo(tmp.path);
+			await Bun.$`git -C ${repoPath} remote add solo ${join(tmp.path, "solo.git")}`.quiet();
+
+			await withCwd(repoPath, async () => {
+				expect(await resolvePrimaryRemote(logger)).toBe("solo");
+			});
+		});
+
+		test("falls back to 'origin' when the repository has no remote at all", async () => {
 			await using tmp = await createTempDir();
 			const repoPath = await initTestRepo(tmp.path);
 
 			await withCwd(repoPath, async () => {
-				const localGit = createBunGitAdapter(createNoopLogger());
-				// No remote exists at all — the operation must surface a typed
-				// error rather than crashing or returning a misleading success.
-				const result = await localGit.updateBranchRef("main");
-				expect(result.success).toBe(false);
-				if (!result.success) {
-					expect(result.error.code).toBe("MERGE_FAILED");
-				}
+				expect(await resolvePrimaryRemote(logger)).toBe("origin");
 			});
 		});
 	});

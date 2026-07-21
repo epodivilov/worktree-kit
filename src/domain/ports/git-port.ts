@@ -41,7 +41,8 @@ export interface GitPort {
 	listRemotes(): Promise<Result<string[], GitError>>;
 	listGoneBranches(): Promise<Result<string[], GitError>>;
 	mergeFFOnly(worktreePath: string, branch: string, remote?: string): Promise<Result<void, GitError>>;
-	updateBranchRef(branch: string): Promise<Result<void, GitError>>;
+	/** Fast-forward a local branch ref that is not checked out anywhere, from `remote` (default: primary remote). */
+	updateBranchRef(branch: string, remote?: string): Promise<Result<void, GitError>>;
 	rebase(
 		worktreePath: string,
 		onto: string,
