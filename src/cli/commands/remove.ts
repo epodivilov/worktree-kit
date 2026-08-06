@@ -10,6 +10,7 @@ import { INIT_ROOT_DIR } from "../../domain/constants.ts";
 import { RemoveArgsSchema } from "../../domain/schemas/command-args-schema.ts";
 import type { Container } from "../../infrastructure/container.ts";
 import { Result } from "../../shared/result.ts";
+import { GLOBAL_ARGS } from "../global-args.ts";
 import { resolveDeleteBranch, resolveDeleteRemoteBranch, resolveWorktreesToRemove } from "../resolve-params.ts";
 import { runCommand } from "../run-command.ts";
 
@@ -20,6 +21,7 @@ export function removeCommand(container: Container) {
 			description: "Remove a worktree (cleans up orphaned worktrees too)",
 		},
 		args: {
+			...GLOBAL_ARGS,
 			branch: {
 				type: "positional",
 				description: "Branch name of the worktree to remove",

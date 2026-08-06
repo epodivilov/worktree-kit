@@ -11,6 +11,7 @@ import type { Container } from "../../infrastructure/container.ts";
 import { formatDisplayPath } from "../../shared/format-path.ts";
 import { Result } from "../../shared/result.ts";
 import { EXIT_CANCEL, EXIT_FAILURE, EXIT_PARTIAL, EXIT_SUCCESS } from "../exit-codes.ts";
+import { GLOBAL_ARGS } from "../global-args.ts";
 import { CommandError, runCommand } from "../run-command.ts";
 
 export function cleanupCommand(container: Container) {
@@ -20,6 +21,7 @@ export function cleanupCommand(container: Container) {
 			description: "Remove worktrees and branches whose remote tracking branch is gone",
 		},
 		args: {
+			...GLOBAL_ARGS,
 			force: {
 				type: "boolean",
 				description: "Delete branches even if they have unmerged changes",

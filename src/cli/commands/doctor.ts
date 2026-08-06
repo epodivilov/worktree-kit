@@ -8,6 +8,7 @@ import type { Container } from "../../infrastructure/container.ts";
 import { formatDisplayPath } from "../../shared/format-path.ts";
 import { Result } from "../../shared/result.ts";
 import { EXIT_CANCEL, EXIT_FAILURE, EXIT_PARTIAL, EXIT_SUCCESS } from "../exit-codes.ts";
+import { GLOBAL_ARGS } from "../global-args.ts";
 import { CommandError, runCommand } from "../run-command.ts";
 
 const SEVERITY_ORDER: HealthSeverity[] = ["error", "warning", "info"];
@@ -71,6 +72,10 @@ export function doctorCommand(container: Container) {
 			description: "Run a health check across the repository worktrees",
 		},
 		args: {
+			// GLOBAL_ARGS brings --non-interactive (and --verbose), spread first so
+			// doctor's own --verbose below overrides it: doctor's verbose has a
+			// different meaning ("include info-level findings") and is read in run().
+			...GLOBAL_ARGS,
 			json: {
 				type: "boolean",
 				default: false,

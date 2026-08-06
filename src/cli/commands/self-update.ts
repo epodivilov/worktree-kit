@@ -8,6 +8,7 @@ import { fetchLatestVersion } from "../../infrastructure/github-releases.ts";
 import { Result as R, type Result } from "../../shared/result.ts";
 import { getCacheDir } from "../../shared/xdg-paths.ts";
 import { EXIT_FAILURE } from "../exit-codes.ts";
+import { GLOBAL_ARGS } from "../global-args.ts";
 import { CommandError, runCommand } from "../run-command.ts";
 import { UPDATE_CHECK_FILENAME } from "../update-notifier.ts";
 
@@ -174,6 +175,9 @@ export function selfUpdateCommand(container: Container) {
 		meta: {
 			name: "self-update",
 			description: "Update worktree-kit to the latest version",
+		},
+		args: {
+			...GLOBAL_ARGS,
 		},
 		async run() {
 			const { ui, fs } = container;

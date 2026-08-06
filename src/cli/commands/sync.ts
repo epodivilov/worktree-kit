@@ -10,6 +10,7 @@ import type { Container } from "../../infrastructure/container.ts";
 import { formatDisplayPath } from "../../shared/format-path.ts";
 import { Result } from "../../shared/result.ts";
 import { EXIT_FAILURE } from "../exit-codes.ts";
+import { GLOBAL_ARGS } from "../global-args.ts";
 import { renderNotifications } from "../render-notifications.ts";
 import { CommandError, runCommand } from "../run-command.ts";
 
@@ -20,6 +21,7 @@ export function syncCommand(container: Container) {
 			description: "Apply config copy/symlink changes to existing worktrees",
 		},
 		args: {
+			...GLOBAL_ARGS,
 			branch: {
 				type: "positional",
 				description: "Branch to sync. Syncs all worktrees if omitted",

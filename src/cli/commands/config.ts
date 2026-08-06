@@ -11,6 +11,7 @@ import type { Container } from "../../infrastructure/container.ts";
 import { Result } from "../../shared/result.ts";
 import { resolveGlobalConfigPath } from "../../shared/xdg-paths.ts";
 import { EXIT_FAILURE } from "../exit-codes.ts";
+import { GLOBAL_ARGS } from "../global-args.ts";
 import { CommandError, runCommand } from "../run-command.ts";
 
 function formatValue(value: unknown): string {
@@ -73,6 +74,7 @@ function showCommand(container: Container) {
 			description: "Show effective config with provenance",
 		},
 		args: {
+			...GLOBAL_ARGS,
 			json: {
 				type: "boolean",
 				default: false,
@@ -125,6 +127,9 @@ export function configCommand(container: Container) {
 		meta: {
 			name: "config",
 			description: "Inspect worktree-kit configuration",
+		},
+		args: {
+			...GLOBAL_ARGS,
 		},
 		subCommands: {
 			show: showCommand(container),

@@ -5,6 +5,7 @@ import type { UiPort } from "../../domain/ports/ui-port.ts";
 import type { Container } from "../../infrastructure/container.ts";
 import { Result } from "../../shared/result.ts";
 import { EXIT_CANCEL, EXIT_FAILURE } from "../exit-codes.ts";
+import { GLOBAL_ARGS } from "../global-args.ts";
 import { resolveUpstream as detectUpstream } from "../resolve-upstream.ts";
 import { CommandError, runCommand } from "../run-command.ts";
 
@@ -75,6 +76,7 @@ export function initCommand(container: Container) {
 			description: "Create .worktreekit.jsonc config",
 		},
 		args: {
+			...GLOBAL_ARGS,
 			force: {
 				type: "boolean",
 				alias: "f",

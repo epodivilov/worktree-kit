@@ -10,6 +10,7 @@ import { removeCommand } from "./cli/commands/remove.ts";
 import { selfUpdateCommand } from "./cli/commands/self-update.ts";
 import { syncCommand } from "./cli/commands/sync.ts";
 import { updateCommand } from "./cli/commands/update.ts";
+import { GLOBAL_ARGS } from "./cli/global-args.ts";
 import { resolveNonInteractive } from "./cli/resolve-non-interactive.ts";
 import { runUpdateNotifier } from "./cli/update-notifier.ts";
 import { type Container, createContainer } from "./infrastructure/container.ts";
@@ -23,16 +24,7 @@ const main = defineCommand({
 		description: "CLI tool for simplifying git-worktree workflow",
 	},
 	args: {
-		verbose: {
-			type: "boolean",
-			default: false,
-			description: "Enable verbose logging",
-		},
-		"non-interactive": {
-			type: "boolean",
-			default: false,
-			description: "Disable interactive prompts",
-		},
+		...GLOBAL_ARGS,
 	},
 	async setup({ args }) {
 		container = await createContainer({
