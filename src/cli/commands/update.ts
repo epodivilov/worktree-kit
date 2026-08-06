@@ -12,6 +12,7 @@ import { formatDisplayPath } from "../../shared/format-path.ts";
 import { Result } from "../../shared/result.ts";
 import { CleanupHandle } from "../cleanup-handle.ts";
 import { EXIT_CANCEL, EXIT_FAILURE } from "../exit-codes.ts";
+import { GLOBAL_ARGS } from "../global-args.ts";
 import { resolveUpstream } from "../resolve-upstream.ts";
 import { CommandError, runCommand } from "../run-command.ts";
 
@@ -22,6 +23,7 @@ export function updateCommand(container: Container) {
 			description: "Fetch, fast-forward default branch, and rebase feature branches",
 		},
 		args: {
+			...GLOBAL_ARGS,
 			branch: {
 				type: "positional",
 				description: "Branch to update (with its sub-branches). Updates all if omitted",

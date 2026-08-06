@@ -8,6 +8,7 @@ import type { Container } from "../../infrastructure/container.ts";
 import { Result } from "../../shared/result.ts";
 import { isDrifted } from "../../shared/worktree-drift.ts";
 import { EXIT_FAILURE } from "../exit-codes.ts";
+import { GLOBAL_ARGS } from "../global-args.ts";
 import { CommandError, runCommand } from "../run-command.ts";
 
 interface DriftContext {
@@ -73,6 +74,7 @@ export function listCommand(container: Container) {
 			description: "List all worktrees",
 		},
 		args: {
+			...GLOBAL_ARGS,
 			json: {
 				type: "boolean",
 				default: false,

@@ -9,6 +9,7 @@ import type { Container } from "../../infrastructure/container.ts";
 import { Result } from "../../shared/result.ts";
 import { CleanupHandle } from "../cleanup-handle.ts";
 import { EXIT_FAILURE } from "../exit-codes.ts";
+import { GLOBAL_ARGS } from "../global-args.ts";
 import { renderNotifications } from "../render-notifications.ts";
 import { resolveBaseBranch, resolveBranch } from "../resolve-params.ts";
 import { CommandError, runCommand } from "../run-command.ts";
@@ -20,6 +21,7 @@ export function createCommand(container: Container) {
 			description: "Create a new worktree with config sync",
 		},
 		args: {
+			...GLOBAL_ARGS,
 			branch: {
 				type: "positional",
 				description: "Branch name for the new worktree",
