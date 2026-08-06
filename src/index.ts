@@ -10,6 +10,7 @@ import { removeCommand } from "./cli/commands/remove.ts";
 import { selfUpdateCommand } from "./cli/commands/self-update.ts";
 import { syncCommand } from "./cli/commands/sync.ts";
 import { updateCommand } from "./cli/commands/update.ts";
+import { resolveNonInteractive } from "./cli/resolve-non-interactive.ts";
 import { runUpdateNotifier } from "./cli/update-notifier.ts";
 import { type Container, createContainer } from "./infrastructure/container.ts";
 
@@ -36,7 +37,14 @@ const main = defineCommand({
 	async setup({ args }) {
 		container = await createContainer({
 			verbose: args.verbose || process.env.WT_VERBOSE === "1",
-			nonInteractive: args["non-interactive"] || process.env.WT_NON_INTERACTIVE === "1",
+			// Detect non-TTY here (not at module load) so unit tests, which never
+			// read process.std*.isTTY, stay unaffected.
+			nonInteractive: resolveNonInteractive({
+				flag: args["non-interactive"],
+				env: process.env.WT_NON_INTERACTIVE,
+				stdinIsTTY: process.stdin.isTTY,
+				stdoutIsTTY: process.stdout.isTTY,
+			}),
 		});
 		await runUpdateNotifier(container, pkg.version);
 	},

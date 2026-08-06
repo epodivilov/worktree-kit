@@ -71,9 +71,9 @@ These flags apply to all commands:
 | `--verbose` | `WT_VERBOSE=1` | Enable detailed debug logging |
 | `--non-interactive` | `WT_NON_INTERACTIVE=1` | Disable all interactive prompts |
 
-**Non-interactive mode** — when active, all prompts are resolved automatically:
+**Non-interactive mode** — activated by the `--non-interactive` flag, `WT_NON_INTERACTIVE=1`, or automatically when stdin or stdout is not a terminal (AI-agent shells, CI, piped I/O). When active, all prompts are resolved automatically:
 
-- Required selection prompts (branch name) exit with an error if the value is not provided via CLI arguments
+- Required selection prompts exit with an error when the value is not provided: the branch name (pass it as an argument) and, for a new branch, the base branch (pass `--base`, set `create.base`, or set `defaultBase` to `current` or `default`)
 - Optional confirmation prompts use safe defaults (typically "no" for destructive actions)
 
 This is useful for CI pipelines, shell scripts, and AI agents.
