@@ -437,6 +437,83 @@ describe("create — failure modes", () => {
 	});
 });
 
+describe("create — base branch strictness in non-interactive mode", () => {
+	test("new branch, no --base, no create.base, defaultBase ask → errors and never creates", async () => {
+		const { fs, git: baseGit, shell } = scenario();
+		const { git, createCalls, fromRemoteCalls } = spyCreateCalls(baseGit);
+		const { ui, log, selectCalls } = createFakeUi({ nonInteractive: true });
+		const container = buildContainer(ui, git, fs, shell);
+
+		const code = await runCreate(container, args({ base: undefined }));
+
+		expect(code).toBe(EXIT_FAILURE);
+		expect(createCalls).toEqual([]);
+		expect(fromRemoteCalls).toEqual([]);
+		expect(selectCalls).toEqual([]);
+		expect(log.error.some((m) => m.includes("--base"))).toBe(true);
+		expect(log.error.some((m) => m.toLowerCase().includes("base branch"))).toBe(true);
+	});
+
+	test("--base set → base resolves without prompt or error", async () => {
+		const { fs, git: baseGit, shell } = scenario();
+		const { git, createCalls } = spyCreateCalls(baseGit);
+		const { ui, log, selectCalls } = createFakeUi({ nonInteractive: true });
+		const container = buildContainer(ui, git, fs, shell);
+
+		const code = await runCreate(container, args({ base: "main" }));
+
+		expect(code).toBe(0);
+		expect(selectCalls).toEqual([]);
+		expect(createCalls[0]?.baseBranch).toBe("main");
+		expect(log.error).toEqual([]);
+	});
+
+	test("create.base set → base resolves from config without prompt or error", async () => {
+		const config = JSON.stringify({ rootDir: WORKTREES_DIR, create: { base: "develop" } });
+		const { fs, git: baseGit, shell } = scenario({ config });
+		const { git, createCalls } = spyCreateCalls(baseGit);
+		const { ui, log, selectCalls } = createFakeUi({ nonInteractive: true });
+		const container = buildContainer(ui, git, fs, shell);
+
+		const code = await runCreate(container, args({ base: undefined }));
+
+		expect(code).toBe(0);
+		expect(selectCalls).toEqual([]);
+		expect(createCalls[0]?.baseBranch).toBe("develop");
+		expect(log.error).toEqual([]);
+	});
+
+	test('defaultBase "current" → undefined base, no prompt or error', async () => {
+		const config = JSON.stringify({ rootDir: WORKTREES_DIR, defaultBase: "current" });
+		const { fs, git: baseGit, shell } = scenario({ config });
+		const { git, createCalls } = spyCreateCalls(baseGit);
+		const { ui, log, selectCalls } = createFakeUi({ nonInteractive: true });
+		const container = buildContainer(ui, git, fs, shell);
+
+		const code = await runCreate(container, args({ base: undefined }));
+
+		expect(code).toBe(0);
+		expect(selectCalls).toEqual([]);
+		expect(createCalls[0]?.baseBranch).toBeUndefined();
+		expect(log.error).toEqual([]);
+	});
+
+	test('defaultBase "default" → resolves to the default branch, no prompt or error', async () => {
+		const config = JSON.stringify({ rootDir: WORKTREES_DIR, defaultBase: "default" });
+		const { fs, git: baseGit, shell } = scenario({ config });
+		const { git, createCalls } = spyCreateCalls(baseGit);
+		const { ui, log, selectCalls } = createFakeUi({ nonInteractive: true });
+		const container = buildContainer(ui, git, fs, shell);
+
+		const code = await runCreate(container, args({ base: undefined }));
+
+		expect(code).toBe(0);
+		expect(selectCalls).toEqual([]);
+		expect(createCalls[0]?.baseBranch).toBe("main");
+		expect(log.error).toEqual([]);
+	});
+});
+
 describe("create — degraded steps stay non-fatal", () => {
 	test("config symlink failure only warns", async () => {
 		const { fs: baseFs, git, shell } = scenario();

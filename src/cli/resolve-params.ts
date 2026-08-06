@@ -146,8 +146,13 @@ export async function resolveBaseBranch(
 
 	// defaultBase === "ask"
 	if (ui.nonInteractive) {
-		const defaultBranch = await git.getDefaultBranch();
-		return Result.isOk(defaultBranch) ? defaultBranch.data : undefined;
+		// No prompt is possible and no base was fixed by --base, create.base, or a
+		// non-"ask" defaultBase. Fail fast with an actionable message instead of
+		// silently guessing the default branch.
+		throw new CommandError(
+			'Base branch is required in non-interactive mode. Provide --base, set create.base, or set defaultBase to "current" or "default" in your config.',
+			EXIT_FAILURE,
+		);
 	}
 
 	const branchesResult = await git.listBranches();
