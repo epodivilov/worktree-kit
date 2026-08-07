@@ -25,6 +25,8 @@ export interface FakeGitOptions {
 	fetchFails?: boolean;
 	mergeFFOnlyFails?: boolean;
 	remotes?: string[];
+	/** Name returned by getPrimaryRemote(); the remote resolveUpstream excludes. */
+	primaryRemote?: string;
 	/** Backing name→url map for getRemoteUrl/setRemoteUrl. */
 	remoteUrls?: Map<string, string>;
 	addRemoteCalls?: { name: string; url: string }[];
@@ -66,6 +68,7 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 		fetchFails = false,
 		mergeFFOnlyFails = false,
 		remotes = ["origin"],
+		primaryRemote = "origin",
 	} = options;
 	const store = [...worktrees];
 	const branchStore = [...branches];
@@ -247,6 +250,10 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 			return Result.ok([...remoteStore]);
 		},
 
+		getPrimaryRemote(): string {
+			return primaryRemote;
+		},
+
 		async listGoneBranches(): Promise<Result<string[], GitError>> {
 			if (!isRepo) {
 				return Result.err({ code: "NOT_A_REPO", message: "Not inside a git repository" });
@@ -254,7 +261,7 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 			return Result.ok([...goneBranches]);
 		},
 
-		async mergeFFOnly(worktreePath: string, branch: string, remote = "origin"): Promise<Result<void, GitError>> {
+		async mergeFFOnly(worktreePath: string, branch: string, remote = primaryRemote): Promise<Result<void, GitError>> {
 			options.mergeFFOnlyCalls?.push({ worktreePath, branch, remote });
 			if (mergeFFOnlyFails) {
 				return Result.err({ code: "MERGE_FAILED", message: "Cannot fast-forward" });
@@ -262,7 +269,7 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 			return Result.ok(undefined);
 		},
 
-		async updateBranchRef(branch: string, remote = "origin"): Promise<Result<void, GitError>> {
+		async updateBranchRef(branch: string, remote = primaryRemote): Promise<Result<void, GitError>> {
 			options.updateBranchRefCalls?.push({ branch, remote });
 			if (mergeFFOnlyFails) {
 				return Result.err({ code: "MERGE_FAILED", message: "Cannot update ref" });

@@ -514,6 +514,10 @@ export function createBunGitAdapter(logger: LoggerPort, primaryRemote: string): 
 			}
 		},
 
+		getPrimaryRemote(): string {
+			return primaryRemote;
+		},
+
 		async listGoneBranches(): Promise<Result<string[], GitError>> {
 			try {
 				const { exitCode, stdout } = await runGit(["branch", "--list", "--format=%(refname:short)|%(upstream:track)"]);
