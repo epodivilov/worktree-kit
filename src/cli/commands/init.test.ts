@@ -218,6 +218,44 @@ describe("init upstream detection", () => {
 		const config = await readConfig(fs);
 		expect(config.upstream).toBeUndefined();
 	});
+
+	// Fork layout: the primary remote is the fork, `origin` is the original
+	// project. Candidates must exclude the primary remote, not the literal
+	// "origin", so `origin` becomes offerable and the fork is hidden (WTK-53).
+	test("fork layout with origin present → offers origin via confirm, never the fork", async () => {
+		const { fs, container, confirmMessages, selectCalls } = scenario(
+			{ remotes: ["fork", "origin"], primaryRemote: "fork" },
+			{ confirm: true },
+		);
+
+		const code = await runInit(container, BASE_ARGS);
+
+		expect(code).toBe(0);
+		// Single candidate (origin) → confirm path, not select.
+		expect(selectCalls).toEqual([]);
+		expect(confirmMessages.some((m) => m.includes("'origin'"))).toBe(true);
+		expect(confirmMessages.some((m) => m.includes("'fork'"))).toBe(false);
+		const config = await readConfig(fs);
+		expect(config.upstream).toBe("origin");
+	});
+
+	// Branch-flip: excluding the primary (no `origin` present) drops the
+	// candidate set 2 → 1, moving from the select path to the confirm path.
+	test("fork layout without origin → single remaining candidate via confirm (not select)", async () => {
+		const { fs, container, confirmMessages, selectCalls } = scenario(
+			{ remotes: ["fork", "mirror"], primaryRemote: "fork" },
+			{ confirm: true },
+		);
+
+		const code = await runInit(container, BASE_ARGS);
+
+		expect(code).toBe(0);
+		expect(selectCalls).toEqual([]);
+		expect(confirmMessages.some((m) => m.includes("'mirror'"))).toBe(true);
+		expect(confirmMessages.some((m) => m.includes("'fork'"))).toBe(false);
+		const config = await readConfig(fs);
+		expect(config.upstream).toBe("mirror");
+	});
 });
 
 describe("init --upstream <url>", () => {

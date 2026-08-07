@@ -39,6 +39,12 @@ export interface GitPort {
 	getRemoteUrl(name: string): Promise<Result<string, GitError>>;
 	setRemoteUrl(name: string, url: string): Promise<Result<void, GitError>>;
 	listRemotes(): Promise<Result<string[], GitError>>;
+	/**
+	 * Name of the repository's primary remote (see `resolvePrimaryRemote`).
+	 * Synchronous and infallible by design: it is a value resolved once at
+	 * startup and injected, not I/O — so it needs neither `Promise` nor `Result`.
+	 */
+	getPrimaryRemote(): string;
 	listGoneBranches(): Promise<Result<string[], GitError>>;
 	mergeFFOnly(worktreePath: string, branch: string, remote?: string): Promise<Result<void, GitError>>;
 	/** Fast-forward a local branch ref that is not checked out anywhere, from `remote` (default: primary remote). */

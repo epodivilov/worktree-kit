@@ -15,9 +15,13 @@ export type ResolveUpstreamResult = { kind: "selected"; name: string } | { kind:
 const SKIP = "__skip__";
 
 /**
- * Detect candidate upstream remotes (every remote except `origin`) and, when
- * interactive, prompt the user the same way both `init` and `update` do:
- * a single candidate is offered via `confirm`, several via `select`.
+ * Detect candidate upstream remotes (every remote except the primary remote)
+ * and, when interactive, prompt the user the same way both `init` and `update`
+ * do: a single candidate is offered via `confirm`, several via `select`.
+ *
+ * Excluding the resolved primary remote — rather than the literal `origin` — is
+ * what makes a fork layout work: when the fork is primary, `origin` (the
+ * original project) stays offerable; when `origin` is primary, it is excluded.
  *
  * All UI lives here in the CLI layer. The `declineLabel` parametrizes the
  * opt-out option's label so callers can phrase it for their flow.
@@ -33,7 +37,8 @@ export async function resolveUpstream(
 
 	const remotesResult = await git.listRemotes();
 	const remotes = remotesResult.success ? remotesResult.data : [];
-	const candidates = remotes.filter((r) => r !== "origin");
+	const primaryRemote = git.getPrimaryRemote();
+	const candidates = remotes.filter((r) => r !== primaryRemote);
 
 	if (candidates.length === 0) {
 		return { kind: "none" };
