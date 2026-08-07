@@ -1,21 +1,17 @@
 name: Release
 
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version bump type'
-        required: false
-        default: 'auto'
-        type: choice
-        options:
-          - auto      # git-cliff determines from commits
-          - patch
-          - minor
-          - major
+  push:
+    branches: [main]
+
+# Serialize releases; never cancel a publish mid-flight.
+concurrency:
+  group: release-main
+  cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: write # create tags + GitHub Releases
+  pull-requests: write # open/update the "Version Packages" PR
 
 jobs:
   release:
@@ -23,81 +19,33 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
+          fetch-depth: 0 # changesets needs full history
 
       - uses: pnpm/action-setup@v6
         with:
           version: 10
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Configure git
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-      - name: Determine version (auto)
-        if: inputs.version == 'auto'
-        id: cliff-bump
-        uses: orhun/git-cliff-action@v4
+      - uses: actions/setup-node@v4
         with:
-          config: cliff.toml
-          args: --bumped-version
+          node-version: 24
+          cache: pnpm
 
-      - name: Determine version
-        id: version
-        run: |
-          if [ "${{ inputs.version }}" = "auto" ]; then
-            VERSION=$(echo "${{ steps.cliff-bump.outputs.content }}" | sed 's/^v//')
-          else
-            CURRENT=$(node -p "require('./package.json').version")
-            VERSION=$(npx semver -i ${{ inputs.version }} $CURRENT)
-          fi
-          if [ -z "$VERSION" ]; then
-            echo "::error::Failed to determine version"
-            exit 1
-          fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-
-      - name: Update package.json
-        run: pnpm version ${{ steps.version.outputs.version }} --no-git-tag-version
-
-      - name: Generate changelog
-        uses: orhun/git-cliff-action@v4
+      # build-release.sh compiles the binaries with `bun build --compile`; bun must be on PATH.
+      - uses: oven-sh/setup-bun@v2
         with:
-          config: cliff.toml
-          args: --tag v${{ steps.version.outputs.version }}
+          bun-version: latest
+
+      - run: pnpm install --frozen-lockfile
+
+      # While changesets exist on main → opens/updates the "Version Packages" PR (runs
+      # `changeset version`). When none remain (that PR was merged) → runs `publish`, which
+      # builds the 5 platform binaries and cuts the `v<version>` GitHub Release.
+      - uses: changesets/action@v1
+        id: changesets
+        with:
+          version: pnpm changeset version
+          publish: bash scripts/release-publish.sh
+          createGithubReleases: false # release-publish.sh owns release creation
         env:
-          OUTPUT: CHANGELOG.md
-
-      - name: Generate release notes
-        uses: orhun/git-cliff-action@v4
-        with:
-          config: cliff.toml
-          args: --latest --strip header --tag v${{ steps.version.outputs.version }}
-        env:
-          OUTPUT: RELEASE_NOTES.md
-
-      - name: Build binaries
-        run: bash scripts/build-release.sh
-
-      - name: Commit and tag
-        run: |
-          git add package.json CHANGELOG.md
-          git commit -m "chore: release v${{ steps.version.outputs.version }}"
-          git tag "v${{ steps.version.outputs.version }}"
-          git push origin main --tags
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
-        with:
-          tag_name: v${{ steps.version.outputs.version }}
-          name: v${{ steps.version.outputs.version }}
-          body_path: RELEASE_NOTES.md
-          files: dist/*
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

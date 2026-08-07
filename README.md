@@ -604,7 +604,13 @@ pnpm typecheck    # Type checking
 pnpm lint         # Lint with Biome
 pnpm format       # Format with Biome
 pnpm test         # Run tests
+pnpm changeset    # Add a changeset describing your change (required by CI)
 ```
+
+Releases are automated via [Changesets](https://github.com/changesets/changesets): every PR that
+changes versionable code must include a changeset (`pnpm changeset`, or `pnpm changeset add --empty`
+for release-irrelevant chores). Merging changesets to `main` maintains a "Version Packages" PR;
+merging that PR builds the platform binaries and cuts a GitHub Release tagged `v<version>`.
 
 ## License
 
