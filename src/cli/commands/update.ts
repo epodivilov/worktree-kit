@@ -133,9 +133,20 @@ export function updateCommand(container: Container) {
 
 				spinner.stop(pc.green("Done"));
 
-				const { defaultBranch, defaultBranchUpdate, syncedFromUpstream, reports } = result.data;
+				const { defaultBranch, defaultBranchUpdate, defaultBranchBehind, syncedFromUpstream, reports } = result.data;
 
-				if (syncedFromUpstream) {
+				if (defaultBranchUpdate === "would-update") {
+					// Dry run: nothing was synced, so preview the advance instead of claiming
+					// a completed action. The commit count is best-effort (see the use case).
+					if (defaultBranchBehind === undefined) {
+						ui.info(`${defaultBranch} would be advanced`);
+					} else if (defaultBranchBehind === 0) {
+						ui.info(`${defaultBranch} is already up to date`);
+					} else {
+						const plural = defaultBranchBehind === 1 ? "" : "s";
+						ui.info(`${defaultBranch} would be advanced by ${defaultBranchBehind} commit${plural}`);
+					}
+				} else if (syncedFromUpstream) {
 					ui.success(`${defaultBranch} synced from ${syncedFromUpstream}/${defaultBranch}`);
 				} else if (defaultBranchUpdate === "ff-updated") {
 					ui.success(`${defaultBranch} fast-forwarded`);

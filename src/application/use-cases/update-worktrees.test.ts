@@ -1165,3 +1165,66 @@ describe("updateWorktrees — upstream sync without a default-branch worktree", 
 		expect(shell.calls).toEqual([]);
 	});
 });
+
+// WTK-52: `wt update --dry-run` must not advance the default branch. The sync
+// (mergeFFOnly / updateBranchRef) is skipped and the report previews the advance
+// instead of claiming a completed action.
+describe("updateWorktrees — dry-run leaves the default branch untouched (WTK-52)", () => {
+	test("R1: main worktree behind upstream — mergeFFOnly is not called on dry-run", async () => {
+		const worktrees = [mainWt, featureA];
+		const mergeFFOnlyCalls: { worktreePath: string; branch: string; remote: string }[] = [];
+		const git = createFakeGit({ worktrees, mergeFFOnlyCalls, ...flatBranchesConfig(worktrees) });
+
+		const result = await updateWorktrees({ dryRun: true }, { git });
+
+		expectOk(result);
+		expect(mergeFFOnlyCalls).toEqual([]);
+	});
+
+	test("R1: no main worktree behind upstream — updateBranchRef is not called on dry-run", async () => {
+		const updateBranchRefCalls: { branch: string; remote: string }[] = [];
+		const git = createFakeGit({
+			worktrees: [featureA],
+			updateBranchRefCalls,
+			...flatBranchesConfig([featureA]),
+		});
+
+		const result = await updateWorktrees({ dryRun: true }, { git });
+
+		expectOk(result);
+		expect(updateBranchRefCalls).toEqual([]);
+	});
+
+	test("R2: default branch behind upstream — output previews a would-be advance, not a completed action", async () => {
+		const worktrees = [mainWt, featureA];
+		const config = flatBranchesConfig(worktrees);
+		// How far the default branch is behind its tracking ref (best-effort preview).
+		config.commitCountMap.set("main..main@{u}", 3);
+		const mergeFFOnlyCalls: { worktreePath: string; branch: string; remote: string }[] = [];
+		const git = createFakeGit({ worktrees, mergeFFOnlyCalls, ...config });
+
+		const result = await updateWorktrees({ dryRun: true }, { git });
+
+		const output = expectOk(result);
+		expect(output.defaultBranchUpdate).toBe("would-update");
+		expect(output.defaultBranchBehind).toBe(3);
+		expect(output.syncedFromUpstream).toBeUndefined();
+		expect(mergeFFOnlyCalls).toEqual([]);
+	});
+
+	test("R2: dry-run with upstream — does not report the default branch as synced from upstream", async () => {
+		const worktrees = [mainWt, featureA];
+		const config = flatBranchesConfig(worktrees);
+		config.commitCountMap.set("main..upstream/main", 2);
+		const mergeFFOnlyCalls: { worktreePath: string; branch: string; remote: string }[] = [];
+		const git = createFakeGit({ worktrees, mergeFFOnlyCalls, ...config });
+
+		const result = await updateWorktrees({ dryRun: true, upstream: "upstream" }, { git });
+
+		const output = expectOk(result);
+		expect(output.syncedFromUpstream).toBeUndefined();
+		expect(output.defaultBranchUpdate).toBe("would-update");
+		expect(output.defaultBranchBehind).toBe(2);
+		expect(mergeFFOnlyCalls).toEqual([]);
+	});
+});

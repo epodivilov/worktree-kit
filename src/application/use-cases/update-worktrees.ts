@@ -39,7 +39,10 @@ export interface WorktreeReport {
 
 export interface UpdateWorktreesOutput {
 	defaultBranch: string;
-	defaultBranchUpdate: "ff-updated" | "ref-updated";
+	/** `"would-update"` is the dry-run preview: nothing was synced, the default branch would be advanced. */
+	defaultBranchUpdate: "ff-updated" | "ref-updated" | "would-update";
+	/** Dry-run only: how many commits the default branch is behind its upstream, when it could be resolved. */
+	defaultBranchBehind?: number;
 	/** Set to the upstream remote name when the default branch was synced from upstream. */
 	syncedFromUpstream?: string;
 	reports: WorktreeReport[];
@@ -200,11 +203,25 @@ export async function updateWorktrees(
 	// Where default-branch work happens: its own worktree when it has one, else the
 	// repo root — the branch is then updated by ref and is checked out nowhere.
 	const defaultBranchPath = mainWorktree?.path ?? input.repoRoot ?? "";
-	let defaultBranchUpdate: "ff-updated" | "ref-updated";
+	let defaultBranchUpdate: "ff-updated" | "ref-updated" | "would-update";
+	let defaultBranchBehind: number | undefined;
 	let defaultBranchHookNotifications: Notification[] = [];
 	let syncedFromUpstream: string | undefined;
 
-	if (mainWorktree) {
+	if (input.dryRun) {
+		// Dry run is a promise that nothing changes, so the default-branch sync is
+		// skipped entirely: mergeFFOnly runs a real merge --ff-only (index + files) and
+		// updateBranchRef writes a local ref — both are mutations. Instead, report how
+		// far the branch would be advanced. Best-effort: the primary remote name is not
+		// available in this layer, so fall back to the branch's tracking ref (@{u}) when
+		// no upstream is given; if the ref cannot be resolved, the count is simply omitted.
+		defaultBranchUpdate = "would-update";
+		const upstreamRef = input.upstream ? `${input.upstream}/${defaultBranch}` : `${defaultBranch}@{u}`;
+		const behindResult = await git.getCommitCount(defaultBranch, upstreamRef);
+		if (behindResult.success) {
+			defaultBranchBehind = behindResult.data;
+		}
+	} else if (mainWorktree) {
 		const ffResult = input.upstream
 			? await git.mergeFFOnly(mainWorktree.path, defaultBranch, input.upstream)
 			: await git.mergeFFOnly(mainWorktree.path, defaultBranch);
@@ -225,11 +242,11 @@ export async function updateWorktrees(
 	}
 
 	// When syncing the default branch from an upstream remote, run post-update hooks
-	// for the default branch too (mirrors the feature-branch path). The branch was
-	// synced either way, so this does not depend on how it was updated.
-	if (input.upstream) {
+	// for the default branch too (mirrors the feature-branch path). Skipped in dry-run:
+	// the branch was not synced, so there is no completed sync to react to or report.
+	if (input.upstream && !input.dryRun) {
 		syncedFromUpstream = input.upstream;
-		if (!input.dryRun && defaultBranchPath) {
+		if (defaultBranchPath) {
 			defaultBranchHookNotifications = await runPostUpdateHooks(
 				{ path: defaultBranchPath, branch: defaultBranch },
 				`${input.upstream}/${defaultBranch}`,
@@ -474,5 +491,5 @@ export async function updateWorktrees(
 		}
 	}
 
-	return R.ok({ defaultBranch, defaultBranchUpdate, syncedFromUpstream, reports });
+	return R.ok({ defaultBranch, defaultBranchUpdate, defaultBranchBehind, syncedFromUpstream, reports });
 }
