@@ -4,8 +4,9 @@ set -Eeuo pipefail
 # Custom publish step for changesets/action. changesets/action runs `version` while changesets
 # remain on main (maintaining the "Version Packages" PR) and runs THIS script once none remain —
 # i.e. after that PR is merged. Because "no changesets" is also the steady state of main, this
-# script runs on every changeset-free push and therefore MUST be idempotent: it skips when the
-# v<version> release already exists.
+# script runs on every changeset-free push and therefore MUST be idempotent: it skips when a
+# PUBLISHED release for v<version> already exists, recovers a stale draft left by an interrupted
+# run, and refuses to guess (aborts) when the release state cannot be determined.
 #
 # Atomicity / rollback: the release is assembled as a DRAFT (tag + draft created together), the 5
 # platform binaries uploaded, then un-drafted and marked "latest" in one final step — the only
@@ -26,11 +27,37 @@ SHA="${GITHUB_SHA:-$(git rev-parse HEAD)}"
 version="$(node -p "require('./package.json').version")"
 tag="v$version"
 
-# Idempotent: a release already exists for this version → nothing to do.
-if gh release view "$tag" >/dev/null 2>&1; then
-  echo "Already released: $tag"
-  exit 0
+# Classify the current release state for $tag before doing anything destructive:
+#   (a) exists & PUBLISHED  -> idempotent skip (this script re-runs on every changeset-free push);
+#   (b) exists but is a DRAFT -> a prior run died between `create --draft` and un-draft (the ERR
+#       trap does NOT fire on SIGTERM / runner eviction), leaving a stale draft — recover by
+#       recreating it below;
+#   (c) genuinely ABSENT     -> create.
+# `gh release view` is the right probe: it resolves drafts by their intended tag, whereas the
+# get-by-tag REST endpoint 404s on drafts. Its failure is ambiguous, though — a real 404 and a
+# transient 403 / rate-limit / network error can look alike — so we proceed to create ONLY on an
+# unmistakable "not found" with no transient-error markers. ANY other failure ABORTS the run:
+# guessing "no release" would fall through to the delete-and-recreate path and could destroy an
+# already-published release.
+view_err="$(mktemp)"
+if is_draft="$(gh release view "$tag" --json isDraft -q .isDraft 2>"$view_err")"; then
+  if [ "$is_draft" = "false" ]; then
+    echo "Already released: $tag"
+    rm -f "$view_err"
+    exit 0
+  fi
+  echo "Stale draft found for $tag — recreating."
+elif grep -qi 'release not found' "$view_err" \
+  && ! grep -qiE 'HTTP [0-9]|rate limit|timed? ?out|connection|could not resolve|temporarily' "$view_err"; then
+  echo "No existing release for $tag — creating."
+else
+  echo "ERROR: cannot determine the release state for $tag; aborting so a transient error never" >&2
+  echo "       triggers a destructive delete of a published release. gh reported:" >&2
+  cat "$view_err" >&2
+  rm -f "$view_err"
+  exit 1
 fi
+rm -f "$view_err"
 
 echo "==> Building release binaries for $tag..."
 bash scripts/build-release.sh
@@ -50,7 +77,9 @@ awk -v ver="$version" '
 cleanup() { gh release delete "$tag" --cleanup-tag --yes >/dev/null 2>&1 || true; }
 trap cleanup ERR
 
-# Clear a stale draft from a prior failed run (only reachable when not yet published).
+# The guard above only lets us reach here for a confirmed stale draft or a genuine absence — never
+# for a published release — so clearing any leftover draft/tag for this version is safe here and
+# cannot delete a live release. (Case b: removes the stale draft. Case c: harmless no-op.)
 gh release delete "$tag" --cleanup-tag --yes >/dev/null 2>&1 || true
 
 gh release create "$tag" --draft --title "$tag" --notes-file "$notes" --target "$SHA"
