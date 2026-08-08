@@ -3,6 +3,15 @@ name: Release
 on:
   push:
     branches: [main]
+    # Most pushes to main are release-irrelevant and this workflow no-ops on them. Both real paths
+    # touch these files: opening/updating the Version PR needs a changeset, and the publish push is
+    # the Version PR merge itself (which deletes the consumed changeset and bumps package.json).
+    paths:
+      - ".changeset/**"
+      - "package.json"
+
+  # A `paths` miss skips silently, so keep a manual trigger to run a release that was filtered out.
+  workflow_dispatch:
 
 # Serialize releases; never cancel a publish mid-flight.
 concurrency:

@@ -62,14 +62,25 @@ rm -f "$view_err"
 echo "==> Building release binaries for $tag..."
 bash scripts/build-release.sh
 
+# Confirm the build actually produced the platform binaries before creating a release around them;
+# otherwise `gh release upload dist/wt-*` would pass an unexpanded glob straight to the API.
+shopt -s nullglob
+assets=(dist/wt-*)
+shopt -u nullglob
+[ "${#assets[@]}" -gt 0 ] || { echo "ERROR: build-release.sh produced no dist/wt-* assets." >&2; exit 1; }
+
 # Release notes: the section for this version from CHANGELOG.md (changesets format — the lines
 # between the "## <version>" heading and the next "## " heading). Fall back to a minimal note.
 notes="$(mktemp)"
-awk -v ver="$version" '
-  $0 == "## " ver { capture = 1; next }
-  capture && /^## / { exit }
-  capture { print }
-' CHANGELOG.md > "$notes"
+# Guard the read: a missing CHANGELOG.md would abort awk (and the publish) before the rollback trap
+# below is armed, so skip it and let the "Release $tag" fallback take over.
+if [ -f CHANGELOG.md ]; then
+  awk -v ver="$version" '
+    $0 == "## " ver { capture = 1; next }
+    capture && /^## / { exit }
+    capture { print }
+  ' CHANGELOG.md > "$notes"
+fi
 [ -s "$notes" ] || echo "Release $tag" > "$notes"
 
 # Roll back to the pre-publish state on any failure between create and un-draft.
