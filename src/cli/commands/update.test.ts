@@ -389,6 +389,51 @@ describe("update — empty stale branches", () => {
 	});
 });
 
+describe("update — dry-run default-branch preview", () => {
+	const CONFIG_NO_UPSTREAM = JSON.stringify({ rootDir: ".worktrees" }, null, 2);
+
+	test("behind by N>1 → previews the plural 'would be advanced by N commits' line", async () => {
+		// Dry run resolves the behind-count from `main@{u}` (no upstream configured).
+		const { fs, git } = upstreamScenario(CONFIG_NO_UPSTREAM, {
+			commitCountMap: new Map([["main..main@{u}", 3]]),
+		});
+		const { ui, log } = createFakeUi();
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runUpdate(container, { "dry-run": true });
+
+		expect(code).toBe(0);
+		expect(log.info).toContain("main would be advanced by 3 commits");
+	});
+
+	test("behind by 0 → previews the 'is already up to date' line", async () => {
+		const { fs, git } = upstreamScenario(CONFIG_NO_UPSTREAM, {
+			commitCountMap: new Map([["main..main@{u}", 0]]),
+		});
+		const { ui, log } = createFakeUi();
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runUpdate(container, { "dry-run": true });
+
+		expect(code).toBe(0);
+		expect(log.info).toContain("main is already up to date");
+	});
+
+	test("count unavailable → previews the numberless 'would be advanced' line", async () => {
+		// No commitCountMap entry → getCommitCount fails → the count is omitted.
+		const { fs, git } = upstreamScenario(CONFIG_NO_UPSTREAM);
+		const { ui, log } = createFakeUi();
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runUpdate(container, { "dry-run": true });
+
+		expect(code).toBe(0);
+		expect(log.info).toContain("main would be advanced");
+		// The numberless variant must not leak a commit count.
+		expect(log.info.some((m) => m.includes("advanced by"))).toBe(false);
+	});
+});
+
 describe("update — unmergeable gone branches", () => {
 	test("gone branch with active worktree + unmerged → no prompt, kept info, outro Done!", async () => {
 		const fs = createFakeFilesystem({
