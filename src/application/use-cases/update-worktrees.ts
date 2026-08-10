@@ -3,11 +3,15 @@ import type { GitPort } from "../../domain/ports/git-port.ts";
 import type { ShellPort } from "../../domain/ports/shell-port.ts";
 import type { Notification } from "../../shared/notification.ts";
 import { Result as R, type Result } from "../../shared/result.ts";
+import { Semaphore } from "../../shared/semaphore.ts";
 import { findMergedPrefix } from "./find-merged-prefix.ts";
 import { runHooks } from "./run-hooks.ts";
 
 const WIP_RESTORE_FAILED =
 	"failed to restore WIP commit — your changes are kept in a WIP commit (run 'git reset --soft HEAD~1' to unpack)";
+
+/** Default max number of worktrees rebased at once (see `--jobs`). */
+export const DEFAULT_JOBS = 4;
 
 export interface UpdateWorktreesInput {
 	dryRun: boolean;
@@ -17,6 +21,21 @@ export interface UpdateWorktreesInput {
 	repoRoot?: string;
 	/** Name of the upstream remote to sync the default branch from (fork workflow). */
 	upstream?: string;
+	/** Max worktrees to rebase concurrently. Defaults to {@link DEFAULT_JOBS}. */
+	jobs?: number;
+}
+
+/**
+ * Live progress for the rebase phase. `begin` is called once with the full set of
+ * targeted worktree branches (the display keys, including children that will be
+ * skipped) before any rebasing starts; `rebasing`/`settle` fire per worktree as it
+ * moves through its in-progress and terminal states. The default branch is not a
+ * key and is never reported here.
+ */
+export interface UpdateProgressReporter {
+	begin(branches: string[]): void;
+	rebasing(branch: string, onto: string): void;
+	settle(report: WorktreeReport): void;
 }
 
 export type WorktreeUpdateStatus =
@@ -51,6 +70,7 @@ export interface UpdateWorktreesOutput {
 export interface UpdateWorktreesDeps {
 	git: GitPort;
 	shell?: ShellPort;
+	progress?: UpdateProgressReporter;
 }
 
 async function findParentBranch(
@@ -292,135 +312,106 @@ export async function updateWorktrees(
 		});
 	}
 
-	for (const wt of targetWorktrees) {
+	// Rebase one worktree onto its parent and return its terminal report. Mutates
+	// `failedBranches` for every non-success outcome so that descendants scheduled
+	// after this worktree completes see the failure. The bounded section (the git
+	// mutations) is guarded by the semaphore; the cheap "parent already failed" skip
+	// is decided before taking a permit so a skipped branch never occupies a slot.
+	const processWorktree = async (wt: Worktree): Promise<WorktreeReport> => {
 		const parent = parentMap[wt.branch] ?? defaultBranch;
+		const retargetedFrom = retargetMap[wt.branch];
+		const base = { branch: wt.branch, path: wt.path, parent, retargetedFrom };
 
 		if (failedBranches.has(parent)) {
-			reports.push({
-				branch: wt.branch,
-				path: wt.path,
-				parent,
-				retargetedFrom: retargetMap[wt.branch],
-				result: { status: "skipped", reason: `parent ${parent} failed` },
-				hookNotifications: [],
-			});
 			failedBranches.add(wt.branch);
-			continue;
+			return { ...base, result: { status: "skipped", reason: `parent ${parent} failed` }, hookNotifications: [] };
 		}
 
-		const dirtyResult = await git.isDirty(wt.path);
-		if (!dirtyResult.success) {
-			reports.push({
-				branch: wt.branch,
-				path: wt.path,
-				parent,
-				retargetedFrom: retargetMap[wt.branch],
-				result: { status: "rebase-conflict", message: "Could not check worktree status" },
-				hookNotifications: [],
-			});
-			failedBranches.add(wt.branch);
-			continue;
-		}
-
-		const isDirty = dirtyResult.data;
-
-		if (input.dryRun) {
-			reports.push({
-				branch: wt.branch,
-				path: wt.path,
-				parent,
-				retargetedFrom: retargetMap[wt.branch],
-				result: { status: "dry-run", dirty: isDirty },
-				hookNotifications: [],
-			});
-			continue;
-		}
-
-		if (isDirty) {
-			const stageResult = await git.stageAll(wt.path);
-			if (!stageResult.success) {
-				reports.push({
-					branch: wt.branch,
-					path: wt.path,
-					parent,
-					retargetedFrom: retargetMap[wt.branch],
-					result: { status: "rebase-conflict", message: "Failed to stage changes for WIP commit" },
-					hookNotifications: [],
-				});
+		await sem.acquire();
+		try {
+			const dirtyResult = await git.isDirty(wt.path);
+			if (!dirtyResult.success) {
 				failedBranches.add(wt.branch);
-				continue;
-			}
-			const wipResult = await git.commitWip(wt.path);
-			if (!wipResult.success) {
-				reports.push({
-					branch: wt.branch,
-					path: wt.path,
-					parent,
-					retargetedFrom: retargetMap[wt.branch],
-					result: { status: "rebase-conflict", message: "Failed to create WIP commit" },
+				return {
+					...base,
+					result: { status: "rebase-conflict", message: "Could not check worktree status" },
 					hookNotifications: [],
-				});
-				failedBranches.add(wt.branch);
-				continue;
+				};
 			}
-		}
 
-		const prefix = await findMergedPrefix(
-			{ git },
-			{ base: parent, feature: wt.branch },
-			{ trySquashOnPartialCherryPick: false },
-		);
+			const isDirty = dirtyResult.data;
 
-		if (prefix?.fully) {
+			if (input.dryRun) {
+				return { ...base, result: { status: "dry-run", dirty: isDirty }, hookNotifications: [] };
+			}
+
 			if (isDirty) {
-				const resetResult = await git.resetLastCommit(wt.path);
-				if (!resetResult.success) {
-					reports.push({
-						branch: wt.branch,
-						path: wt.path,
-						parent,
-						retargetedFrom: retargetMap[wt.branch],
-						result: { status: "rebase-conflict", message: "Failed to restore WIP commit after fully-merged detection" },
-						hookNotifications: [],
-					});
+				const stageResult = await git.stageAll(wt.path);
+				if (!stageResult.success) {
 					failedBranches.add(wt.branch);
-					continue;
+					return {
+						...base,
+						result: { status: "rebase-conflict", message: "Failed to stage changes for WIP commit" },
+						hookNotifications: [],
+					};
 				}
-			}
-			reports.push({
-				branch: wt.branch,
-				path: wt.path,
-				parent,
-				retargetedFrom: retargetMap[wt.branch],
-				result: { status: "skipped", reason: "fully merged" },
-				hookNotifications: [],
-			});
-			continue;
-		}
-
-		const rebaseResult = prefix
-			? await git.rebase(wt.path, parent, { upstream: prefix.lastSkippedCommit, branch: wt.branch })
-			: await git.rebase(wt.path, parent);
-		if (rebaseResult.success) {
-			let warning: string | undefined;
-			if (isDirty) {
-				const resetResult = await git.resetLastCommit(wt.path);
-				if (!resetResult.success) {
-					warning = WIP_RESTORE_FAILED;
+				const wipResult = await git.commitWip(wt.path);
+				if (!wipResult.success) {
+					failedBranches.add(wt.branch);
+					return {
+						...base,
+						result: { status: "rebase-conflict", message: "Failed to create WIP commit" },
+						hookNotifications: [],
+					};
 				}
 			}
 
-			const hookNotifications = await runPostUpdateHooks(wt, parent, input, deps);
+			const prefix = await findMergedPrefix(
+				{ git },
+				{ base: parent, feature: wt.branch },
+				{ trySquashOnPartialCherryPick: false },
+			);
 
-			reports.push({
-				branch: wt.branch,
-				path: wt.path,
-				parent,
-				retargetedFrom: retargetMap[wt.branch],
-				result: { status: isDirty ? "rebased-dirty" : "rebased", warning },
-				hookNotifications,
-			});
-		} else {
+			if (prefix?.fully) {
+				if (isDirty) {
+					const resetResult = await git.resetLastCommit(wt.path);
+					if (!resetResult.success) {
+						failedBranches.add(wt.branch);
+						return {
+							...base,
+							result: {
+								status: "rebase-conflict",
+								message: "Failed to restore WIP commit after fully-merged detection",
+							},
+							hookNotifications: [],
+						};
+					}
+				}
+				return { ...base, result: { status: "skipped", reason: "fully merged" }, hookNotifications: [] };
+			}
+
+			deps.progress?.rebasing(wt.branch, parent);
+			const rebaseResult = prefix
+				? await git.rebase(wt.path, parent, { upstream: prefix.lastSkippedCommit, branch: wt.branch })
+				: await git.rebase(wt.path, parent);
+			if (rebaseResult.success) {
+				let warning: string | undefined;
+				if (isDirty) {
+					const resetResult = await git.resetLastCommit(wt.path);
+					if (!resetResult.success) {
+						warning = WIP_RESTORE_FAILED;
+					}
+				}
+
+				const hookNotifications = await runPostUpdateHooks(wt, parent, input, deps);
+
+				return {
+					...base,
+					result: { status: isDirty ? "rebased-dirty" : "rebased", warning },
+					hookNotifications,
+				};
+			}
+
 			let conflictResolved = false;
 
 			if (input.onConflictHooks?.length && deps.shell) {
@@ -454,41 +445,80 @@ export async function updateWorktrees(
 
 				const hookNotifications = await runPostUpdateHooks(wt, parent, input, deps);
 
-				reports.push({
-					branch: wt.branch,
-					path: wt.path,
-					parent,
-					retargetedFrom: retargetMap[wt.branch],
+				return {
+					...base,
 					result: { status: isDirty ? "rebased-dirty" : "rebased", warning },
 					hookNotifications,
-				});
-			} else {
-				const warnings: string[] = [];
-				const abortResult = await git.rebaseAbort(wt.path);
-				if (!abortResult.success) {
-					warnings.push("rebase abort failed — worktree may be left mid-rebase");
-				}
-				if (isDirty) {
-					const resetResult = await git.resetLastCommit(wt.path);
-					if (!resetResult.success) {
-						warnings.push(WIP_RESTORE_FAILED);
-					}
-				}
-				reports.push({
-					branch: wt.branch,
-					path: wt.path,
-					parent,
-					retargetedFrom: retargetMap[wt.branch],
-					result: {
-						status: "rebase-conflict",
-						message: rebaseResult.error.message,
-						warning: warnings.length > 0 ? warnings.join("; ") : undefined,
-					},
-					hookNotifications: [],
-				});
-				failedBranches.add(wt.branch);
+				};
 			}
+
+			const warnings: string[] = [];
+			const abortResult = await git.rebaseAbort(wt.path);
+			if (!abortResult.success) {
+				warnings.push("rebase abort failed — worktree may be left mid-rebase");
+			}
+			if (isDirty) {
+				const resetResult = await git.resetLastCommit(wt.path);
+				if (!resetResult.success) {
+					warnings.push(WIP_RESTORE_FAILED);
+				}
+			}
+			failedBranches.add(wt.branch);
+			return {
+				...base,
+				result: {
+					status: "rebase-conflict",
+					message: rebaseResult.error.message,
+					warning: warnings.length > 0 ? warnings.join("; ") : undefined,
+				},
+				hookNotifications: [],
+			};
+		} finally {
+			sem.release();
 		}
+	};
+
+	// Bounded, dependency-aware parallel scheduler. Independent subtrees rebase
+	// concurrently (up to `jobs`), but a child never starts before its parent's
+	// terminal report — and therefore its `failedBranches` write — is recorded.
+	// Concurrency is safe only because JS is single-threaded and a child is scheduled
+	// strictly after its parent's `done` promise resolves.
+	const sem = new Semaphore(Math.max(1, Math.trunc(input.jobs ?? DEFAULT_JOBS)));
+
+	deps.progress?.begin(targetWorktrees.map((wt) => wt.branch));
+
+	const doneResolvers = new Map<string, () => void>();
+	const doneByBranch = new Map<string, Promise<void>>();
+	for (const wt of targetWorktrees) {
+		doneByBranch.set(wt.branch, new Promise<void>((resolve) => doneResolvers.set(wt.branch, resolve)));
+	}
+
+	const reportByBranch = new Map<string, WorktreeReport>();
+
+	await Promise.all(
+		targetWorktrees.map(async (wt) => {
+			try {
+				// Wait for the parent only when it is part of this run. A parent outside
+				// the targeted set was never processed, so it cannot have failed here.
+				const parent = parentMap[wt.branch] ?? defaultBranch;
+				const parentDone = doneByBranch.get(parent);
+				if (parentDone) {
+					await parentDone;
+				}
+
+				const report = await processWorktree(wt);
+				reportByBranch.set(wt.branch, report);
+				deps.progress?.settle(report);
+			} finally {
+				doneResolvers.get(wt.branch)?.();
+			}
+		}),
+	);
+
+	// Emit reports in deterministic BFS order regardless of completion order.
+	for (const wt of targetWorktrees) {
+		const report = reportByBranch.get(wt.branch);
+		if (report) reports.push(report);
 	}
 
 	return R.ok({ defaultBranch, defaultBranchUpdate, defaultBranchBehind, syncedFromUpstream, reports });

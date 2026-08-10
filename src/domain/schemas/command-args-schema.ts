@@ -19,10 +19,24 @@ export const RemoveArgsSchema = v.object({
 
 export type RemoveArgs = v.InferOutput<typeof RemoveArgsSchema>;
 
+const JOBS_MESSAGE = "--jobs must be a positive integer";
+
 export const UpdateArgsSchema = v.object({
 	branch: v.optional(v.string()),
 	"dry-run": v.optional(v.boolean(), false),
 	cleanup: v.optional(v.boolean(), false),
+	// Max worktrees to rebase concurrently. citty hands the flag over as a string
+	// (or a number if already numeric); coerce, then reject anything that is not a
+	// positive integer as an argument validation error.
+	jobs: v.optional(
+		v.pipe(
+			v.union([v.string(), v.number()]),
+			v.transform((value) => (typeof value === "number" ? value : Number(value))),
+			v.number(JOBS_MESSAGE),
+			v.integer(JOBS_MESSAGE),
+			v.minValue(1, JOBS_MESSAGE),
+		),
+	),
 });
 
 export type UpdateArgs = v.InferOutput<typeof UpdateArgsSchema>;
