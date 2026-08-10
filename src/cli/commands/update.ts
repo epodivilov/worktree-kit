@@ -5,7 +5,12 @@ import { classifyGoneBranch } from "../../application/use-cases/classify-gone-br
 import { cleanupWorktrees } from "../../application/use-cases/cleanup-worktrees.ts";
 import { loadConfig } from "../../application/use-cases/load-config.ts";
 import { setConfigUpstream } from "../../application/use-cases/set-config-upstream.ts";
-import { updateWorktrees } from "../../application/use-cases/update-worktrees.ts";
+import {
+	type UpdateProgressReporter,
+	updateWorktrees,
+	type WorktreeReport,
+} from "../../application/use-cases/update-worktrees.ts";
+import type { MultiSpinnerHandle } from "../../domain/ports/ui-port.ts";
 import { UpdateArgsSchema } from "../../domain/schemas/command-args-schema.ts";
 import type { Container } from "../../infrastructure/container.ts";
 import { formatDisplayPath } from "../../shared/format-path.ts";
@@ -15,6 +20,38 @@ import { EXIT_CANCEL, EXIT_FAILURE } from "../exit-codes.ts";
 import { GLOBAL_ARGS } from "../global-args.ts";
 import { resolveUpstream } from "../resolve-upstream.ts";
 import { CommandError, runCommand } from "../run-command.ts";
+
+/**
+ * Maps a per-worktree report to a single terminal spinner line. `complete` (✓) is
+ * used for benign outcomes (rebased, would-be-rebased, already-merged skip); `fail`
+ * (✗) for conflicts and descendants skipped under a failed parent. Supplementary
+ * warnings are surfaced separately after the spinner, not folded in here.
+ */
+function progressLine(report: WorktreeReport): { terminal: "complete" | "fail"; message: string } {
+	const onto = report.parent ?? "the default branch";
+	const reparent = report.retargetedFrom ? ` (re-parented from ${report.retargetedFrom})` : "";
+	switch (report.result.status) {
+		case "rebased":
+		case "rebased-dirty": {
+			const wip = report.result.status === "rebased-dirty" ? " (via WIP commit)" : "";
+			return { terminal: "complete", message: `rebased onto ${onto}${wip}${reparent}` };
+		}
+		case "dry-run": {
+			const wip = report.result.dirty ? " (dirty, via WIP commit)" : "";
+			return { terminal: "complete", message: `would be rebased onto ${onto}${wip}${reparent}` };
+		}
+		case "rebase-conflict":
+			return { terminal: "fail", message: `conflict, rebase aborted${reparent}` };
+		case "skipped":
+			return report.result.reason === "fully merged"
+				? { terminal: "complete", message: "skipped: fully merged" }
+				: { terminal: "fail", message: `skipped: ${report.result.reason}` };
+		case "is-default-branch":
+			// The default branch is never a spinner key, so this is unreachable via
+			// `settle`; kept for exhaustiveness.
+			return { terminal: "complete", message: "up to date" };
+	}
+}
 
 export function updateCommand(container: Container) {
 	return defineCommand({
@@ -39,6 +76,11 @@ export function updateCommand(container: Container) {
 				description: "Automatically clean up branches with gone remotes after update",
 				required: false,
 			},
+			jobs: {
+				type: "string",
+				description: "Max worktrees to rebase concurrently (default 4)",
+				required: false,
+			},
 		},
 		async run({ args }) {
 			const { ui, git, fs, shell } = container;
@@ -47,7 +89,7 @@ export function updateCommand(container: Container) {
 
 			await runCommand(async () => {
 				const parsed = v.parse(UpdateArgsSchema, args);
-				const { branch, cleanup: autoCleanup } = parsed;
+				const { branch, cleanup: autoCleanup, jobs } = parsed;
 				const dryRun = parsed["dry-run"];
 				const configResult = await loadConfig({ git, fs });
 				const postUpdateHooks = configResult.success ? configResult.data.config.hooks["post-update"] : [];
@@ -93,8 +135,27 @@ export function updateCommand(container: Container) {
 					}
 				}
 
-				const spinner = ui.createSpinner();
-				spinner.start("Fetching and updating worktrees...");
+				// Live per-worktree progress. The multi-spinner is created lazily by the
+				// use case's `begin` callback, once the full targeted-worktree set (keys)
+				// is known — including children that will be skipped under a failed parent.
+				let updateSpinner: MultiSpinnerHandle | undefined;
+				const progress: UpdateProgressReporter = {
+					begin(branches) {
+						updateSpinner = ui.createMultiSpinner(branches);
+					},
+					rebasing(branchName, onto) {
+						updateSpinner?.update(branchName, `rebasing onto ${onto}`);
+					},
+					settle(report) {
+						if (!updateSpinner) return;
+						const { terminal, message } = progressLine(report);
+						if (terminal === "complete") {
+							updateSpinner.complete(report.branch, message);
+						} else {
+							updateSpinner.fail(report.branch, message);
+						}
+					},
+				};
 
 				const cleanup = new CleanupHandle();
 				cleanup.register(async () => {
@@ -120,18 +181,16 @@ export function updateCommand(container: Container) {
 
 				const needsShell = postUpdateHooks.length > 0 || onConflictHooks.length > 0;
 				const result = await updateWorktrees(
-					{ dryRun, branch, postUpdateHooks, onConflictHooks, repoRoot, upstream },
-					{ git, shell: needsShell ? shell : undefined },
+					{ dryRun, branch, postUpdateHooks, onConflictHooks, repoRoot, upstream, jobs },
+					{ git, shell: needsShell ? shell : undefined, progress },
 				);
 
 				cleanup.clear();
+				updateSpinner?.stop();
 
 				if (Result.isErr(result)) {
-					spinner.stop(pc.red("Failed"));
 					throw new CommandError(result.error.message, EXIT_FAILURE);
 				}
-
-				spinner.stop(pc.green("Done"));
 
 				const { defaultBranch, defaultBranchUpdate, defaultBranchBehind, syncedFromUpstream, reports } = result.data;
 
@@ -154,50 +213,33 @@ export function updateCommand(container: Container) {
 					ui.success(`${defaultBranch} ref updated`);
 				}
 
+				// The primary per-worktree outcome is already shown live in the multi-spinner
+				// (one line per worktree). Here we only surface the supplementary warnings
+				// that don't fit on that single line, plus the default branch (which has no
+				// spinner line of its own).
 				for (const report of reports) {
-					const onto = report.parent ?? defaultBranch;
 					const hookFailures = report.hookNotifications.filter((n) => n.level === "warn");
 
-					switch (report.result.status) {
-						case "is-default-branch":
-							if (hookFailures.length > 0) {
-								const failMsgs = hookFailures.map((n) => n.message).join("; ");
-								ui.warn(`${report.branch} post-update hooks — ${failMsgs}`);
-							}
-							break;
-						case "rebased":
-						case "rebased-dirty": {
-							const wip = report.result.status === "rebased-dirty" ? " (via WIP commit)" : "";
-							const reparent = report.retargetedFrom ? ` (re-parented from ${report.retargetedFrom})` : "";
-							const suffix = `${wip}${reparent}`;
-							if (hookFailures.length > 0) {
-								const failMsgs = hookFailures.map((n) => n.message).join("; ");
-								ui.warn(`${report.branch} rebased onto ${onto}${suffix} — ${failMsgs}`);
-							} else {
-								ui.success(`${report.branch} rebased onto ${onto}${suffix}`);
-							}
-							if (report.result.warning) {
-								ui.warn(`${report.branch}: ${report.result.warning}`);
-							}
-							break;
+					if (report.result.status === "is-default-branch") {
+						if (hookFailures.length > 0) {
+							const failMsgs = hookFailures.map((n) => n.message).join("; ");
+							ui.warn(`${report.branch} post-update hooks — ${failMsgs}`);
 						}
-						case "rebase-conflict": {
-							const reparent = report.retargetedFrom ? ` (re-parented from ${report.retargetedFrom})` : "";
-							ui.warn(`${report.branch} has conflicts, rebase aborted${reparent}`);
-							if (report.result.warning) {
-								ui.warn(`${report.branch}: ${report.result.warning}`);
-							}
-							break;
-						}
-						case "dry-run": {
-							const wip = report.result.dirty ? " (dirty, via WIP commit)" : "";
-							const reparent = report.retargetedFrom ? ` (re-parented from ${report.retargetedFrom})` : "";
-							ui.info(`${report.branch} would be rebased onto ${onto}${wip}${reparent}`);
-							break;
-						}
-						case "skipped":
-							ui.warn(`${report.branch} skipped: ${report.result.reason}`);
-							break;
+						continue;
+					}
+
+					if (
+						(report.result.status === "rebased" || report.result.status === "rebased-dirty") &&
+						report.result.warning
+					) {
+						ui.warn(`${report.branch}: ${report.result.warning}`);
+					}
+					if (report.result.status === "rebase-conflict" && report.result.warning) {
+						ui.warn(`${report.branch}: ${report.result.warning}`);
+					}
+					if (hookFailures.length > 0) {
+						const failMsgs = hookFailures.map((n) => n.message).join("; ");
+						ui.warn(`${report.branch} post-update hooks — ${failMsgs}`);
 					}
 				}
 

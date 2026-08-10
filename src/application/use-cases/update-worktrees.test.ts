@@ -1,9 +1,42 @@
 import { describe, expect, test } from "bun:test";
 import type { Worktree } from "../../domain/entities/worktree.ts";
+import type { GitPort } from "../../domain/ports/git-port.ts";
 import { expectErr, expectOk } from "../../test-utils/assertions.ts";
 import { createFakeGit, type FakeRebaseCall } from "../../test-utils/fake-git.ts";
 import { createFakeShell } from "../../test-utils/fake-shell.ts";
 import { updateWorktrees } from "./update-worktrees.ts";
+
+/**
+ * Wraps a fake git so every `rebase` records a start/end event and a peak
+ * concurrency counter. A small real delay forces overlapping rebases to actually
+ * overlap in time, so the scheduler's ordering and bounding are observable.
+ */
+interface RebaseTracker {
+	events: { path: string; phase: "start" | "end" }[];
+	startOrder: string[];
+	peak: number;
+}
+
+function instrumentRebase(git: GitPort, delayMs = 15): { git: GitPort; tracker: RebaseTracker } {
+	const tracker: RebaseTracker = { events: [], startOrder: [], peak: 0 };
+	let active = 0;
+	const baseRebase = git.rebase.bind(git);
+	const wrapped: GitPort = {
+		...git,
+		async rebase(path, onto, opts) {
+			active += 1;
+			tracker.peak = Math.max(tracker.peak, active);
+			tracker.events.push({ path, phase: "start" });
+			tracker.startOrder.push(path);
+			await new Promise((resolve) => setTimeout(resolve, delayMs));
+			const result = await baseRebase(path, onto, opts);
+			tracker.events.push({ path, phase: "end" });
+			active -= 1;
+			return result;
+		},
+	};
+	return { git: wrapped, tracker };
+}
 
 const mainWt: Worktree = { path: "/repo", branch: "main", head: "aaa", isMain: true, isPrunable: false };
 const featureA: Worktree = { path: "/repo-a", branch: "feature-a", head: "bbb", isMain: false, isPrunable: false };
@@ -972,14 +1005,14 @@ describe("updateWorktrees — post-update hooks", () => {
 		const output = expectOk(result);
 		const reportA = output.reports.find((r) => r.branch === "feature-a");
 		expect(reportA?.result).toMatchObject({ status: "rebased" });
-		// on-conflict hook + post-update hook for feature-a, post-update hook for feature-b
+		// on-conflict hook + post-update hook for feature-a, post-update hook for feature-b.
+		// Independent branches now rebase concurrently, so the two branches' hook calls
+		// interleave; assert per-branch ordering rather than a fixed global order.
 		expect(shell.calls).toHaveLength(3);
-		expect(shell.calls[0]?.command).toBe("resolve-conflicts.sh");
-		expect(shell.calls[0]?.options.cwd).toBe("/repo-a");
-		expect(shell.calls[1]?.command).toBe("git push --force-with-lease");
-		expect(shell.calls[1]?.options.cwd).toBe("/repo-a");
-		expect(shell.calls[2]?.command).toBe("git push --force-with-lease");
-		expect(shell.calls[2]?.options.cwd).toBe("/repo-b");
+		const callsA = shell.calls.filter((c) => c.options.cwd === "/repo-a").map((c) => c.command);
+		const callsB = shell.calls.filter((c) => c.options.cwd === "/repo-b").map((c) => c.command);
+		expect(callsA).toEqual(["resolve-conflicts.sh", "git push --force-with-lease"]);
+		expect(callsB).toEqual(["git push --force-with-lease"]);
 	});
 
 	test("continues after hook failure", async () => {
@@ -1163,6 +1196,126 @@ describe("updateWorktrees — upstream sync without a default-branch worktree", 
 
 		expectOk(result);
 		expect(shell.calls).toEqual([]);
+	});
+});
+
+describe("updateWorktrees — bounded, dependency-aware concurrency (WTK-58)", () => {
+	const main: Worktree = { path: "/repo", branch: "main", head: "aaa", isMain: true, isPrunable: false };
+
+	// main ← a, a ← b, main ← c. `a` and `c` are independent; `b` depends on `a`.
+	function forkConfig() {
+		const a: Worktree = { path: "/repo-a", branch: "a", head: "a1", isMain: false, isPrunable: false };
+		const b: Worktree = { path: "/repo-b", branch: "b", head: "b1", isMain: false, isPrunable: false };
+		const c: Worktree = { path: "/repo-c", branch: "c", head: "c1", isMain: false, isPrunable: false };
+		const mergeBaseMap = new Map([
+			["a:main", "aaa"],
+			["main:a", "aaa"],
+			["b:main", "aaa"],
+			["main:b", "aaa"],
+			["b:a", "eee"],
+			["a:b", "eee"],
+			["c:main", "aaa"],
+			["main:c", "aaa"],
+		]);
+		const commitCountMap = new Map([
+			["aaa..a", 2],
+			["aaa..b", 4],
+			["eee..b", 2],
+			["aaa..c", 2],
+			["eee..a", 0],
+		]);
+		return { worktrees: [main, a, b, c], mergeBaseMap, commitCountMap };
+	}
+
+	test("R3: a child never starts before its parent finishes; independent siblings overlap", async () => {
+		const { worktrees, mergeBaseMap, commitCountMap } = forkConfig();
+		const base = createFakeGit({ worktrees, mergeBaseMap, commitCountMap });
+		const { git, tracker } = instrumentRebase(base);
+
+		const output = expectOk(await updateWorktrees({ dryRun: false }, { git }));
+
+		expect(output.reports.find((r) => r.branch === "a")?.parent).toBe("main");
+		expect(output.reports.find((r) => r.branch === "b")?.parent).toBe("a");
+		expect(output.reports.find((r) => r.branch === "c")?.parent).toBe("main");
+
+		const aEnd = tracker.events.findIndex((e) => e.path === "/repo-a" && e.phase === "end");
+		const bStart = tracker.events.findIndex((e) => e.path === "/repo-b" && e.phase === "start");
+		const cStart = tracker.events.findIndex((e) => e.path === "/repo-c" && e.phase === "start");
+
+		// b (child of a) starts rebasing only after a has finished.
+		expect(bStart).toBeGreaterThan(aEnd);
+		// a and c (both children of main) overlap: c starts before a finishes.
+		expect(cStart).toBeLessThan(aEnd);
+		expect(tracker.peak).toBeGreaterThanOrEqual(2);
+	});
+
+	test("R4: --jobs bounds concurrent rebases; the default caps at 4", async () => {
+		const feats: Worktree[] = [1, 2, 3, 4, 5].map((n) => ({
+			path: `/repo-${n}`,
+			branch: `f${n}`,
+			head: `h${n}`,
+			isMain: false,
+			isPrunable: false,
+		}));
+		const worktrees = [main, ...feats];
+		const config = flatBranchesConfig(worktrees);
+
+		const capped = instrumentRebase(createFakeGit({ worktrees, ...config }));
+		expectOk(await updateWorktrees({ dryRun: false, jobs: 2 }, { git: capped.git }));
+		expect(capped.tracker.peak).toBe(2);
+
+		const dflt = instrumentRebase(createFakeGit({ worktrees, ...config }));
+		expectOk(await updateWorktrees({ dryRun: false }, { git: dflt.git }));
+		expect(dflt.tracker.peak).toBe(4);
+	});
+
+	test("R5: a conflicting parent skips all its descendants under concurrency", async () => {
+		const a: Worktree = { path: "/repo-a", branch: "a", head: "a1", isMain: false, isPrunable: false };
+		const b: Worktree = { path: "/repo-b", branch: "b", head: "b1", isMain: false, isPrunable: false };
+		const c: Worktree = { path: "/repo-c", branch: "c", head: "c1", isMain: false, isPrunable: false };
+		const mergeBaseMap = new Map([
+			["a:main", "aaa"],
+			["main:a", "aaa"],
+			["b:main", "aaa"],
+			["main:b", "aaa"],
+			["b:a", "eee"],
+			["a:b", "eee"],
+			["c:main", "aaa"],
+			["main:c", "aaa"],
+			["c:a", "eee"],
+			["a:c", "eee"],
+		]);
+		const commitCountMap = new Map([
+			["aaa..a", 2],
+			["aaa..b", 4],
+			["eee..b", 2],
+			["aaa..c", 4],
+			["eee..c", 2],
+			["eee..a", 0],
+		]);
+		const rebaseCalls: FakeRebaseCall[] = [];
+		const base = createFakeGit({
+			worktrees: [main, a, b, c],
+			mergeBaseMap,
+			commitCountMap,
+			rebaseConflicts: new Set(["/repo-a"]),
+			rebaseCalls,
+		});
+		const { git } = instrumentRebase(base);
+
+		const output = expectOk(await updateWorktrees({ dryRun: false }, { git }));
+
+		expect(output.reports.find((r) => r.branch === "a")?.result.status).toBe("rebase-conflict");
+		expect(output.reports.find((r) => r.branch === "b")?.result).toMatchObject({
+			status: "skipped",
+			reason: "parent a failed",
+		});
+		expect(output.reports.find((r) => r.branch === "c")?.result).toMatchObject({
+			status: "skipped",
+			reason: "parent a failed",
+		});
+		// Only the parent ever attempted a rebase; the skipped descendants did not.
+		expect(rebaseCalls.map((call) => call.worktreePath)).toEqual(["/repo-a"]);
 	});
 });
 

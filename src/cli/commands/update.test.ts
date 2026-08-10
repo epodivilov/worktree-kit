@@ -5,7 +5,7 @@ import type { UiPort } from "../../domain/ports/ui-port.ts";
 import type { Container } from "../../infrastructure/container.ts";
 import { expectOk } from "../../test-utils/assertions.ts";
 import { createFakeFilesystem } from "../../test-utils/fake-filesystem.ts";
-import { createFakeGit, type FakeGitOptions } from "../../test-utils/fake-git.ts";
+import { createFakeGit, type FakeGitOptions, type FakeRebaseCall } from "../../test-utils/fake-git.ts";
 import { updateCommand } from "./update.ts";
 
 const ROOT = "/fake/project";
@@ -26,6 +26,18 @@ interface FakeUiOptions {
 	select?: string | symbol;
 }
 
+/**
+ * Records how the CLI drives `createMultiSpinner`. `update` is a no-op that only
+ * records the call (mirroring the non-TTY adapter, where `update` produces no
+ * output), so `terminals` holds exactly the one-line-per-worktree results a
+ * non-TTY run would print (R2).
+ */
+interface MultiSpinnerCapture {
+	keys: string[];
+	terminals: { type: "complete" | "fail"; key: string; message: string }[];
+	updates: { key: string; message: string }[];
+}
+
 const CANCEL_SYMBOL = Symbol("cancel");
 
 function createFakeUi(opts: FakeUiOptions = {}): {
@@ -33,10 +45,12 @@ function createFakeUi(opts: FakeUiOptions = {}): {
 	log: FakeUiLog;
 	confirmMessages: string[];
 	selectCalls: { message: string; values: string[] }[];
+	multiSpinner: MultiSpinnerCapture;
 } {
 	const log: FakeUiLog = { info: [], success: [], warn: [], error: [], outro: [] };
 	const confirmMessages: string[] = [];
 	const selectCalls: { message: string; values: string[] }[] = [];
+	const multiSpinner: MultiSpinnerCapture = { keys: [], terminals: [], updates: [] };
 	const ui = {
 		nonInteractive: opts.nonInteractive ?? false,
 		intro() {},
@@ -61,8 +75,20 @@ function createFakeUi(opts: FakeUiOptions = {}): {
 		createSpinner() {
 			return { start() {}, message() {}, stop() {} };
 		},
-		createMultiSpinner() {
-			return { update() {}, complete() {}, fail() {}, stop() {} };
+		createMultiSpinner(keys: string[]) {
+			multiSpinner.keys = [...keys];
+			return {
+				update(key: string, message: string) {
+					multiSpinner.updates.push({ key, message });
+				},
+				complete(key: string, message: string) {
+					multiSpinner.terminals.push({ type: "complete", key, message });
+				},
+				fail(key: string, message: string) {
+					multiSpinner.terminals.push({ type: "fail", key, message });
+				},
+				stop() {},
+			};
 		},
 		async text() {
 			return "";
@@ -83,7 +109,7 @@ function createFakeUi(opts: FakeUiOptions = {}): {
 		},
 		cancel() {},
 	} satisfies UiPort;
-	return { ui, log, confirmMessages, selectCalls };
+	return { ui, log, confirmMessages, selectCalls, multiSpinner };
 }
 
 function buildContainer(
@@ -431,6 +457,144 @@ describe("update — dry-run default-branch preview", () => {
 		expect(log.info).toContain("main would be advanced");
 		// The numberless variant must not leak a commit count.
 		expect(log.info.some((m) => m.includes("advanced by"))).toBe(false);
+	});
+});
+
+describe("update — per-worktree progress (WTK-58)", () => {
+	// main ← a (conflicts), a ← b (skipped as a's descendant), main ← c (rebased).
+	function stackScenario(gitOverrides: Partial<FakeGitOptions> = {}) {
+		const a: Worktree = { path: `${ROOT}/.worktrees/a`, branch: "a", head: "a1", isMain: false, isPrunable: false };
+		const b: Worktree = { path: `${ROOT}/.worktrees/b`, branch: "b", head: "b1", isMain: false, isPrunable: false };
+		const c: Worktree = { path: `${ROOT}/.worktrees/c`, branch: "c", head: "c1", isMain: false, isPrunable: false };
+		const fs = createFakeFilesystem({
+			files: { [`${ROOT}/${CONFIG_FILENAME}`]: JSON.stringify({ rootDir: ".worktrees", upstream: false }) },
+			directories: [ROOT, `${ROOT}/.worktrees`, a.path, b.path, c.path],
+		});
+		const git = createFakeGit({
+			root: ROOT,
+			mainRoot: ROOT,
+			worktrees: [mainWt, a, b, c],
+			branches: ["main", "a", "b", "c"],
+			goneBranches: [],
+			mergeBaseMap: new Map([
+				["a:main", "aaa"],
+				["main:a", "aaa"],
+				["b:main", "aaa"],
+				["main:b", "aaa"],
+				["b:a", "eee"],
+				["a:b", "eee"],
+				["c:main", "aaa"],
+				["main:c", "aaa"],
+			]),
+			commitCountMap: new Map([
+				["aaa..a", 2],
+				["aaa..b", 4],
+				["eee..b", 2],
+				["aaa..c", 2],
+				["eee..a", 0],
+			]),
+			...gitOverrides,
+		});
+		return { fs, git };
+	}
+
+	test("R2: one terminal line per targeted worktree, skipped children included, no ANSI", async () => {
+		const { fs, git } = stackScenario({ rebaseConflicts: new Set([`${ROOT}/.worktrees/a`]) });
+		const { ui, multiSpinner } = createFakeUi();
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runUpdate(container, { "dry-run": false });
+
+		expect(code).toBe(0);
+		// The spinner is seeded with every targeted worktree, including the child
+		// that will be skipped because its parent conflicted.
+		expect([...multiSpinner.keys].sort()).toEqual(["a", "b", "c"]);
+		// Exactly one terminal (complete/fail) line per targeted worktree.
+		expect(multiSpinner.terminals).toHaveLength(3);
+		expect(new Set(multiSpinner.terminals.map((t) => t.key))).toEqual(new Set(["a", "b", "c"]));
+		// No live-render/ANSI escape sequences leak into the terminal messages.
+		for (const t of multiSpinner.terminals) {
+			expect(t.message).not.toContain("\x1b");
+		}
+		const lineFor = (key: string) => multiSpinner.terminals.find((t) => t.key === key);
+		expect(lineFor("a")?.type).toBe("fail");
+		expect(lineFor("a")?.message).toContain("conflict");
+		expect(lineFor("c")?.type).toBe("complete");
+		expect(lineFor("c")?.message).toContain("rebased onto main");
+		expect(lineFor("b")?.type).toBe("fail");
+		expect(lineFor("b")?.message).toContain("parent a failed");
+	});
+
+	test("R7: dry-run reports would-be-rebased per worktree and performs no rebase", async () => {
+		const rebaseCalls: FakeRebaseCall[] = [];
+		const mergeFFOnlyCalls: { worktreePath: string; branch: string; remote: string }[] = [];
+		const { fs, git } = stackScenario({ rebaseCalls, mergeFFOnlyCalls });
+		const { ui, multiSpinner } = createFakeUi();
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runUpdate(container, { "dry-run": true });
+
+		expect(code).toBe(0);
+		// Dry run makes no repository changes.
+		expect(rebaseCalls).toEqual([]);
+		expect(mergeFFOnlyCalls).toEqual([]);
+		expect(multiSpinner.terminals).toHaveLength(3);
+		expect(multiSpinner.terminals.every((t) => t.type === "complete")).toBe(true);
+		expect(multiSpinner.terminals.every((t) => t.message.includes("would be rebased"))).toBe(true);
+	});
+});
+
+describe("update — --jobs validation (WTK-58)", () => {
+	function rebaseScenario(gitOverrides: Partial<FakeGitOptions> = {}) {
+		const fs = createFakeFilesystem({
+			files: { [`${ROOT}/${CONFIG_FILENAME}`]: JSON.stringify({ rootDir: ".worktrees", upstream: false }) },
+			directories: [ROOT, `${ROOT}/.worktrees`, featureWt.path],
+		});
+		const git = createFakeGit({
+			root: ROOT,
+			mainRoot: ROOT,
+			worktrees: [mainWt, featureWt],
+			branches: ["main", "feature"],
+			goneBranches: [],
+			...gitOverrides,
+		});
+		return { fs, git };
+	}
+
+	test("R4b: --jobs abc is rejected as an argument error and runs no rebase", async () => {
+		const rebaseCalls: FakeRebaseCall[] = [];
+		const { fs, git } = rebaseScenario({ rebaseCalls });
+		const { ui } = createFakeUi();
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runUpdate(container, { "dry-run": false, jobs: "abc" });
+
+		expect(code).not.toBe(0);
+		expect(rebaseCalls).toEqual([]);
+	});
+
+	test("R4b: --jobs 0 is rejected as an argument error and runs no rebase", async () => {
+		const rebaseCalls: FakeRebaseCall[] = [];
+		const { fs, git } = rebaseScenario({ rebaseCalls });
+		const { ui } = createFakeUi();
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runUpdate(container, { "dry-run": false, jobs: "0" });
+
+		expect(code).not.toBe(0);
+		expect(rebaseCalls).toEqual([]);
+	});
+
+	test("--jobs 2 is accepted", async () => {
+		const rebaseCalls: FakeRebaseCall[] = [];
+		const { fs, git } = rebaseScenario({ rebaseCalls });
+		const { ui } = createFakeUi();
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runUpdate(container, { "dry-run": false, jobs: "2" });
+
+		expect(code).toBe(0);
+		expect(rebaseCalls.map((c) => c.worktreePath)).toEqual([featureWt.path]);
 	});
 });
 
