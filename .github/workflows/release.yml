@@ -58,3 +58,26 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # changesets/action names the Version PR and its commit statically ("Version Packages") —
+      # its `title`/`commit` inputs can't interpolate the computed version. This repo merges by
+      # rebase, so the Version *commit message* (not the PR title) is what lands on main; rewrite
+      # both to carry the bumped version, e.g. "release: v0.9.0". Runs only in the version phase
+      # (a PR was created/updated), never during publish.
+      - name: Put the bumped version in the release PR title and commit
+        if: steps.changesets.outputs.pullRequestNumber != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.changesets.outputs.pullRequestNumber }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # The action force-pushed changeset-release/main; fetch that exact branch (a shallow
+          # checkout of main doesn't have it) and reset onto it.
+          git fetch --no-tags origin +refs/heads/changeset-release/main:refs/remotes/origin/changeset-release/main
+          git checkout -B changeset-release/main origin/changeset-release/main
+          version="$(node -p "require('./package.json').version")"
+          title="release: v$version"
+          git commit --amend -m "$title"
+          git push --force-with-lease origin changeset-release/main
+          gh pr edit "$PR_NUMBER" --title "$title"
