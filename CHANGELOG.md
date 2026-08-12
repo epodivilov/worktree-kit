@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.0
+
+### Minor Changes
+
+- 27958cc: `wt update` now shows one live progress line per targeted worktree (waiting → rebasing → done/conflict/skipped) instead of a single indeterminate spinner, and rebases independent worktrees concurrently. Concurrency is bounded (default 4) and configurable with a new `--jobs <n>` flag; parent→child ordering, "skip descendants of a failed parent", SIGINT cleanup, and `--dry-run` behavior are all preserved.
+
+### Patch Changes
+
+- 5a960fe: Fix `wt update --dry-run` advancing the default branch. Dry-run now skips the default-branch sync entirely and previews the change ("would be advanced by N commits") instead of fast-forwarding the ref and working tree.
+- 414e38a: Fix upstream candidate detection in fork layouts. `resolveUpstream` now excludes the resolved primary remote instead of the literal `origin`, so `wt init`/`wt update` offer the original project (`origin`) as the upstream when the fork is the primary remote.
 
 ## Bug Fixes
 
@@ -344,7 +354,7 @@
 
 ## Miscellaneous
 
-- add *.local pattern to gitignore
+- add \*.local pattern to gitignore
 
 ## Bug Fixes
 
