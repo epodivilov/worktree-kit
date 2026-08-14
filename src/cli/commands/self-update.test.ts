@@ -281,6 +281,38 @@ describe("downloadBinary retry", () => {
 		});
 	});
 
+	test("R4b: retries a transient 5xx (503) then succeeds", async () => {
+		await withTempTarget(async (target) => {
+			// A 5xx/429 from the release CDN is transient — the same recoverable class
+			// as a thrown socket error, just surfaced as a status. It must be retried,
+			// unlike the deterministic 4xx above.
+			const payload = new TextEncoder().encode("cdn-recovered");
+			let calls = 0;
+			const fetchImpl = (async () => {
+				calls += 1;
+				if (calls === 1) {
+					return {
+						ok: false,
+						status: 503,
+						statusText: "Service Unavailable",
+						headers: new Headers(),
+						body: null,
+					} as unknown as Response;
+				}
+				return okResponse(payload);
+			}) as unknown as typeof fetch;
+
+			const result = await downloadBinary("v1.2.3", "wt-linux-x64", target, {
+				...baseDeps,
+				fetchImpl,
+			});
+
+			expect(R.isOk(result)).toBe(true);
+			expect(calls).toBeGreaterThan(1);
+			expect(await Bun.file(target).text()).toBe("cdn-recovered");
+		});
+	});
+
 	test("truncation: a mid-stream throw then a shorter retry rewrites the file with no leftover bytes", async () => {
 		await withTempTarget(async (target) => {
 			// Attempt 1 streams a long partial chunk, then throws mid-body; attempt 2
