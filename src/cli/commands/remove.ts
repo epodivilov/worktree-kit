@@ -11,6 +11,7 @@ import { RemoveArgsSchema } from "../../domain/schemas/command-args-schema.ts";
 import type { Container } from "../../infrastructure/container.ts";
 import { Result } from "../../shared/result.ts";
 import { GLOBAL_ARGS } from "../global-args.ts";
+import { type LockedWorktree, warnLockedWorktreesGroup } from "../locked-worktrees-warning.ts";
 import { resolveDeleteBranch, resolveDeleteRemoteBranch, resolveWorktreesToRemove } from "../resolve-params.ts";
 import { runCommand } from "../run-command.ts";
 
@@ -186,6 +187,11 @@ export function removeCommand(container: Container) {
 					if (Result.isErr(result)) {
 						spinner.stop(pc.red(`Failed to remove "${displayLabel}"`));
 						ui.error(result.error.message);
+					} else if (result.data.status === "locked") {
+						// Locked is benign — resolve the spinner neutrally and let the warn
+						// group carry the unlock instruction (no red error).
+						spinner.stop(pc.yellow(`Worktree "${displayLabel}" skipped (locked)`));
+						warnLockedWorktreesGroup(ui, [{ branch: wt.branch, path: wt.path }]);
 					} else {
 						const doneMessage = wt.isPrunable
 							? `Orphaned worktree "${wt.path}" pruned`
@@ -245,6 +251,7 @@ export function removeCommand(container: Container) {
 					const ms = ui.createMultiSpinner(keys);
 					const warnings: string[] = [];
 					const unmergedBranches: string[] = [];
+					const lockedWorktrees: LockedWorktree[] = [];
 					let shellUnavailableMessage: string | undefined;
 
 					await Promise.all(
@@ -280,6 +287,13 @@ export function removeCommand(container: Container) {
 							const result = await removeWorktree({ worktree: wt, force }, { git });
 							if (Result.isErr(result)) {
 								ms.fail(wt.path, result.error.message);
+								return;
+							}
+							if (result.data.status === "locked") {
+								// Not a failure — collect for the grouped warning and resolve
+								// the spinner neutrally so it reads as neither ✓ nor ✗.
+								lockedWorktrees.push({ branch: wt.branch, path: wt.path });
+								ms.skip(wt.path, "skipped (locked)");
 								return;
 							}
 
@@ -324,6 +338,10 @@ export function removeCommand(container: Container) {
 					for (const warning of warnings) {
 						ui.warn(warning);
 					}
+
+					// Locked worktrees are expected, not failures — report them as a single
+					// grouped, copy-paste-ready warning (see WTK-62).
+					warnLockedWorktreesGroup(ui, lockedWorktrees);
 
 					// Prompt to force-delete unmerged branches
 					if (unmergedBranches.length > 0) {

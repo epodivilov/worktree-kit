@@ -87,6 +87,7 @@ function createFakeUi(opts: FakeUiOptions = {}): {
 				fail(key: string, message: string) {
 					multiSpinner.terminals.push({ type: "fail", key, message });
 				},
+				skip() {},
 				stop() {},
 			};
 		},

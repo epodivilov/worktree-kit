@@ -62,6 +62,9 @@ export function createClackUiAdapter(options?: { nonInteractive?: boolean }): Ui
 					fail(key: string, message: string) {
 						process.stdout.write(`  ✗  ${key}: ${message}\n`);
 					},
+					skip(key: string, message: string) {
+						process.stdout.write(`  ○  ${key}: ${message}\n`);
+					},
 					stop() {},
 				};
 			}
@@ -70,7 +73,7 @@ export function createClackUiAdapter(options?: { nonInteractive?: boolean }): Ui
 			let frameIndex = 0;
 			let rendered = false;
 
-			const lines = new Map<string, { status: "active" | "done" | "error"; message: string }>();
+			const lines = new Map<string, { status: "active" | "done" | "error" | "skipped"; message: string }>();
 			for (const key of keys) {
 				lines.set(key, { status: "active", message: "waiting" });
 			}
@@ -93,6 +96,9 @@ export function createClackUiAdapter(options?: { nonInteractive?: boolean }): Ui
 					} else if (line.status === "error") {
 						prefix = pc.red("✗");
 						msg = pc.red(line.message);
+					} else if (line.status === "skipped") {
+						prefix = pc.yellow("○");
+						msg = pc.yellow(line.message);
 					} else {
 						prefix = pc.magenta(frame);
 						msg = line.message;
@@ -127,6 +133,13 @@ export function createClackUiAdapter(options?: { nonInteractive?: boolean }): Ui
 					const line = lines.get(key);
 					if (line) {
 						line.status = "error";
+						line.message = message;
+					}
+				},
+				skip(key: string, message: string) {
+					const line = lines.get(key);
+					if (line) {
+						line.status = "skipped";
 						line.message = message;
 					}
 				},
