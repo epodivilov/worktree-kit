@@ -192,8 +192,23 @@ export function updateCommand(container: Container) {
 					throw new CommandError(result.error.message, EXIT_FAILURE);
 				}
 
-				const { defaultBranch, defaultBranchUpdate, defaultBranchBehind, syncedFromUpstream, reports } = result.data;
+				const {
+					defaultBranch,
+					defaultBranchUpdate,
+					defaultBranchBehind,
+					defaultBranchRemoteRef,
+					syncedFromUpstream,
+					reports,
+				} = result.data;
 
+				// Set by the use case for every divergence outcome; the fallback is never
+				// reached for those, it only keeps the label well-formed for other outcomes.
+				const remoteRefLabel = defaultBranchRemoteRef ?? `${defaultBranch}`;
+
+				// The reset / skipped-diverged outcomes are evaluated BEFORE the
+				// `syncedFromUpstream` catch: a skip would otherwise print "synced from …"
+				// and mask the divergence warning, and a reset reads more clearly as its own
+				// line than as a generic upstream sync.
 				if (defaultBranchUpdate === "would-update") {
 					// Dry run: nothing was synced, so preview the advance instead of claiming
 					// a completed action. The commit count is best-effort (see the use case).
@@ -205,6 +220,20 @@ export function updateCommand(container: Container) {
 						const plural = defaultBranchBehind === 1 ? "" : "s";
 						ui.info(`${defaultBranch} would be advanced by ${defaultBranchBehind} commit${plural}`);
 					}
+				} else if (defaultBranchUpdate === "would-reset") {
+					// Dry run: diverged, but every local commit is already upstream.
+					ui.info(`${defaultBranch} has diverged from ${remoteRefLabel} but is fully merged — would be reset to it`);
+				} else if (defaultBranchUpdate === "would-skip-diverged") {
+					// Dry run: genuine local divergence — the sync would be left undone.
+					ui.warn(`${defaultBranch} has diverged from ${remoteRefLabel} with local commits — sync would be skipped`);
+				} else if (defaultBranchUpdate === "reset") {
+					// Diverged but fully merged upstream — reset to the remote (recoverable via reflog).
+					ui.success(`${defaultBranch} reset to ${remoteRefLabel}`);
+				} else if (defaultBranchUpdate === "skipped-diverged") {
+					// Genuine divergence or a dirty worktree — left untouched; feature branches still rebased.
+					ui.warn(
+						`${defaultBranch} has diverged from ${remoteRefLabel} and was left unchanged — resolve it manually, then re-run`,
+					);
 				} else if (syncedFromUpstream) {
 					ui.success(`${defaultBranch} synced from ${syncedFromUpstream}/${defaultBranch}`);
 				} else if (defaultBranchUpdate === "ff-updated") {

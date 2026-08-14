@@ -567,6 +567,39 @@ export function createBunGitAdapter(logger: LoggerPort, primaryRemote: string): 
 			}
 		},
 
+		async resetHardToRemote(worktreePath: string, branch: string, remote?: string): Promise<Result<void, GitError>> {
+			try {
+				const remoteName = remote ?? primaryRemote;
+				const { exitCode, stderr } = await runGit(["-C", worktreePath, "reset", "--hard", `${remoteName}/${branch}`]);
+				if (exitCode !== 0) {
+					return Result.err({
+						code: "MERGE_FAILED",
+						message: stderr || `Failed to reset ${branch} to ${remoteName}/${branch}`,
+					});
+				}
+				return Result.ok(undefined);
+			} catch {
+				return Result.err({ code: "UNKNOWN", message: `Failed to reset ${branch}` });
+			}
+		},
+
+		async forceUpdateBranchRef(branch: string, remote?: string): Promise<Result<void, GitError>> {
+			try {
+				const remoteName = remote ?? primaryRemote;
+				// `+` forces the local ref to whatever the remote holds, overwriting a diverged history.
+				const { exitCode, stderr } = await runGit(["fetch", remoteName, `+${branch}:${branch}`]);
+				if (exitCode !== 0) {
+					return Result.err({
+						code: "MERGE_FAILED",
+						message: stderr || `Failed to force-update ref for ${branch}`,
+					});
+				}
+				return Result.ok(undefined);
+			} catch {
+				return Result.err({ code: "UNKNOWN", message: `Failed to force-update ref for ${branch}` });
+			}
+		},
+
 		async rebase(
 			worktreePath: string,
 			onto: string,
