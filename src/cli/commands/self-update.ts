@@ -108,15 +108,30 @@ function formatMb(bytes: number): string {
 export const MAX_DOWNLOAD_ATTEMPTS = 5;
 
 /**
- * Short, escalating backoff between download retries. `self-update` is
- * interactive, so the total worst case stays bounded (≈2s across all retries)
- * to keep the command from hanging for minutes.
+ * Short, linear escalating backoff between download retries (200ms per prior
+ * attempt). `self-update` is interactive, so the worst case stays bounded
+ * (200+400+600+800 ≈ 2s across all retries) and the command cannot hang for
+ * minutes.
  */
 function downloadBackoffMs(attempt: number): number {
-	return Math.min(attempt * 200, 1000);
+	return attempt * 200;
 }
 
 const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+function toError(err: unknown): Error {
+	return err instanceof Error ? err : new Error(String(err));
+}
+
+/**
+ * A 5xx or 429 from the release CDN (objects.githubusercontent.com) is
+ * transient — the same recoverable class as a thrown socket error, just
+ * surfaced as an HTTP status, so it is retried. Every other non-OK status
+ * (404 missing asset, 403, …) is deterministic and must fail fast.
+ */
+function isTransientStatus(status: number): boolean {
+	return status === 429 || status >= 500;
+}
 
 interface DownloadBinaryDeps {
 	platform: NodeJS.Platform;
@@ -129,6 +144,14 @@ interface DownloadBinaryDeps {
 	sleep?: (ms: number) => Promise<void>;
 }
 
+/**
+ * Outcome of a single download attempt. A `retriable` failure (a thrown
+ * network/connection error, a mid-stream drop, or a transient 5xx/429) is
+ * re-attempted with backoff; a `fatal` failure (a deterministic 4xx, an empty
+ * body, or post-download setup) short-circuits on the first response.
+ */
+type AttemptOutcome = { kind: "ok" } | { kind: "retriable"; error: Error } | { kind: "fatal"; error: Error };
+
 export async function downloadBinary(
 	tag: string,
 	binaryName: string,
@@ -139,37 +162,33 @@ export async function downloadBinary(
 	const url = `https://github.com/${REPO}/releases/download/${tag}/${binaryName}`;
 	const tmpPath = `${targetPath}.tmp`;
 
-	let lastError = new Error("Download failed");
-
-	for (let attempt = 1; attempt <= MAX_DOWNLOAD_ATTEMPTS; attempt++) {
+	// One download attempt: fetch → classify status → stream to the tmp file →
+	// install. Failures are classified as retriable/fatal exactly once here; the
+	// loop below owns the single sleep/continue-vs-return decision.
+	const attemptDownload = async (): Promise<AttemptOutcome> => {
 		let res: Response;
 		try {
 			res = await fetchImpl(url, {
 				redirect: "follow",
-				// Per-attempt timeout: a hung attempt still aborts and then counts as
-				// a failed attempt eligible for retry (TimeoutError is a thrown reject).
+				// Per-attempt timeout: a hung attempt still aborts and then counts as a
+				// failed attempt eligible for retry (TimeoutError is a thrown reject).
 				signal: AbortSignal.timeout(120_000),
 			});
 		} catch (err) {
 			// Network/connection throw: the request never produced a body, so a retry
 			// simply re-issues `fetch` from scratch — no partial file to clean up.
-			if (err instanceof Error && err.name === "TimeoutError") {
-				lastError = new Error("Download timed out");
-			} else {
-				lastError = err instanceof Error ? err : new Error(String(err));
-			}
-			if (attempt < MAX_DOWNLOAD_ATTEMPTS) await sleep(downloadBackoffMs(attempt));
-			continue;
+			const error =
+				err instanceof Error && err.name === "TimeoutError" ? new Error("Download timed out") : toError(err);
+			return { kind: "retriable", error };
 		}
 
-		// A non-OK HTTP status is deterministic (404 missing asset, 403, …): it is
-		// returned, not thrown, and must fail fast without retrying.
 		if (!res.ok) {
-			return R.err(new Error(`Download failed: ${res.status} ${res.statusText}`));
+			const error = new Error(`Download failed: ${res.status} ${res.statusText}`);
+			return isTransientStatus(res.status) ? { kind: "retriable", error } : { kind: "fatal", error };
 		}
 
 		if (!res.body) {
-			return R.err(new Error("Download failed: empty response body"));
+			return { kind: "fatal", error: new Error("Download failed: empty response body") };
 		}
 
 		const total = Number(res.headers.get("content-length") ?? 0);
@@ -194,11 +213,9 @@ export async function downloadBinary(
 			} catch {
 				// ignore cleanup error
 			}
-			// The stream can drop mid-body on the same connection-level fault; treat
-			// it as a retriable failed attempt (the next attempt truncates the tmp).
-			lastError = err instanceof Error ? err : new Error(String(err));
-			if (attempt < MAX_DOWNLOAD_ATTEMPTS) await sleep(downloadBackoffMs(attempt));
-			continue;
+			// A mid-body drop on the same connection-level fault is retriable; the
+			// next attempt truncates the tmp file before rewriting.
+			return { kind: "retriable", error: toError(err) };
 		}
 
 		try {
@@ -210,14 +227,24 @@ export async function downloadBinary(
 				tryRemoveMacosQuarantine(targetPath, { remover: quarantineRemover, warn });
 			}
 		} catch (err) {
-			return R.err(new Error(`Post-download setup failed: ${err instanceof Error ? err.message : String(err)}`));
+			return {
+				kind: "fatal",
+				error: new Error(`Post-download setup failed: ${err instanceof Error ? err.message : String(err)}`),
+			};
 		}
 
-		return R.ok(undefined);
-	}
+		return { kind: "ok" };
+	};
 
-	// Every attempt threw: fail with an error derived from the last attempt.
-	return R.err(lastError);
+	// Bounded retry: `ok`/`fatal` return immediately; a `retriable` attempt backs
+	// off and re-attempts until the bound, then fails with the last attempt's error.
+	for (let attempt = 1; ; attempt++) {
+		const outcome = await attemptDownload();
+		if (outcome.kind === "ok") return R.ok(undefined);
+		if (outcome.kind === "fatal") return R.err(outcome.error);
+		if (attempt >= MAX_DOWNLOAD_ATTEMPTS) return R.err(outcome.error);
+		await sleep(downloadBackoffMs(attempt));
+	}
 }
 
 export function selfUpdateCommand(container: Container) {
