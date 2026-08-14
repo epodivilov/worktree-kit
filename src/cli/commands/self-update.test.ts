@@ -1,8 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Result as R } from "../../shared/result.ts";
 import {
 	detectBinaryName,
+	downloadBinary,
 	interpretXattrRemoval,
+	MAX_DOWNLOAD_ATTEMPTS,
 	type QuarantineRemover,
 	tryRemoveMacosQuarantine,
 	WINDOWS_UNSUPPORTED_MESSAGE,
@@ -169,5 +174,110 @@ describe("tryRemoveMacosQuarantine", () => {
 
 		expect(warnings).toHaveLength(1);
 		expect(warnings[0]).toContain("raw string failure");
+	});
+});
+
+describe("downloadBinary retry", () => {
+	// A connection-level Bun-fetch failure (WTK-59): thrown, not an HTTP status.
+	const SOCKET_ERROR = "The socket connection was closed unexpectedly";
+
+	function okResponse(bytes: Uint8Array): Response {
+		return {
+			ok: true,
+			status: 200,
+			statusText: "OK",
+			headers: new Headers({ "content-length": String(bytes.byteLength) }),
+			body: (async function* () {
+				yield bytes;
+			})(),
+		} as unknown as Response;
+	}
+
+	async function withTempTarget<T>(fn: (target: string) => Promise<T>): Promise<T> {
+		const dir = await mkdtemp(join(tmpdir(), "wtk-self-update-"));
+		try {
+			return await fn(join(dir, "wt"));
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}
+
+	const baseDeps = {
+		platform: "linux" as NodeJS.Platform,
+		quarantineRemover: (() => R.ok(undefined)) as QuarantineRemover,
+		warn: () => {},
+		// No-op backoff: retries/give-up must not run against real timers.
+		sleep: async () => {},
+	};
+
+	test("R1/R2: retries after transient throws, then streams and writes the body", async () => {
+		await withTempTarget(async (target) => {
+			const payload = new TextEncoder().encode("new-binary-contents");
+			const throwsFirst = 2;
+			let calls = 0;
+			const fetchImpl = (async () => {
+				calls += 1;
+				if (calls <= throwsFirst) throw new Error(SOCKET_ERROR);
+				return okResponse(payload);
+			}) as unknown as typeof fetch;
+
+			const result = await downloadBinary("v1.2.3", "wt-linux-x64", target, {
+				...baseDeps,
+				fetchImpl,
+			});
+
+			expect(R.isOk(result)).toBe(true);
+			expect(calls).toBe(throwsFirst + 1);
+			expect(await Bun.file(target).text()).toBe("new-binary-contents");
+		});
+	});
+
+	test("R3: gives up after exactly MAX_DOWNLOAD_ATTEMPTS when every attempt throws", async () => {
+		await withTempTarget(async (target) => {
+			let calls = 0;
+			const fetchImpl = (async () => {
+				calls += 1;
+				throw new Error(SOCKET_ERROR);
+			}) as unknown as typeof fetch;
+
+			const result = await downloadBinary("v1.2.3", "wt-linux-x64", target, {
+				...baseDeps,
+				fetchImpl,
+			});
+
+			expect(R.isErr(result)).toBe(true);
+			if (R.isErr(result)) {
+				// Error is derived from the last attempt.
+				expect(result.error.message).toContain(SOCKET_ERROR);
+			}
+			expect(calls).toBe(MAX_DOWNLOAD_ATTEMPTS);
+		});
+	});
+
+	test("R4: does not retry a non-OK HTTP response (404 missing asset)", async () => {
+		await withTempTarget(async (target) => {
+			let calls = 0;
+			const fetchImpl = (async () => {
+				calls += 1;
+				return {
+					ok: false,
+					status: 404,
+					statusText: "Not Found",
+					headers: new Headers(),
+					body: null,
+				} as unknown as Response;
+			}) as unknown as typeof fetch;
+
+			const result = await downloadBinary("v1.2.3", "wt-linux-x64", target, {
+				...baseDeps,
+				fetchImpl,
+			});
+
+			expect(R.isErr(result)).toBe(true);
+			if (R.isErr(result)) {
+				expect(result.error.message).toContain("404");
+			}
+			expect(calls).toBe(1);
+		});
 	});
 });
