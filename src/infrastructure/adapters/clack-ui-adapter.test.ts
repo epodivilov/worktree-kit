@@ -40,6 +40,16 @@ describe("createMultiSpinner non-TTY", () => {
 		expect(captured[0]).toBe("  ✗  build: exit code 1\n");
 	});
 
+	test("skip() emits a plain-text line with a neutral marker", () => {
+		const ui = createClackUiAdapter();
+		const spinner = ui.createMultiSpinner(["install", "build"]);
+
+		spinner.skip("build", "skipped (locked)");
+
+		expect(captured).toHaveLength(1);
+		expect(captured[0]).toBe("  ○  build: skipped (locked)\n");
+	});
+
 	test("update() produces no output", () => {
 		const ui = createClackUiAdapter();
 		const spinner = ui.createMultiSpinner(["install"]);

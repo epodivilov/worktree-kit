@@ -53,7 +53,7 @@ function createFakeUi(): { ui: UiPort; log: FakeUiLog } {
 			return { start() {}, message() {}, stop() {} };
 		},
 		createMultiSpinner() {
-			return { update() {}, complete() {}, fail() {}, stop() {} };
+			return { update() {}, complete() {}, fail() {}, skip() {}, stop() {} };
 		},
 		async text() {
 			return "";

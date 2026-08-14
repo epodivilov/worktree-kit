@@ -19,8 +19,7 @@ describe("removeWorktree", () => {
 		const result = await removeWorktree({ worktree: feature }, { git });
 
 		const output = expectOk(result);
-		expect(output.removedPath).toBe("/repo-feature");
-		expect(output.pruned).toBe(false);
+		expect(output).toEqual({ status: "removed", removedPath: "/repo-feature" });
 
 		const remaining = expectOk(await git.listWorktrees());
 		expect(remaining.find((w) => w.path === "/repo-feature")).toBeUndefined();
@@ -46,8 +45,7 @@ describe("removeWorktree", () => {
 
 		const result = await removeWorktree({ worktree: orphan }, { git });
 		const output = expectOk(result);
-		expect(output.removedPath).toBe("/repo-orphan");
-		expect(output.pruned).toBe(true);
+		expect(output).toEqual({ status: "pruned", removedPath: "/repo-orphan" });
 
 		const remaining = expectOk(await git.listWorktrees());
 		expect(remaining.find((w) => w.path === "/repo-orphan")).toBeUndefined();
@@ -65,23 +63,24 @@ describe("removeWorktree", () => {
 
 		const result = await removeWorktree({ worktree: orphan }, { git });
 		const output = expectOk(result);
-		expect(output.removedPath).toBe("/repo-detached");
-		expect(output.pruned).toBe(true);
+		expect(output).toEqual({ status: "pruned", removedPath: "/repo-detached" });
 	});
 
-	test("returns actionable error with unlock command when worktree is locked", async () => {
+	test("classifies a locked worktree as a skipped outcome carrying path + reason", async () => {
 		const git = createFakeGit({
 			worktrees: [main, feature],
 			lockedWorktrees: new Map([[feature.path, "claude agent task-xyz (pid 1234)"]]),
 		});
 
 		const result = await removeWorktree({ worktree: feature }, { git });
-		const error = expectErr(result);
+		const output = expectOk(result);
 
-		expect(error.message).toContain(feature.path);
-		expect(error.message).toContain(`git worktree unlock "${feature.path}"`);
-		expect(error.message).toContain("claude agent task-xyz (pid 1234)");
-		expect(error.message).toContain("retry wt remove");
+		// A lock is a distinct, non-error outcome the CLI can group — not a removal failure.
+		expect(output).toEqual({
+			status: "locked",
+			path: feature.path,
+			reason: "claude agent task-xyz (pid 1234)",
+		});
 
 		// Locked worktree must not be removed.
 		const remaining = expectOk(await git.listWorktrees());

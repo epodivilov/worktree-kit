@@ -25,6 +25,7 @@ interface MultiSpinnerCall {
 interface FakeMultiSpinnerLog {
 	complete: MultiSpinnerCall[];
 	fail: MultiSpinnerCall[];
+	skip: MultiSpinnerCall[];
 }
 
 interface FakeSpinnerLog {
@@ -41,7 +42,7 @@ function createFakeUi(opts: { nonInteractive?: boolean; confirm?: boolean; multi
 	confirmMessages: string[];
 } {
 	const log: FakeUiLog = { info: [], success: [], warn: [], error: [], outro: [] };
-	const multiSpinnerLog: FakeMultiSpinnerLog = { complete: [], fail: [] };
+	const multiSpinnerLog: FakeMultiSpinnerLog = { complete: [], fail: [], skip: [] };
 	const spinnerLog: FakeSpinnerLog = { start: [], message: [], stop: [] };
 	const confirmMessages: string[] = [];
 
@@ -87,6 +88,9 @@ function createFakeUi(opts: { nonInteractive?: boolean; confirm?: boolean; multi
 				},
 				fail(key: string, message: string) {
 					multiSpinnerLog.fail.push({ key, message });
+				},
+				skip(key: string, message: string) {
+					multiSpinnerLog.skip.push({ key, message });
 				},
 				stop() {},
 			};
@@ -493,6 +497,162 @@ describe("remove — single path force on unmerged branch", () => {
 		const branches = await git.listBranches();
 		expect(branches.success && branches.data.includes("feature")).toBe(false);
 
+		expect(code).toBe(0);
+	});
+});
+
+describe("remove — locked worktrees reported as a skipped group", () => {
+	const detachedWt: Worktree = {
+		path: `${ROOT}/.worktrees/detached`,
+		branch: "",
+		head: "ddd",
+		isMain: false,
+		isPrunable: false,
+	};
+
+	// R1: a locked worktree must not be a multi-spinner `fail`, the removable one is
+	// still removed, and the command exits success.
+	test("R1: locked worktree is skipped (not failed), removable one removed, exit 0", async () => {
+		const { fs, git } = multiRemoveScenario({
+			lockedWorktrees: new Map([[feature2Wt.path, "kepler:task:abc"]]),
+		});
+		const { ui, multiSpinnerLog } = createFakeUi({
+			multiselectResult: [featureWt.path, feature2Wt.path],
+		});
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runRemove(container, removeArgs);
+
+		// Removable worktree reported removed.
+		expect(multiSpinnerLog.complete.some((c) => c.key === featureWt.path)).toBe(true);
+		// Locked worktree NOT rendered as a failure.
+		expect(multiSpinnerLog.fail.some((c) => c.key === feature2Wt.path)).toBe(false);
+		// Locked worktree resolved as a neutral skip.
+		expect(multiSpinnerLog.skip.some((c) => c.key === feature2Wt.path)).toBe(true);
+		expect(code).toBe(0);
+	});
+
+	// R2: two locked worktrees (one branch, one detached) → single warn group with a
+	// count header, each name + unlock command, and a re-run hint.
+	test("R2: two locked worktrees → single warn group (count, names, unlock commands, re-run hint)", async () => {
+		const fs = createFakeFilesystem({
+			files: { [`${ROOT}/${CONFIG_FILENAME}`]: JSON.stringify({ rootDir: ".worktrees" }) },
+			directories: [ROOT, `${ROOT}/.worktrees`, featureWt.path, detachedWt.path],
+		});
+		const git = createFakeGit({
+			root: ROOT,
+			mainRoot: ROOT,
+			worktrees: [mainWt, featureWt, detachedWt],
+			branches: ["main", "feature"],
+			mergedBranches: ["feature"],
+			lockedWorktrees: new Map([
+				[featureWt.path, "kepler:task:abc"],
+				[detachedWt.path, ""],
+			]),
+		});
+		const { ui, log } = createFakeUi({ multiselectResult: [featureWt.path, detachedWt.path] });
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runRemove(container, removeArgs);
+
+		// Exactly one warn group carries the unlock commands.
+		const groups = log.warn.filter((m) => m.includes("git worktree unlock"));
+		expect(groups).toHaveLength(1);
+		const group = groups[0] as string;
+
+		// Header states the count.
+		expect(group).toContain("2");
+		// Named worktree with its branch + unlock command.
+		expect(group).toContain("feature");
+		expect(group).toContain(`git worktree unlock "${featureWt.path}"`);
+		// Detached worktree rendered as "<detached> (path)" + unlock command.
+		expect(group).toContain(`<detached> (${detachedWt.path})`);
+		expect(group).toContain(`git worktree unlock "${detachedWt.path}"`);
+		// Re-run hint.
+		expect(group).toContain("re-run wt remove");
+		expect(code).toBe(0);
+	});
+
+	// R3: a removed, a locked, and a non-lock removal failure coexist independently.
+	test("R3: removed shows success, other-failure shows error, locked appears only in the warn group", async () => {
+		const orphanWt: Worktree = {
+			path: `${ROOT}/.worktrees/orphan`,
+			branch: "orphan",
+			head: "eee",
+			isMain: false,
+			isPrunable: true,
+		};
+		const fs = createFakeFilesystem({
+			files: { [`${ROOT}/${CONFIG_FILENAME}`]: JSON.stringify({ rootDir: ".worktrees" }) },
+			directories: [ROOT, `${ROOT}/.worktrees`, featureWt.path, feature2Wt.path],
+		});
+		const git = createFakeGit({
+			root: ROOT,
+			mainRoot: ROOT,
+			worktrees: [mainWt, featureWt, feature2Wt, orphanWt],
+			branches: ["main", "feature", "feature2", "orphan"],
+			mergedBranches: ["feature", "feature2", "orphan"],
+			lockedWorktrees: new Map([[feature2Wt.path, "kepler:task:xyz"]]),
+			pruneFailPaths: new Map([[orphanWt.path, "prune boom"]]),
+		});
+		const { ui, log, multiSpinnerLog } = createFakeUi({
+			multiselectResult: [featureWt.path, feature2Wt.path, orphanWt.path],
+		});
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runRemove(container, removeArgs);
+
+		// Removed one: success.
+		expect(multiSpinnerLog.complete.some((c) => c.key === featureWt.path)).toBe(true);
+		// Other-failure (prune boom): rendered as a fail.
+		expect(multiSpinnerLog.fail.some((c) => c.key === orphanWt.path)).toBe(true);
+		// Locked one: not success, not fail — only a skip + the warn group.
+		expect(multiSpinnerLog.complete.some((c) => c.key === feature2Wt.path)).toBe(false);
+		expect(multiSpinnerLog.fail.some((c) => c.key === feature2Wt.path)).toBe(false);
+		expect(multiSpinnerLog.skip.some((c) => c.key === feature2Wt.path)).toBe(true);
+
+		const group = log.warn.find((m) => m.includes("git worktree unlock"));
+		expect(group).toBeDefined();
+		expect(group as string).toContain(`git worktree unlock "${feature2Wt.path}"`);
+		expect(code).toBe(0);
+	});
+
+	// R4: a single selected locked worktree uses the same warn group, never ui.error.
+	test("R4: single locked worktree → warn group format, not ui.error", async () => {
+		const fs = createFakeFilesystem({
+			files: { [`${ROOT}/${CONFIG_FILENAME}`]: JSON.stringify({ rootDir: ".worktrees" }) },
+			directories: [ROOT, `${ROOT}/.worktrees`, featureWt.path],
+		});
+		const git = createFakeGit({
+			root: ROOT,
+			mainRoot: ROOT,
+			worktrees: [mainWt, featureWt],
+			branches: ["main", "feature"],
+			mergedBranches: ["feature"],
+			lockedWorktrees: new Map([[featureWt.path, "kepler:task:single"]]),
+		});
+		const { ui, log } = createFakeUi();
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runRemove(container, {
+			branch: "feature",
+			"delete-branch": true,
+			yes: true,
+			force: false,
+			"dry-run": false,
+		});
+
+		// Never rendered as a red error.
+		expect(log.error).toHaveLength(0);
+
+		// Same warn group format (header + name + unlock command + re-run hint).
+		const group = log.warn.find((m) => m.includes("git worktree unlock"));
+		expect(group).toBeDefined();
+		const g = group as string;
+		expect(g).toContain("1");
+		expect(g).toContain("feature");
+		expect(g).toContain(`git worktree unlock "${featureWt.path}"`);
+		expect(g).toContain("re-run wt remove");
 		expect(code).toBe(0);
 	});
 });

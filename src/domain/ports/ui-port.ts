@@ -8,6 +8,8 @@ export interface MultiSpinnerHandle {
 	update(key: string, message: string): void;
 	complete(key: string, message: string): void;
 	fail(key: string, message: string): void;
+	/** Resolve a worktree as neither success nor failure (neutral "skipped" state). */
+	skip(key: string, message: string): void;
 	stop(): void;
 }
 

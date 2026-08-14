@@ -92,7 +92,7 @@ function createFakeUi(opts: FakeUiOptions = {}): {
 			};
 		},
 		createMultiSpinner() {
-			return { update() {}, complete() {}, fail() {}, stop() {} };
+			return { update() {}, complete() {}, fail() {}, skip() {}, stop() {} };
 		},
 		async text() {
 			return opts.text ?? "";

@@ -67,7 +67,7 @@ function createFakeUi(opts: { nonInteractive?: boolean; confirm?: boolean | symb
 			return { start() {}, message() {}, stop() {} };
 		},
 		createMultiSpinner() {
-			return { update() {}, complete() {}, fail() {}, stop() {} };
+			return { update() {}, complete() {}, fail() {}, skip() {}, stop() {} };
 		},
 		async text() {
 			return "";
