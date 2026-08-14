@@ -280,4 +280,45 @@ describe("downloadBinary retry", () => {
 			expect(calls).toBe(1);
 		});
 	});
+
+	test("truncation: a mid-stream throw then a shorter retry rewrites the file with no leftover bytes", async () => {
+		await withTempTarget(async (target) => {
+			// Attempt 1 streams a long partial chunk, then throws mid-body; attempt 2
+			// returns a shorter, complete body. Bun's FileSink overwrites from offset
+			// 0 without truncating, so the retry MUST reset the .tmp file first — else
+			// the shorter payload leaves the tail of the aborted attempt behind and
+			// silently corrupts the binary. Asserting exact bytes keeps that reset
+			// (self-update.ts) load-bearing: this test goes red if it is removed.
+			const partial = new Uint8Array(40).fill(0x41); // longer than the retry payload
+			const finalPayload = new TextEncoder().encode("short-payload");
+			let calls = 0;
+			const fetchImpl = (async () => {
+				calls += 1;
+				if (calls === 1) {
+					return {
+						ok: true,
+						status: 200,
+						statusText: "OK",
+						headers: new Headers({ "content-length": String(partial.byteLength) }),
+						body: (async function* () {
+							yield partial;
+							throw new Error(SOCKET_ERROR);
+						})(),
+					} as unknown as Response;
+				}
+				return okResponse(finalPayload);
+			}) as unknown as typeof fetch;
+
+			const result = await downloadBinary("v1.2.3", "wt-linux-x64", target, {
+				...baseDeps,
+				fetchImpl,
+			});
+
+			expect(R.isOk(result)).toBe(true);
+			expect(calls).toBe(2);
+			const written = new Uint8Array(await Bun.file(target).arrayBuffer());
+			expect(written.byteLength).toBe(finalPayload.byteLength);
+			expect(written).toEqual(finalPayload);
+		});
+	});
 });
