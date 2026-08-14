@@ -461,6 +461,43 @@ describe("update — dry-run default-branch preview", () => {
 	});
 });
 
+describe("update — default-branch divergence rendering (WTK-61)", () => {
+	const CONFIG_NO_UPSTREAM_OPTOUT = JSON.stringify({ rootDir: ".worktrees", upstream: false }, null, 2);
+
+	test("R7: diverged + fully-merged default branch → distinct 'reset to <remote>/<branch>' line", async () => {
+		// mergeFFOnly fails (diverged); every local commit is cherry-picked upstream → safe reset.
+		const { fs, git } = upstreamScenario(CONFIG_NO_UPSTREAM_OPTOUT, {
+			mergeFFOnlyFails: true,
+			commitCountMap: new Map([["origin/main..main", 1]]),
+			revListMap: new Map([["origin/main..main", ["c1"]]]),
+			revListCherryPickMap: new Map([["origin/main...main", []]]),
+		});
+		const { ui, log } = createFakeUi();
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runUpdate(container, { "dry-run": false });
+
+		expect(code).toBe(0);
+		expect(log.success.some((m) => m.includes("reset to origin/main"))).toBe(true);
+	});
+
+	test("R7: genuinely diverged default branch → warning line, run still succeeds", async () => {
+		const { fs, git } = upstreamScenario(CONFIG_NO_UPSTREAM_OPTOUT, {
+			mergeFFOnlyFails: true,
+			commitCountMap: new Map([["origin/main..main", 2]]),
+			revListMap: new Map([["origin/main..main", ["c2", "c1"]]]),
+			revListCherryPickMap: new Map([["origin/main...main", ["c2", "c1"]]]),
+		});
+		const { ui, log } = createFakeUi();
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runUpdate(container, { "dry-run": false });
+
+		expect(code).toBe(0);
+		expect(log.warn.some((m) => m.includes("diverged"))).toBe(true);
+	});
+});
+
 describe("update — per-worktree progress (WTK-58)", () => {
 	// main ← a (conflicts), a ← b (skipped as a's descendant), main ← c (rebased).
 	function stackScenario(gitOverrides: Partial<FakeGitOptions> = {}) {

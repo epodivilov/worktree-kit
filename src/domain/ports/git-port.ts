@@ -49,6 +49,18 @@ export interface GitPort {
 	mergeFFOnly(worktreePath: string, branch: string, remote?: string): Promise<Result<void, GitError>>;
 	/** Fast-forward a local branch ref that is not checked out anywhere, from `remote` (default: primary remote). */
 	updateBranchRef(branch: string, remote?: string): Promise<Result<void, GitError>>;
+	/**
+	 * Hard-reset a checked-out branch to its remote-tracking ref (`<remote>/<branch>`), discarding
+	 * local commits and working-tree changes. Used to realign a diverged-but-fully-merged default
+	 * branch; the discarded commits stay reachable via reflog. `remote` defaults to the primary remote.
+	 */
+	resetHardToRemote(worktreePath: string, branch: string, remote?: string): Promise<Result<void, GitError>>;
+	/**
+	 * Force-update a local branch ref that is not checked out anywhere to `<remote>/<branch>`,
+	 * discarding diverged local commits. The ref-path counterpart of {@link resetHardToRemote}.
+	 * `remote` defaults to the primary remote.
+	 */
+	forceUpdateBranchRef(branch: string, remote?: string): Promise<Result<void, GitError>>;
 	rebase(
 		worktreePath: string,
 		onto: string,

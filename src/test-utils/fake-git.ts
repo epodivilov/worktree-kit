@@ -33,6 +33,8 @@ export interface FakeGitOptions {
 	setRemoteUrlCalls?: { name: string; url: string }[];
 	mergeFFOnlyCalls?: { worktreePath: string; branch: string; remote: string }[];
 	updateBranchRefCalls?: { branch: string; remote: string }[];
+	resetHardToRemoteCalls?: { worktreePath: string; branch: string; remote: string }[];
+	forceUpdateBranchRefCalls?: { branch: string; remote: string }[];
 	mergeBaseMap?: Map<string, string>;
 	commitCountMap?: Map<string, number>;
 	trackedPaths?: Set<string>;
@@ -274,6 +276,20 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 			if (mergeFFOnlyFails) {
 				return Result.err({ code: "MERGE_FAILED", message: "Cannot update ref" });
 			}
+			return Result.ok(undefined);
+		},
+
+		async resetHardToRemote(
+			worktreePath: string,
+			branch: string,
+			remote = primaryRemote,
+		): Promise<Result<void, GitError>> {
+			options.resetHardToRemoteCalls?.push({ worktreePath, branch, remote });
+			return Result.ok(undefined);
+		},
+
+		async forceUpdateBranchRef(branch: string, remote = primaryRemote): Promise<Result<void, GitError>> {
+			options.forceUpdateBranchRefCalls?.push({ branch, remote });
 			return Result.ok(undefined);
 		},
 

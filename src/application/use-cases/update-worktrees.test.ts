@@ -93,12 +93,34 @@ describe("updateWorktrees", () => {
 		expect(error.message).toContain("Fetch failed");
 	});
 
-	test("ff-only failure — returns error, no rebase", async () => {
-		const git = createFakeGit({ worktrees: [mainWt, featureA], mergeFFOnlyFails: true });
+	test("genuine default-branch divergence — non-fatal skip, feature branches still rebase (R2, R4)", async () => {
+		// A diverged default branch whose local commits are NOT all upstream (mergeFFOnly
+		// fails + findMergedPrefix does not report "fully") must no longer abort the run.
+		const worktrees = [mainWt, featureA];
+		const base = flatBranchesConfig(worktrees);
+		base.commitCountMap.set("origin/main..main", 2);
+		const resetHardToRemoteCalls: { worktreePath: string; branch: string; remote: string }[] = [];
+		const forceUpdateBranchRefCalls: { branch: string; remote: string }[] = [];
+		const git = createFakeGit({
+			worktrees,
+			mergeFFOnlyFails: true,
+			resetHardToRemoteCalls,
+			forceUpdateBranchRefCalls,
+			revListMap: new Map([["origin/main..main", ["c2", "c1"]]]),
+			revListCherryPickMap: new Map([["origin/main...main", ["c2", "c1"]]]),
+			...base,
+		});
+
 		const result = await updateWorktrees({ dryRun: false }, { git });
 
-		const error = expectErr(result);
-		expect(error.message).toContain("Failed to fast-forward");
+		// R4: the run does not abort — it resolves ok, not err.
+		const output = expectOk(result);
+		expect(output.defaultBranchUpdate).toBe("skipped-diverged");
+		// R2: no reset primitive is called for a genuine divergence.
+		expect(resetHardToRemoteCalls).toEqual([]);
+		expect(forceUpdateBranchRefCalls).toEqual([]);
+		// R4: every feature worktree still has a report — the run rebased them.
+		expect(output.reports.find((r) => r.branch === "feature-a")?.result.status).toBe("rebased");
 	});
 
 	test("dirty worktree — rebased via WIP commit", async () => {
@@ -1378,6 +1400,225 @@ describe("updateWorktrees — dry-run leaves the default branch untouched (WTK-5
 		expect(output.syncedFromUpstream).toBeUndefined();
 		expect(output.defaultBranchUpdate).toBe("would-update");
 		expect(output.defaultBranchBehind).toBe(2);
+		expect(mergeFFOnlyCalls).toEqual([]);
+	});
+});
+
+// WTK-61: a diverged default branch no longer aborts `wt update`. When every local
+// default-branch commit is already upstream (squash-merge) it is reset to the remote;
+// genuine local work is left untouched with a warning. Feature branches rebase either way.
+describe("updateWorktrees — default-branch divergence (WTK-61)", () => {
+	type ResetCall = { worktreePath: string; branch: string; remote: string };
+	type ForceRefCall = { branch: string; remote: string };
+
+	/** Wire the fake so `findMergedPrefix(base=<ref>, feature=main)` reports fully-merged (all cherry-picked). */
+	function fullyMergedMaps(ref: string): {
+		revListMap: Map<string, string[]>;
+		revListCherryPickMap: Map<string, string[]>;
+	} {
+		return {
+			revListMap: new Map([[`${ref}..main`, ["c1"]]]),
+			revListCherryPickMap: new Map([[`${ref}...main`, []]]),
+		};
+	}
+
+	/** Wire the fake so the divergence is genuine (no commit is cherry-picked upstream). */
+	function genuineDivergenceMaps(ref: string): {
+		revListMap: Map<string, string[]>;
+		revListCherryPickMap: Map<string, string[]>;
+	} {
+		return {
+			revListMap: new Map([[`${ref}..main`, ["c2", "c1"]]]),
+			revListCherryPickMap: new Map([[`${ref}...main`, ["c2", "c1"]]]),
+		};
+	}
+
+	test("R1/R5(worktree): fully-merged divergence with a worktree → hard-resets the worktree, run continues", async () => {
+		const worktrees = [mainWt, featureA];
+		const base = flatBranchesConfig(worktrees);
+		base.commitCountMap.set("origin/main..main", 1);
+		const resetHardToRemoteCalls: ResetCall[] = [];
+		const forceUpdateBranchRefCalls: ForceRefCall[] = [];
+		const git = createFakeGit({
+			worktrees,
+			mergeFFOnlyFails: true,
+			resetHardToRemoteCalls,
+			forceUpdateBranchRefCalls,
+			...fullyMergedMaps("origin/main"),
+			...base,
+		});
+
+		const output = expectOk(await updateWorktrees({ dryRun: false }, { git }));
+
+		expect(output.defaultBranchUpdate).toBe("reset");
+		expect(output.defaultBranchRemoteRef).toBe("origin/main");
+		// The worktree hard-reset variant runs with the worktree path; the ref variant does not.
+		expect(resetHardToRemoteCalls).toEqual([{ worktreePath: "/repo", branch: "main", remote: "origin" }]);
+		expect(forceUpdateBranchRefCalls).toEqual([]);
+		// Feature branches still rebase.
+		expect(output.reports.find((r) => r.branch === "feature-a")?.result.status).toBe("rebased");
+	});
+
+	test("R5(ref): fully-merged divergence with no worktree → force-updates the ref, no working-tree reset", async () => {
+		const worktrees = [featureA];
+		const base = flatBranchesConfig(worktrees);
+		base.commitCountMap.set("origin/main..main", 1);
+		const resetHardToRemoteCalls: ResetCall[] = [];
+		const forceUpdateBranchRefCalls: ForceRefCall[] = [];
+		const git = createFakeGit({
+			worktrees,
+			mergeFFOnlyFails: true,
+			resetHardToRemoteCalls,
+			forceUpdateBranchRefCalls,
+			...fullyMergedMaps("origin/main"),
+			...base,
+		});
+
+		const output = expectOk(await updateWorktrees({ dryRun: false }, { git }));
+
+		expect(output.defaultBranchUpdate).toBe("reset");
+		expect(forceUpdateBranchRefCalls).toEqual([{ branch: "main", remote: "origin" }]);
+		expect(resetHardToRemoteCalls).toEqual([]);
+		expect(output.reports.find((r) => r.branch === "feature-a")?.result.status).toBe("rebased");
+	});
+
+	test("R5(upstream): the reset target uses <upstream>/<defaultBranch>", async () => {
+		const worktrees = [mainWt, featureA];
+		const base = flatBranchesConfig(worktrees);
+		base.commitCountMap.set("upstream/main..main", 1);
+		const resetHardToRemoteCalls: ResetCall[] = [];
+		const git = createFakeGit({
+			worktrees,
+			mergeFFOnlyFails: true,
+			resetHardToRemoteCalls,
+			...fullyMergedMaps("upstream/main"),
+			...base,
+		});
+
+		const output = expectOk(await updateWorktrees({ dryRun: false, upstream: "upstream" }, { git }));
+
+		expect(output.defaultBranchUpdate).toBe("reset");
+		expect(output.defaultBranchRemoteRef).toBe("upstream/main");
+		expect(resetHardToRemoteCalls).toEqual([{ worktreePath: "/repo", branch: "main", remote: "upstream" }]);
+	});
+
+	test("R3: dirty default-branch worktree → no reset even when fully merged, skipped-diverged", async () => {
+		const worktrees = [mainWt, featureA];
+		const base = flatBranchesConfig(worktrees);
+		base.commitCountMap.set("origin/main..main", 1);
+		const resetHardToRemoteCalls: ResetCall[] = [];
+		const git = createFakeGit({
+			worktrees,
+			mergeFFOnlyFails: true,
+			dirtyWorktrees: new Set(["/repo"]),
+			resetHardToRemoteCalls,
+			...fullyMergedMaps("origin/main"),
+			...base,
+		});
+
+		const output = expectOk(await updateWorktrees({ dryRun: false }, { git }));
+
+		expect(output.defaultBranchUpdate).toBe("skipped-diverged");
+		expect(resetHardToRemoteCalls).toEqual([]);
+		expect(output.reports.find((r) => r.branch === "feature-a")?.result.status).toBe("rebased");
+	});
+
+	test("R4(fork skip): upstream + genuine divergence → ok, no syncedFromUpstream, no default-branch hooks", async () => {
+		const worktrees = [mainWt, featureA];
+		const base = flatBranchesConfig(worktrees);
+		base.commitCountMap.set("upstream/main..main", 2);
+		const git = createFakeGit({
+			worktrees,
+			mergeFFOnlyFails: true,
+			...genuineDivergenceMaps("upstream/main"),
+			...base,
+		});
+		const shell = createFakeShell();
+
+		const output = expectOk(
+			await updateWorktrees(
+				{ dryRun: false, upstream: "upstream", postUpdateHooks: ["git push"], repoRoot: "/repo" },
+				{ git, shell },
+			),
+		);
+
+		expect(output.defaultBranchUpdate).toBe("skipped-diverged");
+		expect(output.syncedFromUpstream).toBeUndefined();
+		expect(output.reports.find((r) => r.branch === "main")?.hookNotifications ?? []).toHaveLength(0);
+		// No default-branch post-update hook ran in the main worktree.
+		expect(shell.calls.find((c) => c.options.cwd === "/repo")).toBeUndefined();
+	});
+
+	test("R4(fork skip, dirty): upstream + dirty worktree → ok, no syncedFromUpstream, no default-branch hooks", async () => {
+		const worktrees = [mainWt, featureA];
+		const base = flatBranchesConfig(worktrees);
+		base.commitCountMap.set("upstream/main..main", 1);
+		const git = createFakeGit({
+			worktrees,
+			mergeFFOnlyFails: true,
+			dirtyWorktrees: new Set(["/repo"]),
+			...fullyMergedMaps("upstream/main"),
+			...base,
+		});
+		const shell = createFakeShell();
+
+		const output = expectOk(
+			await updateWorktrees(
+				{ dryRun: false, upstream: "upstream", postUpdateHooks: ["git push"], repoRoot: "/repo" },
+				{ git, shell },
+			),
+		);
+
+		expect(output.defaultBranchUpdate).toBe("skipped-diverged");
+		expect(output.syncedFromUpstream).toBeUndefined();
+		expect(shell.calls.find((c) => c.options.cwd === "/repo")).toBeUndefined();
+	});
+
+	test("R6(would-reset): dry-run diverged + fully merged → would-reset, no mutation", async () => {
+		const worktrees = [mainWt, featureA];
+		const base = flatBranchesConfig(worktrees);
+		base.commitCountMap.set("main..main@{u}", 1);
+		base.commitCountMap.set("main@{u}..main", 1);
+		const mergeFFOnlyCalls: { worktreePath: string; branch: string; remote: string }[] = [];
+		const updateBranchRefCalls: ForceRefCall[] = [];
+		const resetHardToRemoteCalls: ResetCall[] = [];
+		const forceUpdateBranchRefCalls: ForceRefCall[] = [];
+		const git = createFakeGit({
+			worktrees,
+			mergeFFOnlyCalls,
+			updateBranchRefCalls,
+			resetHardToRemoteCalls,
+			forceUpdateBranchRefCalls,
+			...fullyMergedMaps("main@{u}"),
+			...base,
+		});
+
+		const output = expectOk(await updateWorktrees({ dryRun: true }, { git }));
+
+		expect(output.defaultBranchUpdate).toBe("would-reset");
+		// No mutating primitive runs under dry-run.
+		expect(mergeFFOnlyCalls).toEqual([]);
+		expect(updateBranchRefCalls).toEqual([]);
+		expect(resetHardToRemoteCalls).toEqual([]);
+		expect(forceUpdateBranchRefCalls).toEqual([]);
+	});
+
+	test("R6(would-skip): dry-run genuinely diverged → would-skip-diverged, no mutation", async () => {
+		const worktrees = [mainWt, featureA];
+		const base = flatBranchesConfig(worktrees);
+		base.commitCountMap.set("main..main@{u}", 2);
+		base.commitCountMap.set("main@{u}..main", 2);
+		const mergeFFOnlyCalls: { worktreePath: string; branch: string; remote: string }[] = [];
+		const git = createFakeGit({
+			worktrees,
+			mergeFFOnlyCalls,
+			...genuineDivergenceMaps("main@{u}"),
+			...base,
+		});
+
+		const output = expectOk(await updateWorktrees({ dryRun: true }, { git }));
+
+		expect(output.defaultBranchUpdate).toBe("would-skip-diverged");
 		expect(mergeFFOnlyCalls).toEqual([]);
 	});
 });

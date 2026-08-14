@@ -966,6 +966,50 @@ describe("BunGitAdapter", () => {
 		});
 	});
 
+	describe("default-branch divergence reset primitives (WTK-61)", () => {
+		// Diverge the checkout's local main from origin/main: a second clone advances the
+		// remote, the local repo commits something else, then fetches so origin/main is known.
+		async function divergeLocalMain(fixture: Awaited<ReturnType<typeof createRemoteFixture>>): Promise<string> {
+			const clonePath = await fixture.cloneSecond();
+			const remoteSha = await pushCommit(clonePath, "remote.txt", "remote content");
+			await Bun.write(join(fixture.repoPath, "local.txt"), "local content");
+			await Bun.$`git -C ${fixture.repoPath} add .`.quiet();
+			await Bun.$`git -C ${fixture.repoPath} commit -m "local diverges"`.quiet();
+			await Bun.$`git -C ${fixture.repoPath} fetch origin`.quiet();
+			return remoteSha;
+		}
+
+		test("resetHardToRemote moves the checked-out branch and working tree to the remote ref", async () => {
+			await using tmp = await createTempDir();
+			const fixture = await createRemoteFixture(tmp.path);
+			const remoteSha = await divergeLocalMain(fixture);
+
+			expectOk(await git.resetHardToRemote(fixture.repoPath, "main", "origin"));
+
+			const localSha = (await Bun.$`git -C ${fixture.repoPath} rev-parse main`.quiet().text()).trim();
+			expect(localSha).toBe(remoteSha);
+			// The working tree matches the remote: its file is present, the diverged local file is gone.
+			expect(await Bun.file(join(fixture.repoPath, "remote.txt")).exists()).toBe(true);
+			expect(await Bun.file(join(fixture.repoPath, "local.txt")).exists()).toBe(false);
+			expect(expectOk(await git.isDirty(fixture.repoPath))).toBe(false);
+		});
+
+		test("forceUpdateBranchRef force-updates a non-checked-out branch ref to the remote", async () => {
+			await using tmp = await createTempDir();
+			const fixture = await createRemoteFixture(tmp.path);
+			const remoteSha = await divergeLocalMain(fixture);
+			// Move main out of the way so it is checked out nowhere.
+			await Bun.$`git -C ${fixture.repoPath} checkout -q -b scratch`.quiet();
+
+			await withCwd(fixture.repoPath, async () => {
+				expectOk(await git.forceUpdateBranchRef("main", "origin"));
+			});
+
+			const localSha = (await Bun.$`git -C ${fixture.repoPath} rev-parse refs/heads/main`.quiet().text()).trim();
+			expect(localSha).toBe(remoteSha);
+		});
+	});
+
 	// === Injected remote name ===
 	//
 	// The adapter never resolves the remote itself: the primary remote name is
