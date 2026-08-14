@@ -97,77 +97,127 @@ function formatMb(bytes: number): string {
 	return (bytes / 1024 / 1024).toFixed(1);
 }
 
+/**
+ * Maximum number of binary-download attempts before `self-update` gives up.
+ *
+ * Bun 1.3.x throws a connection-level `fetch` error ("The socket connection was
+ * closed unexpectedly") intermittently on the initial github.com 302 hop
+ * (WTK-59). Each `self-update` is a fresh one-shot request, so a bounded retry
+ * lets a transient throw recover instead of failing the whole command.
+ */
+export const MAX_DOWNLOAD_ATTEMPTS = 5;
+
+/**
+ * Short, escalating backoff between download retries. `self-update` is
+ * interactive, so the total worst case stays bounded (≈2s across all retries)
+ * to keep the command from hanging for minutes.
+ */
+function downloadBackoffMs(attempt: number): number {
+	return Math.min(attempt * 200, 1000);
+}
+
+const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
 interface DownloadBinaryDeps {
 	platform: NodeJS.Platform;
 	quarantineRemover: QuarantineRemover;
 	warn: (message: string) => void;
 	onProgress?: (downloaded: number, total: number) => void;
+	/** Injectable for tests; defaults to the global `fetch`. */
+	fetchImpl?: typeof fetch;
+	/** Injectable backoff sleep; tests pass a no-op to avoid real timers. */
+	sleep?: (ms: number) => Promise<void>;
 }
 
-async function downloadBinary(
+export async function downloadBinary(
 	tag: string,
 	binaryName: string,
 	targetPath: string,
 	deps: DownloadBinaryDeps,
 ): Promise<Result<void>> {
-	const { platform, quarantineRemover, warn, onProgress } = deps;
+	const { platform, quarantineRemover, warn, onProgress, fetchImpl = fetch, sleep = defaultSleep } = deps;
 	const url = `https://github.com/${REPO}/releases/download/${tag}/${binaryName}`;
-
-	let res: Response;
-	try {
-		res = await fetch(url, {
-			redirect: "follow",
-			signal: AbortSignal.timeout(120_000),
-		});
-	} catch (err) {
-		if (err instanceof Error && err.name === "TimeoutError") {
-			return R.err(new Error("Download timed out"));
-		}
-		return R.err(err instanceof Error ? err : new Error(String(err)));
-	}
-
-	if (!res.ok) {
-		return R.err(new Error(`Download failed: ${res.status} ${res.statusText}`));
-	}
-
-	if (!res.body) {
-		return R.err(new Error("Download failed: empty response body"));
-	}
-
-	const total = Number(res.headers.get("content-length") ?? 0);
 	const tmpPath = `${targetPath}.tmp`;
-	const writer = Bun.file(tmpPath).writer();
 
-	let downloaded = 0;
-	try {
-		for await (const chunk of res.body as AsyncIterable<Uint8Array>) {
-			writer.write(chunk);
-			downloaded += chunk.byteLength;
-			onProgress?.(downloaded, total);
-		}
-		await writer.end();
-	} catch (err) {
+	let lastError = new Error("Download failed");
+
+	for (let attempt = 1; attempt <= MAX_DOWNLOAD_ATTEMPTS; attempt++) {
+		let res: Response;
 		try {
+			res = await fetchImpl(url, {
+				redirect: "follow",
+				// Per-attempt timeout: a hung attempt still aborts and then counts as
+				// a failed attempt eligible for retry (TimeoutError is a thrown reject).
+				signal: AbortSignal.timeout(120_000),
+			});
+		} catch (err) {
+			// Network/connection throw: the request never produced a body, so a retry
+			// simply re-issues `fetch` from scratch — no partial file to clean up.
+			if (err instanceof Error && err.name === "TimeoutError") {
+				lastError = new Error("Download timed out");
+			} else {
+				lastError = err instanceof Error ? err : new Error(String(err));
+			}
+			if (attempt < MAX_DOWNLOAD_ATTEMPTS) await sleep(downloadBackoffMs(attempt));
+			continue;
+		}
+
+		// A non-OK HTTP status is deterministic (404 missing asset, 403, …): it is
+		// returned, not thrown, and must fail fast without retrying.
+		if (!res.ok) {
+			return R.err(new Error(`Download failed: ${res.status} ${res.statusText}`));
+		}
+
+		if (!res.body) {
+			return R.err(new Error("Download failed: empty response body"));
+		}
+
+		const total = Number(res.headers.get("content-length") ?? 0);
+		// Reset the tmp file to empty at the start of each streaming attempt so a
+		// retry after a mid-stream failure rewrites rather than appends (Bun's
+		// FileSink overwrites from offset 0 but does not truncate trailing bytes).
+		await Bun.write(tmpPath, new Uint8Array(0));
+		const writer = Bun.file(tmpPath).writer();
+
+		// Reset per attempt so `onProgress` does not double-count across retries.
+		let downloaded = 0;
+		try {
+			for await (const chunk of res.body as AsyncIterable<Uint8Array>) {
+				writer.write(chunk);
+				downloaded += chunk.byteLength;
+				onProgress?.(downloaded, total);
+			}
 			await writer.end();
-		} catch {
-			// ignore cleanup error
+		} catch (err) {
+			try {
+				await writer.end();
+			} catch {
+				// ignore cleanup error
+			}
+			// The stream can drop mid-body on the same connection-level fault; treat
+			// it as a retriable failed attempt (the next attempt truncates the tmp).
+			lastError = err instanceof Error ? err : new Error(String(err));
+			if (attempt < MAX_DOWNLOAD_ATTEMPTS) await sleep(downloadBackoffMs(attempt));
+			continue;
 		}
-		return R.err(err instanceof Error ? err : new Error(String(err)));
+
+		try {
+			const { rename, chmod } = await import("node:fs/promises");
+			await chmod(tmpPath, 0o755);
+			await rename(tmpPath, targetPath);
+
+			if (platform === "darwin") {
+				tryRemoveMacosQuarantine(targetPath, { remover: quarantineRemover, warn });
+			}
+		} catch (err) {
+			return R.err(new Error(`Post-download setup failed: ${err instanceof Error ? err.message : String(err)}`));
+		}
+
+		return R.ok(undefined);
 	}
 
-	try {
-		const { rename, chmod } = await import("node:fs/promises");
-		await chmod(tmpPath, 0o755);
-		await rename(tmpPath, targetPath);
-
-		if (platform === "darwin") {
-			tryRemoveMacosQuarantine(targetPath, { remover: quarantineRemover, warn });
-		}
-	} catch (err) {
-		return R.err(new Error(`Post-download setup failed: ${err instanceof Error ? err.message : String(err)}`));
-	}
-
-	return R.ok(undefined);
+	// Every attempt threw: fail with an error derived from the last attempt.
+	return R.err(lastError);
 }
 
 export function selfUpdateCommand(container: Container) {
