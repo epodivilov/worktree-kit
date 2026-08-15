@@ -706,4 +706,79 @@ describe("cleanupWorktrees", () => {
 			expect(output.reports.filter((r) => r.branch === "feature-b")).toHaveLength(1);
 		});
 	});
+
+	describe("locked worktrees — skipped, not errored", () => {
+		// R1: a gone branch whose worktree is locked must be classified as the new
+		// skipped-locked status, never `error`.
+		test("R1: gone-branch worktree locked on removal — skipped-locked, not error", async () => {
+			const git = createFakeGit({
+				worktrees: [mainWt, featureA],
+				branches: ["main", "feature-a"],
+				goneBranches: ["feature-a"],
+				mergedBranches: ["feature-a"],
+				commitCountMap: new Map([["main..feature-a", 0]]),
+				lockedWorktrees: new Map([["/wt/feature-a", "kepler:task:abc"]]),
+			});
+			const output = expectOk(await cleanupWorktrees({ force: false, dryRun: false }, { git }));
+
+			expect(output.reports).toHaveLength(1);
+			expect(output.reports[0]).toMatchObject({
+				branch: "feature-a",
+				worktreePath: "/wt/feature-a",
+				result: { status: "skipped-locked", path: "/wt/feature-a" },
+			});
+			expect(output.reports[0]?.result.status).not.toBe("error");
+			// Branch is left intact — we could not remove its worktree.
+			expect(expectOk(await git.branchExists("feature-a"))).toBe(true);
+		});
+
+		// R1-orphan: a non-prunable orphan worktree (branch gone locally) that is
+		// locked must also be skipped-locked, not error.
+		test("R1-orphan: non-prunable orphan worktree locked — skipped-locked, not error", async () => {
+			const orphanWt: Worktree = {
+				path: "/wt/orphan",
+				branch: "deleted-branch",
+				head: "ddd",
+				isMain: false,
+				isPrunable: false,
+			};
+			const git = createFakeGit({
+				worktrees: [mainWt, orphanWt],
+				branches: ["main"],
+				goneBranches: [],
+				lockedWorktrees: new Map([["/wt/orphan", "kepler:task:xyz"]]),
+			});
+			const output = expectOk(await cleanupWorktrees({ force: false, dryRun: false }, { git }));
+
+			expect(output.reports).toHaveLength(1);
+			expect(output.reports[0]).toMatchObject({
+				branch: "deleted-branch",
+				worktreePath: "/wt/orphan",
+				result: { status: "skipped-locked", path: "/wt/orphan" },
+			});
+			expect(output.reports[0]?.result.status).not.toBe("error");
+		});
+
+		// R2 (use-case level): one branch cleaned, one worktree locked → no report
+		// carries the `error` status, so nothing feeds cleanup's error tally.
+		test("R2: one cleaned + one locked — no error report", async () => {
+			const git = createFakeGit({
+				worktrees: [mainWt, featureA, featureB],
+				branches: ["main", "feature-a", "feature-b"],
+				goneBranches: ["feature-a", "feature-b"],
+				mergedBranches: ["feature-a", "feature-b"],
+				commitCountMap: new Map([
+					["main..feature-a", 0],
+					["main..feature-b", 0],
+				]),
+				lockedWorktrees: new Map([["/wt/feature-b", "kepler:task:abc"]]),
+			});
+			const output = expectOk(await cleanupWorktrees({ force: false, dryRun: false }, { git }));
+
+			const byBranch = new Map(output.reports.map((r) => [r.branch, r.result.status]));
+			expect(byBranch.get("feature-a")).toBe("cleaned");
+			expect(byBranch.get("feature-b")).toBe("skipped-locked");
+			expect(output.reports.filter((r) => r.result.status === "error")).toHaveLength(0);
+		});
+	});
 });

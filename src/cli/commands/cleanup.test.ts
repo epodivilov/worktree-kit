@@ -214,3 +214,157 @@ describe("cleanup — dirty worktree warning", () => {
 		expect(code).toBe(0);
 	});
 });
+
+describe("cleanup — locked worktrees reported as a skipped group", () => {
+	const feature2Wt: Worktree = {
+		path: `${ROOT}/.worktrees/feature2`,
+		branch: "feature2",
+		head: "ccc",
+		isMain: false,
+		isPrunable: false,
+	};
+
+	// R2: one branch cleaned, one worktree locked → the lock does not count toward
+	// the error tally and the command still exits success (never partial/failure).
+	test("R2: one cleaned + one locked — exits success, no red error", async () => {
+		const fs = createFakeFilesystem({
+			files: { [`${ROOT}/${CONFIG_FILENAME}`]: JSON.stringify({ rootDir: ".worktrees" }) },
+			directories: [ROOT, `${ROOT}/.worktrees`, featureWt.path, feature2Wt.path],
+		});
+		const git = createFakeGit({
+			root: ROOT,
+			mainRoot: ROOT,
+			worktrees: [mainWt, featureWt, feature2Wt],
+			branches: ["main", "feature", "feature2"],
+			goneBranches: ["feature", "feature2"],
+			mergedBranches: ["feature", "feature2"],
+			commitCountMap: new Map([
+				["main..feature", 0],
+				["main..feature2", 0],
+			]),
+			lockedWorktrees: new Map([[feature2Wt.path, "kepler:task:abc"]]),
+		});
+		const { ui, log } = createFakeUi();
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runCleanup(container, { force: false, yes: true, "dry-run": false });
+
+		// Success exit — a lock alone never flips the exit code.
+		expect(code).toBe(0);
+		// The removable branch was cleaned.
+		expect(log.success).toContain("feature — worktree and branch removed");
+		// The lock produced no red error.
+		expect(log.error).toHaveLength(0);
+		// The locked one lands in the warn group with its unlock command.
+		expect(log.warn.some((m) => m.includes(`git worktree unlock "${feature2Wt.path}"`))).toBe(true);
+	});
+
+	// R3: two locked worktrees → exactly one warn group with a count header, one
+	// line per worktree (name + unlock command), and a re-run hint for `wt cleanup`.
+	test("R3: two locked worktrees — single warn group (count, names, unlock commands, re-run hint)", async () => {
+		const fs = createFakeFilesystem({
+			files: { [`${ROOT}/${CONFIG_FILENAME}`]: JSON.stringify({ rootDir: ".worktrees" }) },
+			directories: [ROOT, `${ROOT}/.worktrees`, featureWt.path, feature2Wt.path],
+		});
+		const git = createFakeGit({
+			root: ROOT,
+			mainRoot: ROOT,
+			worktrees: [mainWt, featureWt, feature2Wt],
+			branches: ["main", "feature", "feature2"],
+			goneBranches: ["feature", "feature2"],
+			mergedBranches: ["feature", "feature2"],
+			commitCountMap: new Map([
+				["main..feature", 0],
+				["main..feature2", 0],
+			]),
+			// One lock carries an empty reason — the per-line text must not depend on it.
+			lockedWorktrees: new Map([
+				[featureWt.path, ""],
+				[feature2Wt.path, "kepler:task:xyz"],
+			]),
+		});
+		const { ui, log } = createFakeUi();
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runCleanup(container, { force: false, yes: true, "dry-run": false });
+
+		// Exactly one warn group carries the unlock commands.
+		const groups = log.warn.filter((m) => m.includes("git worktree unlock"));
+		expect(groups).toHaveLength(1);
+		const group = groups[0] as string;
+
+		// Header states the count.
+		expect(group).toContain("2");
+		// One line per worktree: its name + copy-paste unlock command.
+		expect(group).toContain("feature");
+		expect(group).toContain(`git worktree unlock "${featureWt.path}"`);
+		expect(group).toContain("feature2");
+		expect(group).toContain(`git worktree unlock "${feature2Wt.path}"`);
+		// Re-run hint targets `wt cleanup`.
+		expect(group).toContain("re-run wt cleanup");
+		// Never a red error for a lock.
+		expect(log.error).toHaveLength(0);
+		expect(code).toBe(0);
+	});
+
+	// R4: skipped-dirty and skipped-unmerged keep their existing rendering; only the
+	// locked worktree joins the warn group.
+	test("R4: dirty + unmerged + locked — only the locked one joins the warn group", async () => {
+		const lockedWt: Worktree = {
+			path: `${ROOT}/.worktrees/locked-branch`,
+			branch: "locked-branch",
+			head: "l11",
+			isMain: false,
+			isPrunable: false,
+		};
+		const dirtyWt: Worktree = {
+			path: `${ROOT}/.worktrees/dirty-branch`,
+			branch: "dirty-branch",
+			head: "d11",
+			isMain: false,
+			isPrunable: false,
+		};
+		const fs = createFakeFilesystem({
+			files: { [`${ROOT}/${CONFIG_FILENAME}`]: JSON.stringify({ rootDir: ".worktrees" }) },
+			directories: [ROOT, `${ROOT}/.worktrees`, lockedWt.path, dirtyWt.path],
+		});
+		const git = createFakeGit({
+			root: ROOT,
+			mainRoot: ROOT,
+			worktrees: [mainWt, lockedWt, dirtyWt],
+			branches: ["main", "locked-branch", "dirty-branch", "unmerged-branch"],
+			goneBranches: ["locked-branch", "dirty-branch", "unmerged-branch"],
+			mergedBranches: ["locked-branch", "dirty-branch"],
+			dirtyWorktrees: new Set([dirtyWt.path]),
+			lockedWorktrees: new Map([[lockedWt.path, "kepler:task:abc"]]),
+			commitCountMap: new Map([
+				["main..locked-branch", 0],
+				["main..dirty-branch", 0],
+				["main..unmerged-branch", 2],
+			]),
+			revListMap: new Map([["main..unmerged-branch", ["sha1", "sha2"]]]),
+			revListCherryPickMap: new Map([["main...unmerged-branch", ["sha1", "sha2"]]]),
+			mergeBaseMap: new Map([["main:unmerged-branch", "merge-base"]]),
+		});
+		const { ui, log } = createFakeUi();
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runCleanup(container, { force: false, yes: true, "dry-run": false });
+
+		// skipped-dirty renders as today.
+		expect(log.warn.some((m) => m.includes("dirty-branch") && m.includes("uncommitted changes"))).toBe(true);
+		// skipped-unmerged renders as today.
+		expect(log.warn.some((m) => m.includes("unmerged-branch") && m.includes("not fully merged"))).toBe(true);
+
+		// Exactly one warn group, and it carries only the locked worktree.
+		const groups = log.warn.filter((m) => m.includes("git worktree unlock"));
+		expect(groups).toHaveLength(1);
+		const group = groups[0] as string;
+		expect(group).toContain(`git worktree unlock "${lockedWt.path}"`);
+		expect(group).not.toContain("dirty-branch");
+		expect(group).not.toContain("unmerged-branch");
+
+		expect(log.error).toHaveLength(0);
+		expect(code).toBe(0);
+	});
+});
