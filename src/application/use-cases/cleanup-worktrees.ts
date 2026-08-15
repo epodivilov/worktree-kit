@@ -22,6 +22,9 @@ export type CleanupBranchStatus =
 	| { status: "orphan-cleaned" }
 	| { status: "orphan-skipped-dirty" }
 	| { status: "orphan-dry-run" }
+	// A locked worktree is an expected, benign state (another task holds it), not a
+	// removal failure — kept distinct from `error` so it stays out of the error tally.
+	| { status: "skipped-locked"; path: string }
 	| { status: "error"; message: string };
 
 export interface CleanupBranchReport {
@@ -78,6 +81,10 @@ export async function cleanupWorktrees(
 		if (worktree) {
 			const removeResult = await git.removeWorktree(worktree.path, { force: input.force });
 			if (!removeResult.success) {
+				if (removeResult.error.code === "WORKTREE_LOCKED") {
+					reports.push({ branch, worktreePath, result: { status: "skipped-locked", path: worktree.path } });
+					return;
+				}
 				reports.push({
 					branch,
 					worktreePath,
@@ -226,6 +233,14 @@ export async function cleanupWorktrees(
 
 			const removeResult = await git.removeWorktree(worktree.path, { force: input.force });
 			if (!removeResult.success) {
+				if (removeResult.error.code === "WORKTREE_LOCKED") {
+					reports.push({
+						branch: worktree.branch,
+						worktreePath: worktree.path,
+						result: { status: "skipped-locked", path: worktree.path },
+					});
+					continue;
+				}
 				reports.push({
 					branch: worktree.branch,
 					worktreePath: worktree.path,

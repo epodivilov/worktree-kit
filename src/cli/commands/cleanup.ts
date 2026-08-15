@@ -12,6 +12,7 @@ import { formatDisplayPath } from "../../shared/format-path.ts";
 import { Result } from "../../shared/result.ts";
 import { EXIT_CANCEL, EXIT_FAILURE, EXIT_PARTIAL, EXIT_SUCCESS } from "../exit-codes.ts";
 import { GLOBAL_ARGS } from "../global-args.ts";
+import { type LockedWorktree, warnLockedWorktreesGroup } from "../locked-worktrees-warning.ts";
 import { CommandError, runCommand } from "../run-command.ts";
 
 export function cleanupCommand(container: Container) {
@@ -158,6 +159,10 @@ export function cleanupCommand(container: Container) {
 
 				execSpinner.stop(pc.green("Cleanup complete"));
 
+				// Locked worktrees are collected here and rendered as one calm warn group
+				// (WTK-62's shared format) instead of a red error per worktree.
+				const lockedWorktrees: LockedWorktree[] = [];
+
 				for (const report of execResult.data.reports) {
 					switch (report.result.status) {
 						case "cleaned":
@@ -188,11 +193,19 @@ export function cleanupCommand(container: Container) {
 							);
 							break;
 						}
+						case "skipped-locked":
+							// Pre-resolve the display name (branch, or the display path when
+							// detached) so the shared group renders cleanup's naming; the actual
+							// group is emitted once, after the loop.
+							lockedWorktrees.push({ branch: report.branch || dp(report.result.path), path: report.result.path });
+							break;
 						case "error":
 							ui.error(`${report.branch} — ${report.result.message}`);
 							break;
 					}
 				}
+
+				warnLockedWorktreesGroup(ui, lockedWorktrees, "wt cleanup");
 
 				const errorCount = execResult.data.reports.filter((r) => r.result.status === "error").length;
 				const totalCount = execResult.data.reports.length;
