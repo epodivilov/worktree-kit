@@ -101,6 +101,16 @@ const CASES: ContractCase[] = [
 		run: (git) => git.deleteRemoteBranch("ghost"),
 		expected: { ok: false, code: "REMOTE_REF_NOT_FOUND" },
 	},
+	{
+		name: "listRemoteBranchesFor on the primary remote succeeds",
+		run: (git) => git.listRemoteBranchesFor("origin"),
+		expected: { ok: true },
+	},
+	{
+		name: "listRemoteBranchesFor on a remote with no tracking refs succeeds (empty)",
+		run: (git) => git.listRemoteBranchesFor("ghost-remote"),
+		expected: { ok: true },
+	},
 ];
 
 const IMPLEMENTATIONS = [

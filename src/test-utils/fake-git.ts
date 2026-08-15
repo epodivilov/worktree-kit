@@ -15,6 +15,10 @@ export interface FakeGitOptions {
 	worktrees?: Worktree[];
 	branches?: string[];
 	remoteBranches?: string[];
+	/** Bare branch names per remote, returned by listRemoteBranchesFor(remote). */
+	remoteBranchesByRemote?: Map<string, string[]>;
+	/** Records every listRemoteBranchesFor(remote) call. */
+	listRemoteBranchesForCalls?: string[];
 	mergedBranches?: string[];
 	goneBranches?: string[];
 	defaultBranch?: string;
@@ -24,6 +28,8 @@ export interface FakeGitOptions {
 	onConflictResolved?: Set<string>;
 	fetchFails?: boolean;
 	mergeFFOnlyFails?: boolean;
+	/** Fail mergeFFOnly / updateBranchRef only for these branch names (per-root divergence). */
+	mergeFFOnlyFailBranches?: Set<string>;
 	remotes?: string[];
 	/** Name returned by getPrimaryRemote(); the remote resolveUpstream excludes. */
 	primaryRemote?: string;
@@ -117,6 +123,24 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 				return Result.err({ code: "NOT_A_REPO", message: "Not inside a git repository" });
 			}
 			return Result.ok([...remoteBranchStore]);
+		},
+
+		async listRemoteBranchesFor(remote: string): Promise<Result<string[], GitError>> {
+			if (!isRepo) {
+				return Result.err({ code: "NOT_A_REPO", message: "Not inside a git repository" });
+			}
+			options.listRemoteBranchesForCalls?.push(remote);
+			const configured = options.remoteBranchesByRemote?.get(remote);
+			if (configured !== undefined) {
+				return Result.ok([...configured]);
+			}
+			// Parity with the real adapter's canonical contract state: the primary
+			// remote's branches are the `remoteBranches` set; other remotes are empty
+			// unless explicitly modelled via `remoteBranchesByRemote`.
+			if (remote === primaryRemote) {
+				return Result.ok([...remoteBranchStore]);
+			}
+			return Result.ok([]);
 		},
 
 		async getDefaultBranch(): Promise<Result<string, GitError>> {
@@ -265,7 +289,7 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 
 		async mergeFFOnly(worktreePath: string, branch: string, remote = primaryRemote): Promise<Result<void, GitError>> {
 			options.mergeFFOnlyCalls?.push({ worktreePath, branch, remote });
-			if (mergeFFOnlyFails) {
+			if (mergeFFOnlyFails || options.mergeFFOnlyFailBranches?.has(branch)) {
 				return Result.err({ code: "MERGE_FAILED", message: "Cannot fast-forward" });
 			}
 			return Result.ok(undefined);
@@ -273,7 +297,7 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 
 		async updateBranchRef(branch: string, remote = primaryRemote): Promise<Result<void, GitError>> {
 			options.updateBranchRefCalls?.push({ branch, remote });
-			if (mergeFFOnlyFails) {
+			if (mergeFFOnlyFails || options.mergeFFOnlyFailBranches?.has(branch)) {
 				return Result.err({ code: "MERGE_FAILED", message: "Cannot update ref" });
 			}
 			return Result.ok(undefined);

@@ -6,11 +6,12 @@ import { cleanupWorktrees } from "../../application/use-cases/cleanup-worktrees.
 import { loadConfig } from "../../application/use-cases/load-config.ts";
 import { setConfigUpstream } from "../../application/use-cases/set-config-upstream.ts";
 import {
+	type RootSyncReport,
 	type UpdateProgressReporter,
 	updateWorktrees,
 	type WorktreeReport,
 } from "../../application/use-cases/update-worktrees.ts";
-import type { MultiSpinnerHandle } from "../../domain/ports/ui-port.ts";
+import type { MultiSpinnerHandle, UiPort } from "../../domain/ports/ui-port.ts";
 import { UpdateArgsSchema } from "../../domain/schemas/command-args-schema.ts";
 import type { Container } from "../../infrastructure/container.ts";
 import { formatDisplayPath } from "../../shared/format-path.ts";
@@ -50,6 +51,51 @@ function progressLine(report: WorktreeReport): { terminal: "complete" | "fail"; 
 			// The default branch is never a spinner key, so this is unreachable via
 			// `settle`; kept for exhaustiveness.
 			return { terminal: "complete", message: "up to date" };
+	}
+}
+
+/**
+ * One summary line for a synced root — the default branch and, in a fork, each
+ * other root synced from its own `<upstream>/<name>` (WTK-64). The reset /
+ * skipped-diverged / would-* wording matches the WTK-61 default-branch lines; the
+ * only difference is the branch name is now per-root rather than always the default.
+ */
+function renderRootSync(ui: UiPort, report: RootSyncReport): void {
+	const { branch: name } = report;
+	// Set by the use case for every divergence outcome; the fallback only keeps the
+	// label well-formed for the non-divergence outcomes that never read it.
+	const remoteRefLabel = report.remoteRef ?? name;
+
+	// The reset / skipped-diverged outcomes are evaluated BEFORE the
+	// `syncedFromUpstream` catch: a skip would otherwise print "synced from …" and
+	// mask the divergence warning, and a reset reads more clearly as its own line.
+	if (report.update === "would-update") {
+		if (report.behind === undefined) {
+			ui.info(`${name} would be advanced`);
+		} else if (report.behind === 0) {
+			ui.info(`${name} is already up to date`);
+		} else {
+			const plural = report.behind === 1 ? "" : "s";
+			ui.info(`${name} would be advanced by ${report.behind} commit${plural}`);
+		}
+	} else if (report.update === "would-reset") {
+		ui.info(`${name} has diverged from ${remoteRefLabel} but is fully merged — would be reset to it`);
+	} else if (report.update === "would-skip-diverged") {
+		ui.warn(`${name} has diverged from ${remoteRefLabel} with local commits — sync would be skipped`);
+	} else if (report.update === "reset") {
+		ui.success(`${name} reset to ${remoteRefLabel}`);
+	} else if (report.update === "skipped-diverged") {
+		ui.warn(`${name} has diverged from ${remoteRefLabel} and was left unchanged — resolve it manually, then re-run`);
+	} else if (report.syncedFromUpstream) {
+		ui.success(`${name} synced from ${report.syncedFromUpstream}/${name}`);
+	} else if (report.update === "ff-updated") {
+		ui.success(`${name} fast-forwarded`);
+	} else if (report.update === "ref-updated") {
+		ui.success(`${name} ref updated`);
+	} else {
+		// Exhaustiveness guard: a new sync outcome must add its own branch.
+		const _exhaustive: never = report.update;
+		throw new Error(`Unhandled root sync outcome: ${_exhaustive}`);
 	}
 }
 
@@ -198,52 +244,22 @@ export function updateCommand(container: Container) {
 					defaultBranchBehind,
 					defaultBranchRemoteRef,
 					syncedFromUpstream,
+					rootSyncs,
 					reports,
 				} = result.data;
 
-				// Set by the use case for every divergence outcome; the fallback is never
-				// reached for those, it only keeps the label well-formed for other outcomes.
-				const remoteRefLabel = defaultBranchRemoteRef ?? defaultBranch;
-
-				// The reset / skipped-diverged outcomes are evaluated BEFORE the
-				// `syncedFromUpstream` catch: a skip would otherwise print "synced from …"
-				// and mask the divergence warning, and a reset reads more clearly as its own
-				// line than as a generic upstream sync.
-				if (defaultBranchUpdate === "would-update") {
-					// Dry run: nothing was synced, so preview the advance instead of claiming
-					// a completed action. The commit count is best-effort (see the use case).
-					if (defaultBranchBehind === undefined) {
-						ui.info(`${defaultBranch} would be advanced`);
-					} else if (defaultBranchBehind === 0) {
-						ui.info(`${defaultBranch} is already up to date`);
-					} else {
-						const plural = defaultBranchBehind === 1 ? "" : "s";
-						ui.info(`${defaultBranch} would be advanced by ${defaultBranchBehind} commit${plural}`);
-					}
-				} else if (defaultBranchUpdate === "would-reset") {
-					// Dry run: diverged, but every local commit is already upstream.
-					ui.info(`${defaultBranch} has diverged from ${remoteRefLabel} but is fully merged — would be reset to it`);
-				} else if (defaultBranchUpdate === "would-skip-diverged") {
-					// Dry run: genuine local divergence — the sync would be left undone.
-					ui.warn(`${defaultBranch} has diverged from ${remoteRefLabel} with local commits — sync would be skipped`);
-				} else if (defaultBranchUpdate === "reset") {
-					// Diverged but fully merged upstream — reset to the remote (recoverable via reflog).
-					ui.success(`${defaultBranch} reset to ${remoteRefLabel}`);
-				} else if (defaultBranchUpdate === "skipped-diverged") {
-					// Genuine divergence or a dirty worktree — left untouched; feature branches still rebased.
-					ui.warn(
-						`${defaultBranch} has diverged from ${remoteRefLabel} and was left unchanged — resolve it manually, then re-run`,
-					);
-				} else if (syncedFromUpstream) {
-					ui.success(`${defaultBranch} synced from ${syncedFromUpstream}/${defaultBranch}`);
-				} else if (defaultBranchUpdate === "ff-updated") {
-					ui.success(`${defaultBranch} fast-forwarded`);
-				} else if (defaultBranchUpdate === "ref-updated") {
-					ui.success(`${defaultBranch} ref updated`);
-				} else {
-					// Exhaustiveness guard: a new defaultBranchUpdate variant must add its own branch.
-					const _exhaustive: never = defaultBranchUpdate;
-					throw new Error(`Unhandled default-branch outcome: ${_exhaustive}`);
+				// One summary line for the default branch, then one per extra fork root
+				// (WTK-64). The default branch keeps its dedicated output fields; the extra
+				// roots carry their own outcome in `rootSyncs`.
+				renderRootSync(ui, {
+					branch: defaultBranch,
+					update: defaultBranchUpdate,
+					behind: defaultBranchBehind,
+					remoteRef: defaultBranchRemoteRef,
+					syncedFromUpstream,
+				});
+				for (const rootSync of rootSyncs) {
+					renderRootSync(ui, rootSync);
 				}
 
 				// The primary per-worktree outcome is already shown live in the multi-spinner

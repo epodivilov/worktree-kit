@@ -57,6 +57,30 @@ export interface WorktreeReport {
 	hookNotifications: Notification[];
 }
 
+/**
+ * Per-root sync outcome (WTK-64). One is produced for the default branch and for
+ * every other local root (a branch whose same name exists on the upstream remote).
+ * The `update` variants mirror the default-branch outcomes so the CLI renders each
+ * root the same way.
+ */
+export interface RootSyncReport {
+	branch: string;
+	update:
+		| "ff-updated"
+		| "ref-updated"
+		| "reset"
+		| "skipped-diverged"
+		| "would-update"
+		| "would-reset"
+		| "would-skip-diverged";
+	/** Dry-run only: commits the root is behind its upstream, when resolvable. */
+	behind?: number;
+	/** `<remote>/<branch>` the root was, or would be, reset to (reset / skip / would-* outcomes). */
+	remoteRef?: string;
+	/** Upstream remote name when the root was actually synced from upstream. */
+	syncedFromUpstream?: string;
+}
+
 export interface UpdateWorktreesOutput {
 	defaultBranch: string;
 	/**
@@ -83,6 +107,13 @@ export interface UpdateWorktreesOutput {
 	defaultBranchRemoteRef?: string;
 	/** Set to the upstream remote name when the default branch was synced from upstream. */
 	syncedFromUpstream?: string;
+	/**
+	 * Sync outcome for every NON-default local root (WTK-64). The default branch's
+	 * outcome stays on the `defaultBranch*` fields above; these are the extra roots
+	 * a fork syncs from their own `<upstream>/<name>`. Empty when there is a single
+	 * root (no upstream, or upstream has no other same-named local branch).
+	 */
+	rootSyncs: RootSyncReport[];
 	reports: WorktreeReport[];
 }
 
@@ -92,15 +123,128 @@ export interface UpdateWorktreesDeps {
 	progress?: UpdateProgressReporter;
 }
 
+/**
+ * A "root" branch feature branches rebase toward (WTK-64). The default branch is
+ * always a root; with an upstream remote, every other same-named branch on it is
+ * one too. A `local` root has a local branch — it is synced and used as a base by
+ * name; an absent root lives only on the upstream remote and is a rebase target
+ * via its `<upstream>/<name>` ref.
+ */
+interface Root {
+	name: string;
+	local: boolean;
+	/** Ref features rebase onto: the local branch name, or `<upstream>/<name>` for an absent root. */
+	base: string;
+	/** Worktree path when a local root is checked out; decides fast-forward vs. ref update. */
+	worktreePath?: string;
+}
+
+/**
+ * Sync a single LOCAL root from its upstream, applying the WTK-61 divergence
+ * handling (R5). Fast-forwards when the root is checked out, else updates its ref
+ * in place; on a refused fast-forward it resets to the remote when every local
+ * commit is already upstream AND the worktree is clean, otherwise leaves the root
+ * untouched and continues. Dry-run mutates nothing and previews the outcome.
+ * Absent (upstream-only) roots are never passed here — they cannot diverge.
+ */
+async function syncRoot(
+	root: { name: string; worktreePath?: string },
+	input: UpdateWorktreesInput,
+	git: GitPort,
+): Promise<{ report: RootSyncReport; synced: boolean }> {
+	const { name } = root;
+	// Which remote is authoritative for this root — the configured upstream (fork
+	// workflow) or the primary remote — independent of whether it is checked out.
+	const syncRemote = input.upstream ?? git.getPrimaryRemote();
+	const remoteRef = `${syncRemote}/${name}`;
+
+	if (input.dryRun) {
+		// A dry run promises nothing changes, so classify read-only and preview.
+		// Without a configured upstream the counts key off the tracking ref (@{u}).
+		const upstreamRef = input.upstream ? `${input.upstream}/${name}` : `${name}@{u}`;
+		const behindResult = await git.getCommitCount(name, upstreamRef);
+		const behind = behindResult.success ? behindResult.data : undefined;
+		const aheadResult = await git.getCommitCount(upstreamRef, name);
+		const ahead = aheadResult.success ? aheadResult.data : undefined;
+
+		if (ahead !== undefined && ahead > 0 && behind !== undefined && behind > 0) {
+			const fullyMerged = await isFullyMerged({ branch: name, defaultBranch: upstreamRef }, { git });
+			return {
+				report: { branch: name, update: fullyMerged ? "would-reset" : "would-skip-diverged", remoteRef },
+				synced: false,
+			};
+		}
+		return { report: { branch: name, update: "would-update", behind }, synced: false };
+	}
+
+	if (root.worktreePath) {
+		const ffResult = input.upstream
+			? await git.mergeFFOnly(root.worktreePath, name, input.upstream)
+			: await git.mergeFFOnly(root.worktreePath, name);
+		if (ffResult.success) {
+			return { report: { branch: name, update: "ff-updated" }, synced: true };
+		}
+		// Fast-forward refused → diverged (or dirty). Reset only when every local
+		// commit is already upstream AND the tree is clean; else leave it and warn.
+		const dirtyResult = await git.isDirty(root.worktreePath);
+		const worktreeDirty = !dirtyResult.success || dirtyResult.data;
+		const canReset = !worktreeDirty && (await isFullyMerged({ branch: name, defaultBranch: remoteRef }, { git }));
+		if (canReset) {
+			const resetResult = await git.resetHardToRemote(root.worktreePath, name, syncRemote);
+			if (resetResult.success) {
+				return { report: { branch: name, update: "reset", remoteRef }, synced: true };
+			}
+		}
+		return { report: { branch: name, update: "skipped-diverged", remoteRef }, synced: false };
+	}
+
+	const refResult = input.upstream ? await git.updateBranchRef(name, input.upstream) : await git.updateBranchRef(name);
+	if (refResult.success) {
+		return { report: { branch: name, update: "ref-updated" }, synced: true };
+	}
+	// Ref path (root checked out nowhere): no working tree, so no dirty guard — a
+	// fully-merged divergence force-updates the ref; a genuine one is skipped.
+	const fullyMerged = await isFullyMerged({ branch: name, defaultBranch: remoteRef }, { git });
+	if (fullyMerged) {
+		const forceResult = await git.forceUpdateBranchRef(name, syncRemote);
+		if (forceResult.success) {
+			return { report: { branch: name, update: "reset", remoteRef }, synced: true };
+		}
+	}
+	return { report: { branch: name, update: "skipped-diverged", remoteRef }, synced: false };
+}
+
+/**
+ * Distance from `candidateRef`'s tip to `branch` when `candidateRef` is a TRUE
+ * ancestor of `branch` (the branch fully contains the candidate's tip), else null.
+ * Ancestor test: `merge-base(branch, candidate) === candidate.tip`, i.e. the
+ * candidate has no commits beyond the merge-base. This is what excludes a sibling
+ * that merely shares a common base (R4). Returns null on missing git data or when
+ * the branch has no commits past the candidate (distance 0).
+ */
+async function ancestorDistance(git: GitPort, branch: string, candidateRef: string): Promise<number | null> {
+	const mergeBase = await git.getMergeBase(branch, candidateRef);
+	if (!mergeBase.success) return null;
+	const distance = await git.getCommitCount(mergeBase.data, branch);
+	if (!distance.success || distance.data === 0) return null;
+	const candidateAhead = await git.getCommitCount(mergeBase.data, candidateRef);
+	if (!candidateAhead.success || candidateAhead.data !== 0) return null;
+	return distance.data;
+}
+
 async function findParentBranch(
 	branch: string,
 	worktrees: Worktree[],
 	defaultBranch: string,
+	roots: Root[],
+	localRootNames: Set<string>,
 	goneSet: Set<string>,
 	git: GitPort,
 ): Promise<{ parent: string; retargetedFrom?: string }> {
 	const candidates: { branch: string; distance: number; gone: boolean }[] = [];
 
+	// The default branch is the always-available fallback base; it is not put
+	// through the strict ancestor filter (R6-compatible with the original logic).
 	const defaultMergeBase = await git.getMergeBase(branch, defaultBranch);
 	if (defaultMergeBase.success) {
 		const defaultCount = await git.getCommitCount(defaultMergeBase.data, branch);
@@ -112,18 +256,24 @@ async function findParentBranch(
 		}
 	}
 
+	// Non-default roots (local branches or upstream-only refs), each a candidate
+	// only when it is a true ancestor of the branch (R2/R3/R4). Roots never go gone.
+	for (const root of roots) {
+		if (root.name === defaultBranch) continue;
+		const distance = await ancestorDistance(git, branch, root.base);
+		if (distance !== null) {
+			candidates.push({ branch: root.base, distance, gone: false });
+		}
+	}
+
+	// Other worktree branches. The same true-ancestor rule now also excludes a
+	// non-ancestor sibling that merely shares a common base with the branch (R4).
 	for (const wt of worktrees) {
-		if (!wt.branch || wt.branch === branch || wt.branch === defaultBranch) continue;
-
-		const mergeBaseResult = await git.getMergeBase(branch, wt.branch);
-		if (!mergeBaseResult.success) continue;
-
-		const countResult = await git.getCommitCount(mergeBaseResult.data, branch);
-		if (!countResult.success) continue;
-
-		if (countResult.data === 0) continue;
-
-		candidates.push({ branch: wt.branch, distance: countResult.data, gone: goneSet.has(wt.branch) });
+		if (!wt.branch || wt.branch === branch || localRootNames.has(wt.branch)) continue;
+		const distance = await ancestorDistance(git, branch, wt.branch);
+		if (distance !== null) {
+			candidates.push({ branch: wt.branch, distance, gone: goneSet.has(wt.branch) });
+		}
 	}
 
 	if (candidates.length === 0) return { parent: defaultBranch };
@@ -141,10 +291,16 @@ async function findParentBranch(
 	return { parent: liveParent };
 }
 
-function buildRebaseOrder(worktrees: Worktree[], parentMap: Record<string, string>, defaultBranch: string): Worktree[] {
+function buildRebaseOrder(
+	worktrees: Worktree[],
+	parentMap: Record<string, string>,
+	defaultBranch: string,
+	rootBases: Set<string>,
+	localRootNames: Set<string>,
+): Worktree[] {
 	const children = new Map<string, string[]>();
 	for (const wt of worktrees) {
-		if (!wt.branch || wt.branch === defaultBranch) continue;
+		if (!wt.branch || localRootNames.has(wt.branch)) continue;
 		const parent = parentMap[wt.branch] ?? defaultBranch;
 		const siblings = children.get(parent);
 		if (siblings) {
@@ -155,12 +311,14 @@ function buildRebaseOrder(worktrees: Worktree[], parentMap: Record<string, strin
 	}
 
 	const ordered: string[] = [];
-	const queue: string[] = [defaultBranch];
+	// Seed the BFS with every root base so a descendant of a non-default root waits
+	// for that root, and roots themselves are never emitted for rebasing.
+	const queue: string[] = [...rootBases];
 
 	while (queue.length > 0) {
 		const current = queue.shift();
 		if (!current) break;
-		if (current !== defaultBranch) {
+		if (!rootBases.has(current)) {
 			ordered.push(current);
 		}
 		const kids = children.get(current) ?? [];
@@ -242,139 +400,90 @@ export async function updateWorktrees(
 	// Where default-branch work happens: its own worktree when it has one, else the
 	// repo root — the branch is then updated by ref and is checked out nowhere.
 	const defaultBranchPath = mainWorktree?.path ?? input.repoRoot ?? "";
-	let defaultBranchUpdate: UpdateWorktreesOutput["defaultBranchUpdate"];
-	let defaultBranchBehind: number | undefined;
-	let defaultBranchRemoteRef: string | undefined;
-	let defaultBranchHookNotifications: Notification[] = [];
-	let syncedFromUpstream: string | undefined;
 
-	// Which remote is authoritative for the default branch: the configured upstream
-	// (fork workflow) or the repository's primary remote. Used both as the reset target
-	// and as the base for the divergence classification. Independent of whether the
-	// branch happens to be checked out.
-	const syncRemote = input.upstream ?? git.getPrimaryRemote();
-	const remoteRef = `${syncRemote}/${defaultBranch}`;
-	// True once the default branch is actually brought up to the remote (fast-forwarded
-	// or reset). A skipped-diverged sync leaves it false so the run neither reports the
-	// branch as synced-from-upstream nor runs its post-update hooks (R4).
-	let defaultBranchSynced = false;
-
-	if (input.dryRun) {
-		// Dry run is a promise that nothing changes, so the default-branch sync is
-		// skipped entirely: mergeFFOnly runs a real merge --ff-only (index + files),
-		// updateBranchRef writes a local ref, and a reset mutates too. Instead, classify
-		// read-only and preview the outcome. Best-effort: the primary remote name resolves
-		// via getPrimaryRemote, but without a configured upstream we still key the counts
-		// off the branch's tracking ref (@{u}) to match the historical preview behaviour.
-		const upstreamRef = input.upstream ? `${input.upstream}/${defaultBranch}` : `${defaultBranch}@{u}`;
-		const behindResult = await git.getCommitCount(defaultBranch, upstreamRef);
-		const behind = behindResult.success ? behindResult.data : undefined;
-		const aheadResult = await git.getCommitCount(upstreamRef, defaultBranch);
-		const ahead = aheadResult.success ? aheadResult.data : undefined;
-
-		if (ahead !== undefined && ahead > 0 && behind !== undefined && behind > 0) {
-			// Ahead AND behind → diverged. Preview a would-reset when every local commit
-			// is already upstream, else a would-skip. All reads, no mutation (N1).
-			const fullyMerged = await isFullyMerged({ branch: defaultBranch, defaultBranch: upstreamRef }, { git });
-			defaultBranchUpdate = fullyMerged ? "would-reset" : "would-skip-diverged";
-			// Label the outcome with the same `<remote>/<branch>` ref the live run resets
-			// to, so the dry-run preview names the same ref as execution (not `@{u}`).
-			defaultBranchRemoteRef = remoteRef;
-		} else {
-			defaultBranchUpdate = "would-update";
-			defaultBranchBehind = behind;
-		}
-	} else if (mainWorktree) {
-		const ffResult = input.upstream
-			? await git.mergeFFOnly(mainWorktree.path, defaultBranch, input.upstream)
-			: await git.mergeFFOnly(mainWorktree.path, defaultBranch);
-		if (ffResult.success) {
-			defaultBranchUpdate = "ff-updated";
-			defaultBranchSynced = true;
-		} else {
-			// Fast-forward refused: the branch diverged (or the remote branch is missing /
-			// the tree is dirty). Reset to the remote only when every local commit is
-			// already present upstream AND the worktree is clean; otherwise leave it
-			// untouched and continue the run (R2/R3/R4). The discarded commits stay
-			// recoverable via reflog, which makes the silent safe-case reset acceptable.
-			defaultBranchRemoteRef = remoteRef;
-			const dirtyResult = await git.isDirty(mainWorktree.path);
-			// On an unreadable status, assume dirty and skip — never reset over unknown state.
-			const worktreeDirty = !dirtyResult.success || dirtyResult.data;
-			// Named `canReset` (not `fullyMerged`): the dirty guard is folded in, so this is
-			// false on a dirty-but-merged tree — it is the reset predicate, not the merge fact.
-			const canReset =
-				!worktreeDirty && (await isFullyMerged({ branch: defaultBranch, defaultBranch: remoteRef }, { git }));
-			if (canReset) {
-				const resetResult = await git.resetHardToRemote(mainWorktree.path, defaultBranch, syncRemote);
-				if (resetResult.success) {
-					defaultBranchUpdate = "reset";
-					defaultBranchSynced = true;
-				} else {
-					defaultBranchUpdate = "skipped-diverged";
-				}
-			} else {
-				defaultBranchUpdate = "skipped-diverged";
-			}
-		}
-	} else {
-		// Same remote as the fast-forward path above: which remote is authoritative for
-		// the default branch must not depend on whether it happens to be checked out.
-		const refResult = input.upstream
-			? await git.updateBranchRef(defaultBranch, input.upstream)
-			: await git.updateBranchRef(defaultBranch);
-		if (refResult.success) {
-			defaultBranchUpdate = "ref-updated";
-			defaultBranchSynced = true;
-		} else {
-			// Same divergence handling on the ref path (default branch checked out
-			// nowhere). No working tree, so no dirty guard — a fully-merged divergence
-			// force-updates the ref; a genuine one is skipped (R2/R4/R5).
-			defaultBranchRemoteRef = remoteRef;
-			const fullyMerged = await isFullyMerged({ branch: defaultBranch, defaultBranch: remoteRef }, { git });
-			if (fullyMerged) {
-				const forceResult = await git.forceUpdateBranchRef(defaultBranch, syncRemote);
-				if (forceResult.success) {
-					defaultBranchUpdate = "reset";
-					defaultBranchSynced = true;
-				} else {
-					defaultBranchUpdate = "skipped-diverged";
-				}
-			} else {
-				defaultBranchUpdate = "skipped-diverged";
-			}
+	// Discover the roots (WTK-64). The default branch is always a root; with an
+	// upstream remote, every other same-named branch on it is a root too — local
+	// when a local branch of that name exists (synced + used as a base by name),
+	// otherwise absent (a rebase target via its `<upstream>/<name>` ref, never
+	// synced and never created locally).
+	const worktreeByBranch = new Map(worktrees.filter((w) => w.branch).map((w) => [w.branch, w] as const));
+	const roots: Root[] = [{ name: defaultBranch, local: true, base: defaultBranch, worktreePath: mainWorktree?.path }];
+	if (input.upstream) {
+		const localBranchesResult = await git.listBranches();
+		const localBranches = new Set(localBranchesResult.success ? localBranchesResult.data : []);
+		const upstreamBranchesResult = await git.listRemoteBranchesFor(input.upstream);
+		// ignored: on failure no extra roots are discovered — the default stays the only root.
+		const upstreamBranches = upstreamBranchesResult.success ? upstreamBranchesResult.data : [];
+		for (const name of upstreamBranches) {
+			if (name === defaultBranch) continue;
+			const local = localBranches.has(name);
+			roots.push({
+				name,
+				local,
+				base: local ? name : `${input.upstream}/${name}`,
+				worktreePath: local ? worktreeByBranch.get(name)?.path : undefined,
+			});
 		}
 	}
+	const localRootNames = new Set(roots.filter((r) => r.local).map((r) => r.name));
+	const rootBases = new Set(roots.map((r) => r.base));
 
-	// When syncing the default branch from an upstream remote AND the sync actually
-	// completed (fast-forward or reset), run post-update hooks for the default branch
-	// too (mirrors the feature-branch path). Skipped in dry-run, and when the sync was
-	// left undone (diverged/dirty) — there is then no completed sync to react to or
-	// report, so `syncedFromUpstream` stays unset and no default-branch hooks run (R4).
-	if (input.upstream && !input.dryRun && defaultBranchSynced) {
-		syncedFromUpstream = input.upstream;
-		if (defaultBranchPath) {
-			defaultBranchHookNotifications = await runPostUpdateHooks(
-				{ path: defaultBranchPath, branch: defaultBranch },
-				`${input.upstream}/${defaultBranch}`,
-				input,
-				deps,
-			);
+	// Sync every LOCAL root from its own upstream (R1), each with the WTK-61
+	// divergence handling (R5). Absent roots are rebase targets only and cannot
+	// diverge, so they are skipped here.
+	const rootSyncByName = new Map<string, { report: RootSyncReport; synced: boolean }>();
+	for (const root of roots) {
+		if (!root.local) continue;
+		const result = await syncRoot(root, input, git);
+		if (input.upstream && !input.dryRun && result.synced) {
+			result.report.syncedFromUpstream = input.upstream;
 		}
+		rootSyncByName.set(root.name, result);
+	}
+
+	const defaultSync = rootSyncByName.get(defaultBranch);
+	if (!defaultSync) {
+		// Unreachable: the default branch is always the first local root.
+		return R.err(new Error("internal error: default branch was not synced"));
+	}
+	const defaultBranchUpdate = defaultSync.report.update;
+	const defaultBranchBehind = defaultSync.report.behind;
+	const defaultBranchRemoteRef = defaultSync.report.remoteRef;
+	const syncedFromUpstream = defaultSync.report.syncedFromUpstream;
+	const defaultBranchSynced = defaultSync.synced;
+	// Non-default local roots, in discovery order, for the CLI's per-root summary.
+	const rootSyncs = roots
+		.filter((r) => r.local && r.name !== defaultBranch)
+		.map((r) => rootSyncByName.get(r.name)?.report)
+		.filter((report): report is RootSyncReport => report !== undefined);
+
+	// When the default branch was actually synced from an upstream remote, run its
+	// post-update hooks too (mirrors the feature-branch path). Skipped in dry-run and
+	// when the sync was left undone (diverged/dirty) — `syncedFromUpstream` then stays
+	// unset and no default-branch hooks run (R4).
+	let defaultBranchHookNotifications: Notification[] = [];
+	if (input.upstream && !input.dryRun && defaultBranchSynced && defaultBranchPath) {
+		defaultBranchHookNotifications = await runPostUpdateHooks(
+			{ path: defaultBranchPath, branch: defaultBranch },
+			`${input.upstream}/${defaultBranch}`,
+			input,
+			deps,
+		);
 	}
 
 	const parentMap: Record<string, string> = {};
 	const retargetMap: Record<string, string> = {};
 	for (const wt of worktrees) {
-		if (!wt.branch || wt.branch === defaultBranch) continue;
-		const resolved = await findParentBranch(wt.branch, worktrees, defaultBranch, goneSet, git);
+		// Roots are never rebased — they are synced above and serve as bases.
+		if (!wt.branch || localRootNames.has(wt.branch)) continue;
+		const resolved = await findParentBranch(wt.branch, worktrees, defaultBranch, roots, localRootNames, goneSet, git);
 		parentMap[wt.branch] = resolved.parent;
 		if (resolved.retargetedFrom) {
 			retargetMap[wt.branch] = resolved.retargetedFrom;
 		}
 	}
 
-	const orderedWorktrees = buildRebaseOrder(worktrees, parentMap, defaultBranch);
+	const orderedWorktrees = buildRebaseOrder(worktrees, parentMap, defaultBranch, rootBases, localRootNames);
 
 	if (input.branch && input.branch !== defaultBranch && !worktrees.some((w) => w.branch === input.branch)) {
 		return R.err(new Error(`Branch "${input.branch}" not found in worktrees`));
@@ -614,6 +723,7 @@ export async function updateWorktrees(
 		defaultBranchBehind,
 		defaultBranchRemoteRef,
 		syncedFromUpstream,
+		rootSyncs,
 		reports,
 	});
 }

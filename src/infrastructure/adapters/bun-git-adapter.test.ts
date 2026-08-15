@@ -860,6 +860,40 @@ describe("BunGitAdapter", () => {
 			});
 		});
 
+		test("listRemoteBranchesFor returns only the named remote's branches, not other remotes'", async () => {
+			await using tmp = await createTempDir();
+			const fixture = await createRemoteFixture(tmp.path);
+			await fixture.addTrackedBranch("origin-only");
+
+			// A second remote 'upstream' with its own 'core' branch on top of main.
+			const upstreamBare = join(tmp.path, "upstream.git");
+			await Bun.$`git init --bare -b main ${upstreamBare}`.quiet();
+			await Bun.$`git -C ${fixture.repoPath} remote add upstream ${upstreamBare}`.quiet();
+			await Bun.$`git -C ${fixture.repoPath} push upstream main`.quiet();
+			await Bun.$`git -C ${fixture.repoPath} branch core`.quiet();
+			await Bun.$`git -C ${fixture.repoPath} push upstream core`.quiet();
+			await Bun.$`git -C ${fixture.repoPath} fetch upstream`.quiet();
+
+			await withCwd(fixture.repoPath, async () => {
+				const upstreamBranches = expectOk(await git.listRemoteBranchesFor("upstream"));
+				expect(upstreamBranches.sort()).toEqual(["core", "main"]);
+				// origin-only lives on origin, never on upstream — it must not leak in.
+				expect(upstreamBranches).not.toContain("origin-only");
+
+				const originBranches = expectOk(await git.listRemoteBranchesFor("origin"));
+				expect(originBranches.sort()).toEqual(["main", "origin-only"]);
+			});
+		});
+
+		test("listRemoteBranchesFor is empty for a remote with no tracking refs", async () => {
+			await using tmp = await createTempDir();
+			const fixture = await createRemoteFixture(tmp.path);
+
+			await withCwd(fixture.repoPath, async () => {
+				expect(expectOk(await git.listRemoteBranchesFor("ghost"))).toEqual([]);
+			});
+		});
+
 		test("deleteRemoteBranch removes the ref on the remote", async () => {
 			await using tmp = await createTempDir();
 			const fixture = await createRemoteFixture(tmp.path);

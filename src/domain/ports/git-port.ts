@@ -23,6 +23,14 @@ export interface GitPort {
 	listWorktrees(): Promise<Result<Worktree[], GitError>>;
 	listBranches(): Promise<Result<string[], GitError>>;
 	listRemoteBranches(): Promise<Result<string[], GitError>>;
+	/**
+	 * Bare branch names on a single remote, read from its remote-tracking refs
+	 * (`refs/remotes/<remote>/*`) after a fetch. Unlike {@link listRemoteBranches}
+	 * (which spans every remote and only strips the primary prefix), this is a
+	 * clean "branches on THIS remote" query — used to discover the upstream roots
+	 * a fork rebases onto. `HEAD` is excluded.
+	 */
+	listRemoteBranchesFor(remote: string): Promise<Result<string[], GitError>>;
 	branchExists(branch: string): Promise<Result<boolean, GitError>>;
 	getDefaultBranch(): Promise<Result<string, GitError>>;
 	createWorktree(branch: string, path: string, baseBranch?: string): Promise<Result<Worktree, GitError>>;
