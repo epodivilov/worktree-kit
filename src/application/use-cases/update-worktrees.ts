@@ -277,7 +277,9 @@ export async function updateWorktrees(
 			// is already upstream, else a would-skip. All reads, no mutation (N1).
 			const fullyMerged = await isFullyMerged({ branch: defaultBranch, defaultBranch: upstreamRef }, { git });
 			defaultBranchUpdate = fullyMerged ? "would-reset" : "would-skip-diverged";
-			defaultBranchRemoteRef = upstreamRef;
+			// Label the outcome with the same `<remote>/<branch>` ref the live run resets
+			// to, so the dry-run preview names the same ref as execution (not `@{u}`).
+			defaultBranchRemoteRef = remoteRef;
 		} else {
 			defaultBranchUpdate = "would-update";
 			defaultBranchBehind = behind;
@@ -299,9 +301,11 @@ export async function updateWorktrees(
 			const dirtyResult = await git.isDirty(mainWorktree.path);
 			// On an unreadable status, assume dirty and skip — never reset over unknown state.
 			const worktreeDirty = !dirtyResult.success || dirtyResult.data;
-			const fullyMerged =
+			// Named `canReset` (not `fullyMerged`): the dirty guard is folded in, so this is
+			// false on a dirty-but-merged tree — it is the reset predicate, not the merge fact.
+			const canReset =
 				!worktreeDirty && (await isFullyMerged({ branch: defaultBranch, defaultBranch: remoteRef }, { git }));
-			if (fullyMerged) {
+			if (canReset) {
 				const resetResult = await git.resetHardToRemote(mainWorktree.path, defaultBranch, syncRemote);
 				if (resetResult.success) {
 					defaultBranchUpdate = "reset";
