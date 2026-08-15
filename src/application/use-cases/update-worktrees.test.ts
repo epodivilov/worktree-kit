@@ -1632,3 +1632,290 @@ describe("updateWorktrees — default-branch divergence (WTK-61)", () => {
 		expect(forceUpdateBranchRefCalls).toEqual([]);
 	});
 });
+
+// WTK-64: a fork can have more than one long-lived root (default branch + any
+// branch mirroring a different upstream branch, e.g. `core`). Each local root is
+// synced from its own `<upstream>/<name>` and is a rebase base; a root that lives
+// only on the upstream remote is a rebase target via its remote-tracking ref.
+describe("updateWorktrees — multiple upstream roots (WTK-64)", () => {
+	type FfCall = { worktreePath: string; branch: string; remote: string };
+	type RefCall = { branch: string; remote: string };
+	type ResetCall = { worktreePath: string; branch: string; remote: string };
+
+	const coreWt: Worktree = { path: "/repo-core", branch: "core", head: "cTip", isMain: false, isPrunable: false };
+	const featF: Worktree = { path: "/repo-f", branch: "f", head: "fTip", isMain: false, isPrunable: false };
+
+	test("R1: a local core root with a worktree is fast-forwarded from upstream/core, never rebased onto main", async () => {
+		const mergeFFOnlyCalls: FfCall[] = [];
+		const rebaseCalls: FakeRebaseCall[] = [];
+		const git = createFakeGit({
+			worktrees: [mainWt, coreWt],
+			branches: ["main", "core"],
+			remoteBranchesByRemote: new Map([["upstream", ["main", "core"]]]),
+			mergeFFOnlyCalls,
+			rebaseCalls,
+		});
+
+		const output = expectOk(await updateWorktrees({ dryRun: false, upstream: "upstream" }, { git }));
+
+		expect(mergeFFOnlyCalls).toContainEqual({ worktreePath: "/repo-core", branch: "core", remote: "upstream" });
+		expect(rebaseCalls.find((c) => c.worktreePath === "/repo-core")).toBeUndefined();
+		const coreSync = output.rootSyncs.find((r) => r.branch === "core");
+		expect(coreSync?.update).toBe("ff-updated");
+		expect(coreSync?.syncedFromUpstream).toBe("upstream");
+		// A root is not a feature: it must not appear in the per-worktree rebase reports.
+		expect(output.reports.find((r) => r.branch === "core")).toBeUndefined();
+	});
+
+	test("R1: a local root with no worktree has its ref advanced from upstream via updateBranchRef", async () => {
+		const updateBranchRefCalls: RefCall[] = [];
+		const git = createFakeGit({
+			worktrees: [mainWt, featureA],
+			branches: ["main", "core", "feature-a"],
+			remoteBranchesByRemote: new Map([["upstream", ["main", "core"]]]),
+			updateBranchRefCalls,
+			...flatBranchesConfig([mainWt, featureA]),
+		});
+
+		const output = expectOk(await updateWorktrees({ dryRun: false, upstream: "upstream" }, { git }));
+
+		expect(updateBranchRefCalls).toContainEqual({ branch: "core", remote: "upstream" });
+		expect(output.rootSyncs.find((r) => r.branch === "core")?.update).toBe("ref-updated");
+	});
+
+	test("R2: a feature built on a local core root rebases onto core, not main", async () => {
+		const rebaseCalls: FakeRebaseCall[] = [];
+		const git = createFakeGit({
+			worktrees: [mainWt, coreWt, featF],
+			branches: ["main", "core", "f"],
+			remoteBranchesByRemote: new Map([["upstream", ["main", "core"]]]),
+			rebaseCalls,
+			mergeBaseMap: new Map([
+				["f:main", "root"],
+				["main:f", "root"],
+				["f:core", "cTip"],
+				["core:f", "cTip"],
+			]),
+			commitCountMap: new Map([
+				["root..f", 5],
+				["cTip..f", 2],
+				["cTip..core", 0],
+			]),
+		});
+
+		const output = expectOk(await updateWorktrees({ dryRun: false, upstream: "upstream" }, { git }));
+
+		const fReport = output.reports.find((r) => r.branch === "f");
+		expect(fReport?.parent).toBe("core");
+		expect(fReport?.result.status).toBe("rebased");
+		expect(rebaseCalls.find((c) => c.worktreePath === "/repo-f")?.onto).toBe("core");
+	});
+
+	test("R3: a feature whose base exists only on upstream rebases onto <upstream>/core and no local core is created", async () => {
+		const rebaseCalls: FakeRebaseCall[] = [];
+		const updateBranchRefCalls: RefCall[] = [];
+		const mergeFFOnlyCalls: FfCall[] = [];
+		const git = createFakeGit({
+			worktrees: [mainWt, featF],
+			branches: ["main", "f"], // no local core
+			remoteBranchesByRemote: new Map([["upstream", ["main", "core"]]]),
+			rebaseCalls,
+			updateBranchRefCalls,
+			mergeFFOnlyCalls,
+			mergeBaseMap: new Map([
+				["f:main", "root"],
+				["main:f", "root"],
+				["f:upstream/core", "cTip"],
+				["upstream/core:f", "cTip"],
+			]),
+			commitCountMap: new Map([
+				["root..f", 5],
+				["cTip..f", 2],
+				["cTip..upstream/core", 0],
+			]),
+		});
+
+		const output = expectOk(await updateWorktrees({ dryRun: false, upstream: "upstream" }, { git }));
+
+		const fReport = output.reports.find((r) => r.branch === "f");
+		expect(fReport?.parent).toBe("upstream/core");
+		expect(rebaseCalls.find((c) => c.worktreePath === "/repo-f")?.onto).toBe("upstream/core");
+		// The absent root is a rebase target only — never synced, never created as a local branch.
+		expect(updateBranchRefCalls.find((c) => c.branch === "core")).toBeUndefined();
+		expect(mergeFFOnlyCalls.find((c) => c.branch === "core")).toBeUndefined();
+		expect(output.rootSyncs.find((r) => r.branch === "core")).toBeUndefined();
+	});
+
+	test("R4: sibling features off the same root tip resolve to the root, not to each other", async () => {
+		const aWt: Worktree = { path: "/repo-a", branch: "a", head: "aTip", isMain: false, isPrunable: false };
+		const bWt: Worktree = { path: "/repo-b", branch: "b", head: "bTip", isMain: false, isPrunable: false };
+		const git = createFakeGit({
+			worktrees: [mainWt, coreWt, aWt, bWt],
+			branches: ["main", "core", "a", "b"],
+			remoteBranchesByRemote: new Map([["upstream", ["main", "core"]]]),
+			mergeBaseMap: new Map([
+				["a:main", "root"],
+				["main:a", "root"],
+				["b:main", "root"],
+				["main:b", "root"],
+				["a:core", "cTip"],
+				["core:a", "cTip"],
+				["b:core", "cTip"],
+				["core:b", "cTip"],
+				["a:b", "cTip"],
+				["b:a", "cTip"],
+			]),
+			commitCountMap: new Map([
+				["root..a", 4],
+				["root..b", 4],
+				["cTip..a", 1],
+				["cTip..b", 1],
+				["cTip..core", 0],
+			]),
+		});
+
+		const output = expectOk(await updateWorktrees({ dryRun: false, upstream: "upstream" }, { git }));
+
+		expect(output.reports.find((r) => r.branch === "a")?.parent).toBe("core");
+		expect(output.reports.find((r) => r.branch === "b")?.parent).toBe("core");
+	});
+
+	test("R4: a feature contained by both main and core picks core, the nearer ancestor", async () => {
+		const rebaseCalls: FakeRebaseCall[] = [];
+		const git = createFakeGit({
+			worktrees: [mainWt, coreWt, featF],
+			branches: ["main", "core", "f"],
+			remoteBranchesByRemote: new Map([["upstream", ["main", "core"]]]),
+			rebaseCalls,
+			mergeBaseMap: new Map([
+				["f:main", "root"],
+				["main:f", "root"],
+				["f:core", "cTip"],
+				["core:f", "cTip"],
+			]),
+			commitCountMap: new Map([
+				// f fully contains both main (root..main==0 via default handling) and core.
+				["root..f", 6],
+				["cTip..f", 2],
+				["cTip..core", 0],
+			]),
+		});
+
+		const output = expectOk(await updateWorktrees({ dryRun: false, upstream: "upstream" }, { git }));
+
+		// main is a (farther) ancestor; core wins because it is nearer.
+		expect(output.reports.find((r) => r.branch === "f")?.parent).toBe("core");
+		expect(rebaseCalls.find((c) => c.worktreePath === "/repo-f")?.onto).toBe("core");
+	});
+
+	test("R5 (safe reset): a fully-merged diverged core root is reset to upstream/core; features still rebase onto it", async () => {
+		const resetHardToRemoteCalls: ResetCall[] = [];
+		const git = createFakeGit({
+			worktrees: [mainWt, coreWt, featF],
+			branches: ["main", "core", "f"],
+			remoteBranchesByRemote: new Map([["upstream", ["main", "core"]]]),
+			mergeFFOnlyFailBranches: new Set(["core"]),
+			resetHardToRemoteCalls,
+			revListMap: new Map([["upstream/core..core", ["cc1"]]]),
+			revListCherryPickMap: new Map([["upstream/core...core", []]]),
+			mergeBaseMap: new Map([
+				["f:main", "root"],
+				["main:f", "root"],
+				["f:core", "cTip"],
+				["core:f", "cTip"],
+			]),
+			commitCountMap: new Map([
+				["upstream/core..core", 1],
+				["root..f", 5],
+				["cTip..f", 2],
+				["cTip..core", 0],
+			]),
+		});
+
+		const output = expectOk(await updateWorktrees({ dryRun: false, upstream: "upstream" }, { git }));
+
+		const coreSync = output.rootSyncs.find((r) => r.branch === "core");
+		expect(coreSync?.update).toBe("reset");
+		expect(coreSync?.remoteRef).toBe("upstream/core");
+		expect(resetHardToRemoteCalls).toContainEqual({ worktreePath: "/repo-core", branch: "core", remote: "upstream" });
+		// The default root is healthy and still synced; the run does not abort.
+		expect(output.defaultBranchUpdate).toBe("ff-updated");
+		const fReport = output.reports.find((r) => r.branch === "f");
+		expect(fReport?.parent).toBe("core");
+		expect(fReport?.result.status).toBe("rebased");
+	});
+
+	test("R5 (genuine skip): a genuinely diverged core root is left unchanged with a warning; the run continues", async () => {
+		const resetHardToRemoteCalls: ResetCall[] = [];
+		const git = createFakeGit({
+			worktrees: [mainWt, coreWt, featF],
+			branches: ["main", "core", "f"],
+			remoteBranchesByRemote: new Map([["upstream", ["main", "core"]]]),
+			mergeFFOnlyFailBranches: new Set(["core"]),
+			resetHardToRemoteCalls,
+			revListMap: new Map([["upstream/core..core", ["cc2", "cc1"]]]),
+			revListCherryPickMap: new Map([["upstream/core...core", ["cc2", "cc1"]]]),
+			mergeBaseMap: new Map([
+				["f:main", "root"],
+				["main:f", "root"],
+				["f:core", "cTip"],
+				["core:f", "cTip"],
+			]),
+			commitCountMap: new Map([
+				["upstream/core..core", 2],
+				["root..f", 5],
+				["cTip..f", 2],
+				["cTip..core", 0],
+			]),
+		});
+
+		const output = expectOk(await updateWorktrees({ dryRun: false, upstream: "upstream" }, { git }));
+
+		expect(output.rootSyncs.find((r) => r.branch === "core")?.update).toBe("skipped-diverged");
+		expect(resetHardToRemoteCalls).toEqual([]);
+		expect(output.defaultBranchUpdate).toBe("ff-updated");
+		// Feature on the skipped root still rebases onto its (un-advanced) local position.
+		expect(output.reports.find((r) => r.branch === "f")?.result.status).toBe("rebased");
+	});
+
+	test("R5 (dirty guard): a dirty checked-out core root is not reset even when fully merged; it is skipped and the run continues", async () => {
+		const resetHardToRemoteCalls: ResetCall[] = [];
+		const git = createFakeGit({
+			worktrees: [mainWt, coreWt, featF],
+			branches: ["main", "core", "f"],
+			remoteBranchesByRemote: new Map([["upstream", ["main", "core"]]]),
+			mergeFFOnlyFailBranches: new Set(["core"]),
+			dirtyWorktrees: new Set(["/repo-core"]),
+			resetHardToRemoteCalls,
+			revListMap: new Map([["upstream/core..core", ["cc1"]]]),
+			revListCherryPickMap: new Map([["upstream/core...core", []]]),
+			mergeBaseMap: new Map([
+				["f:main", "root"],
+				["main:f", "root"],
+				["f:core", "cTip"],
+				["core:f", "cTip"],
+			]),
+			commitCountMap: new Map([
+				["upstream/core..core", 1],
+				["root..f", 5],
+				["cTip..f", 2],
+				["cTip..core", 0],
+			]),
+		});
+
+		const output = expectOk(await updateWorktrees({ dryRun: false, upstream: "upstream" }, { git }));
+
+		expect(output.rootSyncs.find((r) => r.branch === "core")?.update).toBe("skipped-diverged");
+		expect(resetHardToRemoteCalls).toEqual([]);
+		expect(output.reports.find((r) => r.branch === "f")?.result.status).toBe("rebased");
+	});
+
+	test("R6: with no upstream resolved the default branch is the only root and there are no extra root syncs", async () => {
+		const git = createFakeGit({ worktrees: [mainWt, featureA], ...flatBranchesConfig([mainWt, featureA]) });
+
+		const output = expectOk(await updateWorktrees({ dryRun: false }, { git }));
+
+		expect(output.rootSyncs).toEqual([]);
+		expect(output.reports.find((r) => r.branch === "feature-a")?.parent).toBe("main");
+	});
+});

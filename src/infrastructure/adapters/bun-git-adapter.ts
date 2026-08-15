@@ -198,6 +198,32 @@ export function createBunGitAdapter(logger: LoggerPort, primaryRemote: string): 
 			}
 		},
 
+		async listRemoteBranchesFor(remote: string): Promise<Result<string[], GitError>> {
+			try {
+				// `lstrip=3` drops `refs/remotes/<remote>`, leaving the bare branch name
+				// (slashes in the branch survive). The remote's symref shows up as `HEAD`
+				// and is dropped — unlike `refname:short`, which shortens it ambiguously.
+				const { exitCode, stdout } = await runGit([
+					"for-each-ref",
+					"--format=%(refname:lstrip=3)",
+					`refs/remotes/${remote}/`,
+				]);
+				if (exitCode !== 0) {
+					return Result.err({ code: "NOT_A_REPO", message: "Not inside a git repository" });
+				}
+				const branches = stdout
+					.split("\n")
+					.filter(Boolean)
+					.filter((b) => b !== "HEAD");
+				return Result.ok(branches);
+			} catch {
+				return Result.err({
+					code: "UNKNOWN",
+					message: `Failed to list branches for remote "${remote}"`,
+				});
+			}
+		},
+
 		async branchExists(branch: string): Promise<Result<boolean, GitError>> {
 			try {
 				const { exitCode } = await runGit(["show-ref", "--verify", "--quiet", `refs/heads/${branch}`]);
