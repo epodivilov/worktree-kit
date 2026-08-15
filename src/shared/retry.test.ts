@@ -50,6 +50,10 @@ describe("withRetry", () => {
 		expect(calls).toBe(DEFAULT_MAX_ATTEMPTS);
 	});
 
+	test("DEFAULT_MAX_ATTEMPTS is pinned to 5 (the documented ~2s retry budget)", () => {
+		expect(DEFAULT_MAX_ATTEMPTS).toBe(5);
+	});
+
 	test("a fatal attempt returns immediately with no retry", async () => {
 		let calls = 0;
 		const attempt = async (): Promise<RetryOutcome<string>> => {
