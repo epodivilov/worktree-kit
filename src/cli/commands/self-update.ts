@@ -6,6 +6,7 @@ import { writeUpdateCache } from "../../application/use-cases/check-for-updates.
 import type { Container } from "../../infrastructure/container.ts";
 import { fetchLatestVersion } from "../../infrastructure/github-releases.ts";
 import { Result as R, type Result } from "../../shared/result.ts";
+import { DEFAULT_MAX_ATTEMPTS, isTransientStatus, type RetryOutcome, withRetry } from "../../shared/retry.ts";
 import { getCacheDir } from "../../shared/xdg-paths.ts";
 import { EXIT_FAILURE } from "../exit-codes.ts";
 import { GLOBAL_ARGS } from "../global-args.ts";
@@ -100,37 +101,17 @@ function formatMb(bytes: number): string {
 /**
  * Maximum number of binary-download attempts before `self-update` gives up.
  *
- * Bun 1.3.x throws a connection-level `fetch` error ("The socket connection was
- * closed unexpectedly") intermittently on the initial github.com 302 hop
- * (WTK-59). Each `self-update` is a fresh one-shot request, so a bounded retry
- * lets a transient throw recover instead of failing the whole command.
+ * Aliases the shared {@link DEFAULT_MAX_ATTEMPTS}: the binary download and the
+ * release-check fetch share one bounded-retry budget. Bun 1.3.x intermittently
+ * throws a connection-level `fetch` error ("The socket connection was closed
+ * unexpectedly") on the github.com 302 hop (WTK-59), so a bounded retry lets a
+ * transient throw recover instead of failing the whole command. Re-exported for
+ * the download-retry tests.
  */
-export const MAX_DOWNLOAD_ATTEMPTS = 5;
-
-/**
- * Short, linear escalating backoff between download retries (200ms per prior
- * attempt). `self-update` is interactive, so the worst case stays bounded
- * (200+400+600+800 ≈ 2s across all retries) and the command cannot hang for
- * minutes.
- */
-function downloadBackoffMs(attempt: number): number {
-	return attempt * 200;
-}
-
-const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+export const MAX_DOWNLOAD_ATTEMPTS = DEFAULT_MAX_ATTEMPTS;
 
 function toError(err: unknown): Error {
 	return err instanceof Error ? err : new Error(String(err));
-}
-
-/**
- * A 5xx or 429 from the release CDN (objects.githubusercontent.com) is
- * transient — the same recoverable class as a thrown socket error, just
- * surfaced as an HTTP status, so it is retried. Every other non-OK status
- * (404 missing asset, 403, …) is deterministic and must fail fast.
- */
-function isTransientStatus(status: number): boolean {
-	return status === 429 || status >= 500;
 }
 
 interface DownloadBinaryDeps {
@@ -144,28 +125,20 @@ interface DownloadBinaryDeps {
 	sleep?: (ms: number) => Promise<void>;
 }
 
-/**
- * Outcome of a single download attempt. A `retriable` failure (a thrown
- * network/connection error, a mid-stream drop, or a transient 5xx/429) is
- * re-attempted with backoff; a `fatal` failure (a deterministic 4xx, an empty
- * body, or post-download setup) short-circuits on the first response.
- */
-type AttemptOutcome = { kind: "ok" } | { kind: "retriable"; error: Error } | { kind: "fatal"; error: Error };
-
 export async function downloadBinary(
 	tag: string,
 	binaryName: string,
 	targetPath: string,
 	deps: DownloadBinaryDeps,
 ): Promise<Result<void>> {
-	const { platform, quarantineRemover, warn, onProgress, fetchImpl = fetch, sleep = defaultSleep } = deps;
+	const { platform, quarantineRemover, warn, onProgress, fetchImpl = fetch, sleep } = deps;
 	const url = `https://github.com/${REPO}/releases/download/${tag}/${binaryName}`;
 	const tmpPath = `${targetPath}.tmp`;
 
 	// One download attempt: fetch → classify status → stream to the tmp file →
 	// install. Failures are classified as retriable/fatal exactly once here; the
-	// loop below owns the single sleep/continue-vs-return decision.
-	const attemptDownload = async (): Promise<AttemptOutcome> => {
+	// shared `withRetry` below owns the single sleep/continue-vs-return decision.
+	const attemptDownload = async (): Promise<RetryOutcome<void>> => {
 		let res: Response;
 		try {
 			res = await fetchImpl(url, {
@@ -233,18 +206,13 @@ export async function downloadBinary(
 			};
 		}
 
-		return { kind: "ok" };
+		return { kind: "ok", value: undefined };
 	};
 
 	// Bounded retry: `ok`/`fatal` return immediately; a `retriable` attempt backs
-	// off and re-attempts until the bound, then fails with the last attempt's error.
-	for (let attempt = 1; ; attempt++) {
-		const outcome = await attemptDownload();
-		if (outcome.kind === "ok") return R.ok(undefined);
-		if (outcome.kind === "fatal") return R.err(outcome.error);
-		if (attempt >= MAX_DOWNLOAD_ATTEMPTS) return R.err(outcome.error);
-		await sleep(downloadBackoffMs(attempt));
-	}
+	// off and re-attempts until MAX_DOWNLOAD_ATTEMPTS, then fails with the last
+	// attempt's error. The shared bound and linear backoff apply by default.
+	return withRetry(attemptDownload, { sleep });
 }
 
 export function selfUpdateCommand(container: Container) {
