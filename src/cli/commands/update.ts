@@ -203,7 +203,7 @@ export function updateCommand(container: Container) {
 
 				// Set by the use case for every divergence outcome; the fallback is never
 				// reached for those, it only keeps the label well-formed for other outcomes.
-				const remoteRefLabel = defaultBranchRemoteRef ?? `${defaultBranch}`;
+				const remoteRefLabel = defaultBranchRemoteRef ?? defaultBranch;
 
 				// The reset / skipped-diverged outcomes are evaluated BEFORE the
 				// `syncedFromUpstream` catch: a skip would otherwise print "synced from …"
@@ -238,8 +238,12 @@ export function updateCommand(container: Container) {
 					ui.success(`${defaultBranch} synced from ${syncedFromUpstream}/${defaultBranch}`);
 				} else if (defaultBranchUpdate === "ff-updated") {
 					ui.success(`${defaultBranch} fast-forwarded`);
-				} else {
+				} else if (defaultBranchUpdate === "ref-updated") {
 					ui.success(`${defaultBranch} ref updated`);
+				} else {
+					// Exhaustiveness guard: a new defaultBranchUpdate variant must add its own branch.
+					const _exhaustive: never = defaultBranchUpdate;
+					throw new Error(`Unhandled default-branch outcome: ${_exhaustive}`);
 				}
 
 				// The primary per-worktree outcome is already shown live in the multi-spinner

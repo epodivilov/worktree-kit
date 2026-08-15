@@ -1609,9 +1609,15 @@ describe("updateWorktrees — default-branch divergence (WTK-61)", () => {
 		base.commitCountMap.set("main..main@{u}", 2);
 		base.commitCountMap.set("main@{u}..main", 2);
 		const mergeFFOnlyCalls: { worktreePath: string; branch: string; remote: string }[] = [];
+		const updateBranchRefCalls: ForceRefCall[] = [];
+		const resetHardToRemoteCalls: ResetCall[] = [];
+		const forceUpdateBranchRefCalls: ForceRefCall[] = [];
 		const git = createFakeGit({
 			worktrees,
 			mergeFFOnlyCalls,
+			updateBranchRefCalls,
+			resetHardToRemoteCalls,
+			forceUpdateBranchRefCalls,
 			...genuineDivergenceMaps("main@{u}"),
 			...base,
 		});
@@ -1619,6 +1625,10 @@ describe("updateWorktrees — default-branch divergence (WTK-61)", () => {
 		const output = expectOk(await updateWorktrees({ dryRun: true }, { git }));
 
 		expect(output.defaultBranchUpdate).toBe("would-skip-diverged");
+		// No mutating primitive runs under dry-run.
 		expect(mergeFFOnlyCalls).toEqual([]);
+		expect(updateBranchRefCalls).toEqual([]);
+		expect(resetHardToRemoteCalls).toEqual([]);
+		expect(forceUpdateBranchRefCalls).toEqual([]);
 	});
 });
