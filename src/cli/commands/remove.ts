@@ -191,7 +191,7 @@ export function removeCommand(container: Container) {
 						// Locked is benign — resolve the spinner neutrally and let the warn
 						// group carry the unlock instruction (no red error).
 						spinner.stop(pc.yellow(`Worktree "${displayLabel}" skipped (locked)`));
-						warnLockedWorktreesGroup(ui, [{ branch: wt.branch, path: wt.path }]);
+						warnLockedWorktreesGroup(ui, [{ branch: wt.branch, path: wt.path }], "wt remove");
 					} else {
 						const doneMessage = wt.isPrunable
 							? `Orphaned worktree "${wt.path}" pruned`
@@ -341,7 +341,7 @@ export function removeCommand(container: Container) {
 
 					// Locked worktrees are expected, not failures — report them as a single
 					// grouped, copy-paste-ready warning (see WTK-62).
-					warnLockedWorktreesGroup(ui, lockedWorktrees);
+					warnLockedWorktreesGroup(ui, lockedWorktrees, "wt remove");
 
 					// Prompt to force-delete unmerged branches
 					if (unmergedBranches.length > 0) {

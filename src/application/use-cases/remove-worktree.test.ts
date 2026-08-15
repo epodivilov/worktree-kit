@@ -66,7 +66,7 @@ describe("removeWorktree", () => {
 		expect(output).toEqual({ status: "pruned", removedPath: "/repo-detached" });
 	});
 
-	test("classifies a locked worktree as a skipped outcome carrying path + reason", async () => {
+	test("classifies a locked worktree as a skipped outcome carrying path", async () => {
 		const git = createFakeGit({
 			worktrees: [main, feature],
 			lockedWorktrees: new Map([[feature.path, "claude agent task-xyz (pid 1234)"]]),
@@ -79,7 +79,6 @@ describe("removeWorktree", () => {
 		expect(output).toEqual({
 			status: "locked",
 			path: feature.path,
-			reason: "claude agent task-xyz (pid 1234)",
 		});
 
 		// Locked worktree must not be removed.

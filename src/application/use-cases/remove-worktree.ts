@@ -15,14 +15,13 @@ export interface RemoveWorktreeInput {
  * - `pruned`  — an orphaned (prunable) worktree was pruned.
  * - `locked`  — git refused because the worktree is locked (e.g. another task
  *               holds it). This is an expected, benign state — NOT a failure —
- *               so it is surfaced on the success channel with the `path` and the
- *               (possibly empty) lock `reason`, letting the CLI group it instead
- *               of rendering a red error.
+ *               so it is surfaced on the success channel with the `path`,
+ *               letting the CLI group it instead of rendering a red error.
  */
 export type RemoveWorktreeOutput =
 	| { status: "removed"; removedPath: string }
 	| { status: "pruned"; removedPath: string }
-	| { status: "locked"; path: string; reason: string };
+	| { status: "locked"; path: string };
 
 export interface RemoveWorktreeDeps {
 	git: GitPort;
@@ -50,7 +49,7 @@ export async function removeWorktree(
 	const removeResult = await git.removeWorktree(worktree.path, { force: input.force });
 	if (!removeResult.success) {
 		if (removeResult.error.code === "WORKTREE_LOCKED") {
-			return R.ok({ status: "locked", path: worktree.path, reason: removeResult.error.message.trim() });
+			return R.ok({ status: "locked", path: worktree.path });
 		}
 		return R.err(new Error(`Failed to remove worktree: ${removeResult.error.message}`));
 	}

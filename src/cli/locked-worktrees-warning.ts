@@ -20,13 +20,13 @@ function worktreeDisplayName(wt: LockedWorktree): string {
  * renders one calm block: a count header, one entry per worktree (its name plus a
  * copy-paste `git worktree unlock "<path>"` line), and a closing re-run hint.
  *
- * Shared by `wt remove` (WTK-62) and `wt cleanup` (WTK-63); the latter passes its
- * own `rerunCommand`. No-op when nothing was skipped.
+ * Intended for reuse by `wt cleanup` (WTK-63), which will pass its own
+ * `rerunCommand`. No-op when nothing was skipped.
  */
 export function warnLockedWorktreesGroup(
 	ui: Pick<UiPort, "warn">,
 	locked: LockedWorktree[],
-	rerunCommand = "wt remove",
+	rerunCommand: string,
 ): void {
 	if (locked.length === 0) return;
 
