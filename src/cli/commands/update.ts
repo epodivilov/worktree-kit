@@ -18,6 +18,7 @@ import { Result } from "../../shared/result.ts";
 import { CleanupHandle } from "../cleanup-handle.ts";
 import { EXIT_CANCEL, EXIT_FAILURE } from "../exit-codes.ts";
 import { GLOBAL_ARGS } from "../global-args.ts";
+import { type LockedWorktree, warnLockedWorktreesGroup } from "../locked-worktrees-warning.ts";
 import { resolveUpstream } from "../resolve-upstream.ts";
 import { CommandError, runCommand } from "../run-command.ts";
 
@@ -389,6 +390,8 @@ export function updateCommand(container: Container) {
 				const dp = (p: string | null) =>
 					p && cleanupRepoRoot ? formatDisplayPath(p, cleanupRepoRoot) : (p ?? "(unknown)");
 
+				const lockedWorktrees: LockedWorktree[] = [];
+
 				for (const cleanupReport of cleanupResult.data.reports) {
 					switch (cleanupReport.result.status) {
 						case "cleaned":
@@ -432,8 +435,23 @@ export function updateCommand(container: Container) {
 						case "error":
 							ui.error(`${cleanupReport.branch} — ${cleanupReport.result.message}`);
 							break;
+						case "skipped-locked":
+							// Mirror `wt cleanup`: collect locked worktrees into one calm warn
+							// group (rendered after the loop) instead of a red error per worktree.
+							lockedWorktrees.push({
+								branch: cleanupReport.branch || dp(cleanupReport.result.path),
+								path: cleanupReport.result.path,
+							});
+							break;
+						default: {
+							// Exhaustiveness guard: a new cleanup status must add its own branch.
+							const _exhaustive: never = cleanupReport.result;
+							throw new Error(`Unhandled cleanup status: ${_exhaustive}`);
+						}
 					}
 				}
+
+				warnLockedWorktreesGroup(ui, lockedWorktrees, "wt update");
 
 				ui.outro(outroMessage);
 			}, ui);

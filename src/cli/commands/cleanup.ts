@@ -202,6 +202,15 @@ export function cleanupCommand(container: Container) {
 						case "error":
 							ui.error(`${report.branch} — ${report.result.message}`);
 							break;
+						case "dry-run":
+						case "orphan-dry-run":
+							// The execution pass (dryRun: false) never emits dry-run statuses.
+							break;
+						default: {
+							// Exhaustiveness guard: a new cleanup status must add its own branch.
+							const _exhaustive: never = report.result;
+							throw new Error(`Unhandled cleanup status: ${_exhaustive}`);
+						}
 					}
 				}
 
