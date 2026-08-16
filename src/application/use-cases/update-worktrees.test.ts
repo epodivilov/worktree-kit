@@ -1746,6 +1746,63 @@ describe("updateWorktrees — multiple upstream roots (WTK-64)", () => {
 		expect(output.rootSyncs.find((r) => r.branch === "core")).toBeUndefined();
 	});
 
+	test("R2 (advanced root): a feature on local core rebases onto core even after core advanced past the fork point", async () => {
+		const rebaseCalls: FakeRebaseCall[] = [];
+		const git = createFakeGit({
+			worktrees: [mainWt, coreWt, featF],
+			branches: ["main", "core", "f"],
+			remoteBranchesByRemote: new Map([["upstream", ["main", "core"]]]),
+			rebaseCalls,
+			mergeBaseMap: new Map([
+				["f:main", "root"],
+				["main:f", "root"],
+				["f:core", "C0"],
+				["core:f", "C0"],
+			]),
+			commitCountMap: new Map([
+				["root..f", 10],
+				["C0..f", 2],
+				// core was synced forward and now sits 3 commits past f's fork — no longer a
+				// strict ancestor of f, but still f's base.
+				["C0..core", 3],
+			]),
+		});
+
+		const output = expectOk(await updateWorktrees({ dryRun: false, upstream: "upstream" }, { git }));
+
+		const fReport = output.reports.find((r) => r.branch === "f");
+		expect(fReport?.parent).toBe("core");
+		expect(rebaseCalls.find((c) => c.worktreePath === "/repo-f")?.onto).toBe("core");
+	});
+
+	test("R3 (advanced absent root): a feature rebases onto upstream/core even after fetch advanced it past the fork", async () => {
+		const rebaseCalls: FakeRebaseCall[] = [];
+		const git = createFakeGit({
+			worktrees: [mainWt, featF],
+			branches: ["main", "f"],
+			remoteBranchesByRemote: new Map([["upstream", ["main", "core"]]]),
+			rebaseCalls,
+			mergeBaseMap: new Map([
+				["f:main", "root"],
+				["main:f", "root"],
+				["f:upstream/core", "C0"],
+				["upstream/core:f", "C0"],
+			]),
+			commitCountMap: new Map([
+				["root..f", 10],
+				["C0..f", 2],
+				// fetch advanced upstream/core 3 commits past f's fork.
+				["C0..upstream/core", 3],
+			]),
+		});
+
+		const output = expectOk(await updateWorktrees({ dryRun: false, upstream: "upstream" }, { git }));
+
+		const fReport = output.reports.find((r) => r.branch === "f");
+		expect(fReport?.parent).toBe("upstream/core");
+		expect(rebaseCalls.find((c) => c.worktreePath === "/repo-f")?.onto).toBe("upstream/core");
+	});
+
 	test("R4: sibling features off the same root tip resolve to the root, not to each other", async () => {
 		const aWt: Worktree = { path: "/repo-a", branch: "a", head: "aTip", isMain: false, isPrunable: false };
 		const bWt: Worktree = { path: "/repo-b", branch: "b", head: "bTip", isMain: false, isPrunable: false };
