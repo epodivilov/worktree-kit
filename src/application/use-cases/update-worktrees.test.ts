@@ -1667,6 +1667,27 @@ describe("updateWorktrees — multiple upstream roots (WTK-64)", () => {
 		expect(output.reports.find((r) => r.branch === "core")).toBeUndefined();
 	});
 
+	test("R1 (hooks): a synced checked-out non-default root runs its post-update hooks", async () => {
+		const shell = createFakeShell();
+		const git = createFakeGit({
+			worktrees: [mainWt, coreWt],
+			branches: ["main", "core"],
+			remoteBranchesByRemote: new Map([["upstream", ["main", "core"]]]),
+		});
+
+		const output = expectOk(
+			await updateWorktrees(
+				{ dryRun: false, upstream: "upstream", postUpdateHooks: ["echo done"], repoRoot: "/repo" },
+				{ git, shell },
+			),
+		);
+
+		const coreSync = output.rootSyncs.find((r) => r.branch === "core");
+		expect(coreSync?.update).toBe("ff-updated");
+		expect(coreSync?.hookNotifications).toHaveLength(1);
+		expect(coreSync?.hookNotifications?.[0]?.level).toBe("info");
+	});
+
 	test("R1: a local root with no worktree has its ref advanced from upstream via updateBranchRef", async () => {
 		const updateBranchRefCalls: RefCall[] = [];
 		const git = createFakeGit({
