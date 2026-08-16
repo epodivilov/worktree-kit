@@ -17,8 +17,6 @@ export interface FakeGitOptions {
 	remoteBranches?: string[];
 	/** Bare branch names per remote, returned by listRemoteBranchesFor(remote). */
 	remoteBranchesByRemote?: Map<string, string[]>;
-	/** Records every listRemoteBranchesFor(remote) call. */
-	listRemoteBranchesForCalls?: string[];
 	mergedBranches?: string[];
 	goneBranches?: string[];
 	defaultBranch?: string;
@@ -129,7 +127,6 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 			if (!isRepo) {
 				return Result.err({ code: "NOT_A_REPO", message: "Not inside a git repository" });
 			}
-			options.listRemoteBranchesForCalls?.push(remote);
 			const configured = options.remoteBranchesByRemote?.get(remote);
 			if (configured !== undefined) {
 				return Result.ok([...configured]);
