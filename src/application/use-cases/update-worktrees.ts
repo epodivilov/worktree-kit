@@ -232,6 +232,27 @@ async function ancestorDistance(git: GitPort, branch: string, candidateRef: stri
 	return distance.data;
 }
 
+/**
+ * Merge-base distance: how many commits `branch` carries past its common ancestor
+ * with `ref`. Returns null when there is no shared history, or when `branch` has
+ * nothing past the merge-base (distance 0).
+ *
+ * Unlike {@link ancestorDistance} this does NOT require `ref` to be a true ancestor.
+ * It is used for ROOTS, whose identity is structural — a name on the upstream
+ * remote — not ancestral. A root that has advanced past `branch`'s fork point (its
+ * upstream moved, or `fetch` advanced its remote-tracking ref) is no longer a strict
+ * ancestor of `branch`, yet it is still `branch`'s base and must stay eligible
+ * (R2 local root, R3 absent root). The strict ancestor test is reserved for sibling
+ * worktree branches, where it correctly excludes a non-ancestor sibling (R4).
+ */
+async function baseDistance(git: GitPort, branch: string, ref: string): Promise<number | null> {
+	const mergeBase = await git.getMergeBase(branch, ref);
+	if (!mergeBase.success) return null;
+	const distance = await git.getCommitCount(mergeBase.data, branch);
+	if (!distance.success || distance.data === 0) return null;
+	return distance.data;
+}
+
 async function findParentBranch(
 	branch: string,
 	worktrees: Worktree[],
@@ -256,11 +277,16 @@ async function findParentBranch(
 		}
 	}
 
-	// Non-default roots (local branches or upstream-only refs), each a candidate
-	// only when it is a true ancestor of the branch (R2/R3/R4). Roots never go gone.
+	// Non-default roots (local branches or upstream-only refs). A root is a base by
+	// STRUCTURE — its name exists on the upstream remote — not by ancestry, so it is
+	// matched by merge-base nearness like the default branch above. A root that
+	// advanced past this branch's fork point (its upstream moved, or `fetch` advanced
+	// its remote-tracking ref) is no longer a strict ancestor but is still this
+	// branch's base and must stay eligible (R2 local, R3 absent). The strict ancestor
+	// filter is reserved for the sibling worktree branches below. Roots never go gone.
 	for (const root of roots) {
 		if (root.name === defaultBranch) continue;
-		const distance = await ancestorDistance(git, branch, root.base);
+		const distance = await baseDistance(git, branch, root.base);
 		if (distance !== null) {
 			candidates.push({ branch: root.base, distance, gone: false });
 		}
