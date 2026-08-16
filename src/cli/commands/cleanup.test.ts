@@ -294,7 +294,7 @@ describe("cleanup — locked worktrees reported as a skipped group", () => {
 		const group = groups[0] as string;
 
 		// Header states the count.
-		expect(group).toContain("2");
+		expect(group).toContain("2 worktrees skipped");
 		// One line per worktree: its name + copy-paste unlock command.
 		expect(group).toContain("feature");
 		expect(group).toContain(`git worktree unlock "${featureWt.path}"`);
