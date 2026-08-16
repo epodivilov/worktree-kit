@@ -245,7 +245,7 @@ async function ancestorDistance(git: GitPort, branch: string, candidateRef: stri
  * (R2 local root, R3 absent root). The strict ancestor test is reserved for sibling
  * worktree branches, where it correctly excludes a non-ancestor sibling (R4).
  */
-async function baseDistance(git: GitPort, branch: string, ref: string): Promise<number | null> {
+async function mergeBaseDistance(git: GitPort, branch: string, ref: string): Promise<number | null> {
 	const mergeBase = await git.getMergeBase(branch, ref);
 	if (!mergeBase.success) return null;
 	const distance = await git.getCommitCount(mergeBase.data, branch);
@@ -286,7 +286,7 @@ async function findParentBranch(
 	// filter is reserved for the sibling worktree branches below. Roots never go gone.
 	for (const root of roots) {
 		if (root.name === defaultBranch) continue;
-		const distance = await baseDistance(git, branch, root.base);
+		const distance = await mergeBaseDistance(git, branch, root.base);
 		if (distance !== null) {
 			candidates.push({ branch: root.base, distance, gone: false });
 		}
