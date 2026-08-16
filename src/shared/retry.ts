@@ -47,7 +47,6 @@ export function isTransientStatus(status: number): boolean {
 
 export interface RetryOptions {
 	maxAttempts?: number;
-	backoffMs?: (attempt: number) => number;
 	/** Injectable backoff sleep; tests pass a no-op to avoid real timers. */
 	sleep?: (ms: number) => Promise<void>;
 }
@@ -64,13 +63,13 @@ export async function withRetry<T>(
 	attempt: () => Promise<RetryOutcome<T>>,
 	opts: RetryOptions = {},
 ): Promise<Result<T>> {
-	const { maxAttempts = DEFAULT_MAX_ATTEMPTS, backoffMs = defaultBackoffMs, sleep = defaultSleep } = opts;
+	const { maxAttempts = DEFAULT_MAX_ATTEMPTS, sleep = defaultSleep } = opts;
 
 	for (let n = 1; ; n++) {
 		const outcome = await attempt();
 		if (outcome.kind === "ok") return R.ok(outcome.value);
 		if (outcome.kind === "fatal") return R.err(outcome.error);
 		if (n >= maxAttempts) return R.err(outcome.error);
-		await sleep(backoffMs(n));
+		await sleep(defaultBackoffMs(n));
 	}
 }
