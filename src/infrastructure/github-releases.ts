@@ -37,12 +37,8 @@ export async function fetchLatestVersion(deps: FetchLatestVersionDeps = {}): Pro
 				signal: AbortSignal.timeout(15_000),
 			});
 		} catch (err) {
-			const error =
-				err instanceof Error && err.name === "TimeoutError"
-					? new Error("GitHub API timeout")
-					: err instanceof Error
-						? err
-						: new Error(String(err));
+			const cause = err instanceof Error ? err : new Error(String(err));
+			const error = cause.name === "TimeoutError" ? new Error("GitHub API timeout") : cause;
 			return { kind: "retriable", error };
 		}
 
