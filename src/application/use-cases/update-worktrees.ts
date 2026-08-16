@@ -79,6 +79,13 @@ export interface RootSyncReport {
 	remoteRef?: string;
 	/** Upstream remote name when the root was actually synced from upstream. */
 	syncedFromUpstream?: string;
+	/**
+	 * Post-update hook results for a checked-out non-default root that was synced
+	 * (WTK-64). The default branch surfaces its hooks via its is-default-branch
+	 * report instead; a ref-only root (checked out nowhere) has no worktree to run
+	 * hooks in, so this stays unset for it.
+	 */
+	hookNotifications?: Notification[];
 }
 
 export interface UpdateWorktreesOutput {
@@ -463,6 +470,17 @@ export async function updateWorktrees(
 		const result = await syncRoot(root, input, git);
 		if (input.upstream && !input.dryRun && result.synced) {
 			result.report.syncedFromUpstream = input.upstream;
+			// A non-default root runs its post-update hooks here; the default branch
+			// runs them below and surfaces them via its is-default-branch report. Only a
+			// checked-out root has a worktree to run hooks in.
+			if (root.name !== defaultBranch && root.worktreePath) {
+				result.report.hookNotifications = await runPostUpdateHooks(
+					{ path: root.worktreePath, branch: root.name },
+					`${input.upstream}/${root.name}`,
+					input,
+					deps,
+				);
+			}
 		}
 		rootSyncByName.set(root.name, result);
 	}

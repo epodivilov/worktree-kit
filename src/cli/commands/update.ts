@@ -261,6 +261,11 @@ export function updateCommand(container: Container) {
 				});
 				for (const rootSync of rootSyncs) {
 					renderRootSync(ui, rootSync);
+					const rootHookFailures = (rootSync.hookNotifications ?? []).filter((n) => n.level === "warn");
+					if (rootHookFailures.length > 0) {
+						const failMsgs = rootHookFailures.map((n) => n.message).join("; ");
+						ui.warn(`${rootSync.branch} post-update hooks — ${failMsgs}`);
+					}
 				}
 
 				// The primary per-worktree outcome is already shown live in the multi-spinner
