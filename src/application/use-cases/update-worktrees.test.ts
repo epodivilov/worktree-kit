@@ -1808,6 +1808,50 @@ describe("updateWorktrees — multiple upstream roots (WTK-64)", () => {
 		expect(rebaseCalls.find((c) => c.worktreePath === "/repo-f")?.onto).toBe("core");
 	});
 
+	test("R4 (guard): a non-ancestor sibling that is strictly nearer than every root is still excluded", async () => {
+		// Topology: main(M) → core(C) → X → {a, b}. The two features share the deeper
+		// base X, so mergeBase(a,b)=X gives the sibling distance 1 — STRICTLY nearer than
+		// the true ancestor core (distance 2) or main (distance 3). Only the true-ancestor
+		// guard keeps `a` off `b`; without it `a` wrongly rebases onto its sibling and
+		// history is corrupted. (Unlike the same-tip sibling case, `core` cannot win here
+		// by a distance tie or stable-sort order — the sibling is the nearest candidate.)
+		const aWt: Worktree = { path: "/repo-a", branch: "a", head: "aTip", isMain: false, isPrunable: false };
+		const bWt: Worktree = { path: "/repo-b", branch: "b", head: "bTip", isMain: false, isPrunable: false };
+		const rebaseCalls: FakeRebaseCall[] = [];
+		const git = createFakeGit({
+			worktrees: [mainWt, coreWt, aWt, bWt],
+			branches: ["main", "core", "a", "b"],
+			remoteBranchesByRemote: new Map([["upstream", ["main", "core"]]]),
+			rebaseCalls,
+			mergeBaseMap: new Map([
+				["a:main", "M"],
+				["b:main", "M"],
+				["a:core", "C"],
+				["b:core", "C"],
+				["a:b", "X"],
+				["b:a", "X"],
+			]),
+			commitCountMap: new Map([
+				["M..a", 3],
+				["M..b", 3],
+				["C..a", 2],
+				["C..b", 2],
+				["C..core", 0],
+				["X..a", 1],
+				["X..b", 1],
+			]),
+		});
+
+		const output = expectOk(await updateWorktrees({ dryRun: false, upstream: "upstream" }, { git }));
+
+		// The strictly-nearer sibling must NOT be chosen: each feature resolves to its
+		// true-ancestor root, never to the other feature.
+		expect(output.reports.find((r) => r.branch === "a")?.parent).toBe("core");
+		expect(output.reports.find((r) => r.branch === "b")?.parent).toBe("core");
+		expect(rebaseCalls.find((c) => c.worktreePath === "/repo-a")?.onto).toBe("core");
+		expect(rebaseCalls.find((c) => c.worktreePath === "/repo-b")?.onto).toBe("core");
+	});
+
 	test("R5 (safe reset): a fully-merged diverged core root is reset to upstream/core; features still rebase onto it", async () => {
 		const resetHardToRemoteCalls: ResetCall[] = [];
 		const git = createFakeGit({
