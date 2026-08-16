@@ -13,6 +13,17 @@ const SKIP_FLAGS = new Set(["--help", "-h", "--version", "-v"]);
 // version in its closure and would print after a successful upgrade.
 const SKIP_COMMANDS = new Set(["self-update"]);
 
+/**
+ * Backoff sleep whose timer does not keep the event loop alive. The update check
+ * runs fire-and-forget, so its retries must never delay the shell prompt past the
+ * foreground command; the interactive `self-update` path keeps the default (ref'd)
+ * sleep so its own retries still hold the process while it works.
+ */
+const unrefSleep = (ms: number): Promise<void> =>
+	new Promise((resolve) => {
+		setTimeout(resolve, ms).unref();
+	});
+
 export async function runUpdateNotifier(container: Container, currentVersion: string): Promise<void> {
 	if (!process.stdout.isTTY) return;
 	if (process.argv.some((arg) => SKIP_FLAGS.has(arg) || SKIP_COMMANDS.has(arg))) return;
@@ -39,7 +50,7 @@ export async function runUpdateNotifier(container: Container, currentVersion: st
 		void refreshUpdateCache({
 			fs: container.fs,
 			cachePath,
-			fetchLatest: fetchLatestVersion,
+			fetchLatest: () => fetchLatestVersion({ sleep: unrefSleep }),
 		});
 	}
 }
