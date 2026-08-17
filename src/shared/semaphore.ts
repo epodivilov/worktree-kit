@@ -46,3 +46,18 @@ export class Semaphore {
 		}
 	}
 }
+
+/**
+ * Runs `fn` while holding a single permit from `sem`, releasing it even if `fn`
+ * throws. The building block for bounding a batch of independent async tasks:
+ * `Promise.all(items.map((x) => withPermit(sem, () => work(x))))` caps how many run
+ * at once without any task holding a permit while it waits for another.
+ */
+export async function withPermit<T>(sem: Semaphore, fn: () => Promise<T>): Promise<T> {
+	await sem.acquire();
+	try {
+		return await fn();
+	} finally {
+		sem.release();
+	}
+}

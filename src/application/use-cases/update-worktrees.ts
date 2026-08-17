@@ -3,7 +3,7 @@ import type { GitPort } from "../../domain/ports/git-port.ts";
 import type { ShellPort } from "../../domain/ports/shell-port.ts";
 import type { Notification } from "../../shared/notification.ts";
 import { Result as R, type Result } from "../../shared/result.ts";
-import { Semaphore } from "../../shared/semaphore.ts";
+import { Semaphore, withPermit } from "../../shared/semaphore.ts";
 import { findMergedPrefix } from "./find-merged-prefix.ts";
 import { isFullyMerged } from "./is-fully-merged.ts";
 import { runHooks } from "./run-hooks.ts";
@@ -13,6 +13,14 @@ const WIP_RESTORE_FAILED =
 
 /** Default max number of worktrees rebased at once (see `--jobs`). */
 export const DEFAULT_JOBS = 4;
+
+/**
+ * Max base-resolution git probes (merge-base / commit-count) in flight at once
+ * (WTK-66). Internal, not a CLI knob: it bounds read-only reads, distinct from
+ * `--jobs`, which bounds rebase writes. Keeps a busy-upstream fork from spawning
+ * hundreds of `git` processes at once while still overlapping the independent probes.
+ */
+export const DEFAULT_PROBE_CONCURRENCY = 16;
 
 export interface UpdateWorktreesInput {
 	dryRun: boolean;
@@ -268,21 +276,24 @@ async function findParentBranch(
 	localRootNames: Set<string>,
 	goneSet: Set<string>,
 	git: GitPort,
+	probeSem: Semaphore,
 ): Promise<{ parent: string; retargetedFrom?: string }> {
-	const candidates: { branch: string; distance: number; gone: boolean }[] = [];
+	// The candidate slots below are probed CONCURRENTLY under `probeSem`, but their
+	// results are reassembled in a fixed order — default, then roots in discovery
+	// order, then siblings in worktree order — before the sort, so probe-completion
+	// order never leaks into the equal-distance tie-break (WTK-66 R3).
 
-	// The default branch is the always-available fallback base; it is not put
-	// through the strict ancestor filter (R6-compatible with the original logic).
-	const defaultMergeBase = await git.getMergeBase(branch, defaultBranch);
-	if (defaultMergeBase.success) {
-		const defaultCount = await git.getCommitCount(defaultMergeBase.data, branch);
-		if (defaultCount.success && defaultCount.data === 0) {
-			return { parent: defaultBranch };
-		}
-		if (defaultCount.success && defaultCount.data > 0) {
-			candidates.push({ branch: defaultBranch, distance: defaultCount.data, gone: false });
-		}
-	}
+	// The default branch is the always-available fallback base; it is not put through
+	// the strict ancestor filter (R6-compatible with the original logic). A distance of
+	// 0 means the branch is fully contained by the default and short-circuits to it.
+	const defaultProbe = withPermit(probeSem, async (): Promise<"none" | "contained" | { distance: number }> => {
+		const mergeBase = await git.getMergeBase(branch, defaultBranch);
+		if (!mergeBase.success) return "none";
+		const count = await git.getCommitCount(mergeBase.data, branch);
+		if (!count.success) return "none";
+		if (count.data === 0) return "contained";
+		return { distance: count.data };
+	});
 
 	// Non-default roots (local branches or upstream-only refs). A root is a base by
 	// STRUCTURE — its name exists on the upstream remote — not by ancestry, so it is
@@ -291,23 +302,40 @@ async function findParentBranch(
 	// its remote-tracking ref) is no longer a strict ancestor but is still this
 	// branch's base and must stay eligible (R2 local, R3 absent). The strict ancestor
 	// filter is reserved for the sibling worktree branches below. Roots never go gone.
-	for (const root of roots) {
-		if (root.name === defaultBranch) continue;
-		const distance = await mergeBaseDistance(git, branch, root.base);
-		if (distance !== null) {
-			candidates.push({ branch: root.base, distance, gone: false });
-		}
-	}
+	const nonDefaultRoots = roots.filter((root) => root.name !== defaultBranch);
+	const rootProbes = Promise.all(
+		nonDefaultRoots.map((root) => withPermit(probeSem, () => mergeBaseDistance(git, branch, root.base))),
+	);
 
 	// Other worktree branches. The same true-ancestor rule now also excludes a
 	// non-ancestor sibling that merely shares a common base with the branch (R4).
-	for (const wt of worktrees) {
-		if (!wt.branch || wt.branch === branch || localRootNames.has(wt.branch)) continue;
-		const distance = await ancestorDistance(git, branch, wt.branch);
-		if (distance !== null) {
+	const siblings = worktrees.filter((wt) => wt.branch && wt.branch !== branch && !localRootNames.has(wt.branch));
+	const siblingProbes = Promise.all(
+		siblings.map((wt) => withPermit(probeSem, () => ancestorDistance(git, branch, wt.branch))),
+	);
+
+	const [defaultResult, rootDistances, siblingDistances] = await Promise.all([defaultProbe, rootProbes, siblingProbes]);
+
+	if (defaultResult === "contained") {
+		return { parent: defaultBranch };
+	}
+
+	const candidates: { branch: string; distance: number; gone: boolean }[] = [];
+	if (defaultResult !== "none") {
+		candidates.push({ branch: defaultBranch, distance: defaultResult.distance, gone: false });
+	}
+	nonDefaultRoots.forEach((root, index) => {
+		const distance = rootDistances[index];
+		if (distance !== null && distance !== undefined) {
+			candidates.push({ branch: root.base, distance, gone: false });
+		}
+	});
+	siblings.forEach((wt, index) => {
+		const distance = siblingDistances[index];
+		if (distance !== null && distance !== undefined) {
 			candidates.push({ branch: wt.branch, distance, gone: goneSet.has(wt.branch) });
 		}
-	}
+	});
 
 	if (candidates.length === 0) return { parent: defaultBranch };
 
@@ -515,17 +543,35 @@ export async function updateWorktrees(
 		);
 	}
 
+	// Resolve every feature's rebase base (WTK-66). This is a pure read phase with no
+	// inter-feature ordering dependency, so features resolve CONCURRENTLY and each
+	// feature's own per-candidate probes overlap too — all bounded by one shared probe
+	// semaphore. Every feature writes only its own `parentMap` / `retargetMap` keys
+	// (safe under single-threaded JS), and the `Promise.all` barrier below guarantees
+	// resolution is fully complete before `buildRebaseOrder` consumes `parentMap`.
 	const parentMap: Record<string, string> = {};
 	const retargetMap: Record<string, string> = {};
-	for (const wt of worktrees) {
-		// Roots are never rebased — they are synced above and serve as bases.
-		if (!wt.branch || localRootNames.has(wt.branch)) continue;
-		const resolved = await findParentBranch(wt.branch, worktrees, defaultBranch, roots, localRootNames, goneSet, git);
-		parentMap[wt.branch] = resolved.parent;
-		if (resolved.retargetedFrom) {
-			retargetMap[wt.branch] = resolved.retargetedFrom;
-		}
-	}
+	const probeSem = new Semaphore(DEFAULT_PROBE_CONCURRENCY);
+	// Roots are never rebased — they are synced above and serve as bases.
+	const featureWorktrees = worktrees.filter((wt) => wt.branch && !localRootNames.has(wt.branch));
+	await Promise.all(
+		featureWorktrees.map(async (wt) => {
+			const resolved = await findParentBranch(
+				wt.branch,
+				worktrees,
+				defaultBranch,
+				roots,
+				localRootNames,
+				goneSet,
+				git,
+				probeSem,
+			);
+			parentMap[wt.branch] = resolved.parent;
+			if (resolved.retargetedFrom) {
+				retargetMap[wt.branch] = resolved.retargetedFrom;
+			}
+		}),
+	);
 
 	const orderedWorktrees = buildRebaseOrder(worktrees, parentMap, defaultBranch, rootBases, localRootNames);
 
