@@ -46,15 +46,13 @@ function instrumentRebase(git: GitPort, delayMs = 15): { git: GitPort; tracker: 
  */
 interface ProbeTracker {
 	peak: number;
-	calls: number;
 }
 
 function instrumentProbes(git: GitPort, delayMs = 10): { git: GitPort; tracker: ProbeTracker } {
-	const tracker: ProbeTracker = { peak: 0, calls: 0 };
+	const tracker: ProbeTracker = { peak: 0 };
 	let active = 0;
 	const track = async <T>(fn: () => Promise<T>): Promise<T> => {
 		active += 1;
-		tracker.calls += 1;
 		tracker.peak = Math.max(tracker.peak, active);
 		try {
 			await new Promise((resolve) => setTimeout(resolve, delayMs));
