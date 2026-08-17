@@ -4,7 +4,7 @@ import type { GitPort } from "../../domain/ports/git-port.ts";
 import { expectErr, expectOk } from "../../test-utils/assertions.ts";
 import { createFakeGit, type FakeRebaseCall } from "../../test-utils/fake-git.ts";
 import { createFakeShell } from "../../test-utils/fake-shell.ts";
-import { updateWorktrees } from "./update-worktrees.ts";
+import { DEFAULT_PROBE_CONCURRENCY, updateWorktrees } from "./update-worktrees.ts";
 
 /**
  * Wraps a fake git so every `rebase` records a start/end event and a peak
@@ -36,6 +36,43 @@ function instrumentRebase(git: GitPort, delayMs = 15): { git: GitPort; tracker: 
 		},
 	};
 	return { git: wrapped, tracker };
+}
+
+/**
+ * Base-resolution analogue of {@link instrumentRebase}: wraps a fake git so every
+ * `getMergeBase` / `getCommitCount` probe records peak in-flight concurrency, with a
+ * small real delay to force overlap. Both calls share one counter, so `peak` is the
+ * largest number of resolution git probes ever running at once.
+ */
+interface ProbeTracker {
+	peak: number;
+	calls: number;
+}
+
+function instrumentProbes(git: GitPort, delayMs = 10): { git: GitPort; tracker: ProbeTracker } {
+	const tracker: ProbeTracker = { peak: 0, calls: 0 };
+	let active = 0;
+	const track = async <T>(fn: () => Promise<T>): Promise<T> => {
+		active += 1;
+		tracker.calls += 1;
+		tracker.peak = Math.max(tracker.peak, active);
+		try {
+			await new Promise((resolve) => setTimeout(resolve, delayMs));
+			return await fn();
+		} finally {
+			active -= 1;
+		}
+	};
+	const baseMergeBase = git.getMergeBase.bind(git);
+	const baseCommitCount = git.getCommitCount.bind(git);
+	return {
+		git: {
+			...git,
+			getMergeBase: (a, b) => track(() => baseMergeBase(a, b)),
+			getCommitCount: (from, to) => track(() => baseCommitCount(from, to)),
+		},
+		tracker,
+	};
 }
 
 const mainWt: Worktree = { path: "/repo", branch: "main", head: "aaa", isMain: true, isPrunable: false };
@@ -2039,5 +2076,156 @@ describe("updateWorktrees — multiple upstream roots (WTK-64)", () => {
 
 		expect(output.rootSyncs).toEqual([]);
 		expect(output.reports.find((r) => r.branch === "feature-a")?.parent).toBe("main");
+	});
+});
+
+// WTK-66: the base-resolution phase probes every candidate root for every feature
+// with read-only git calls. Those independent probes now run under a bounded
+// semaphore instead of strictly one at a time — both across the per-feature loop and
+// across the per-candidate probes within one feature — while the chosen base stays
+// byte-identical to the sequential resolution.
+describe("updateWorktrees — parallel base resolution (WTK-66)", () => {
+	// One feature, many upstream-only (absent) roots. Each root is a rebase target via
+	// `upstream/<name>` and is probed by merge-base nearness; none is synced.
+	function manyAbsentRootsConfig(rootCount: number, feature: string) {
+		const mergeBaseMap = new Map<string, string>();
+		const commitCountMap = new Map<string, number>();
+		// The default branch is a (far) candidate so its probe runs alongside the roots.
+		mergeBaseMap.set(`${feature}:main`, "mbMain");
+		mergeBaseMap.set(`main:${feature}`, "mbMain");
+		commitCountMap.set(`mbMain..${feature}`, 100);
+		const upstreamBranches = ["main"];
+		for (let i = 0; i < rootCount; i += 1) {
+			const name = `root${i}`;
+			const ref = `upstream/${name}`;
+			const mb = `mb${i}`;
+			upstreamBranches.push(name);
+			mergeBaseMap.set(`${feature}:${ref}`, mb);
+			mergeBaseMap.set(`${ref}:${feature}`, mb);
+			commitCountMap.set(`${mb}..${feature}`, 50 + i);
+		}
+		return { mergeBaseMap, commitCountMap, upstreamBranches };
+	}
+
+	test("R1 (many roots, one feature): the per-root probes within a single resolution overlap", async () => {
+		const fWt: Worktree = { path: "/repo-f", branch: "f", head: "fTip", isMain: false, isPrunable: false };
+		const { mergeBaseMap, commitCountMap, upstreamBranches } = manyAbsentRootsConfig(30, "f");
+		const base = createFakeGit({
+			worktrees: [mainWt, fWt],
+			branches: ["main"],
+			remoteBranchesByRemote: new Map([["upstream", upstreamBranches]]),
+			mergeBaseMap,
+			commitCountMap,
+		});
+		const { git, tracker } = instrumentProbes(base);
+
+		expectOk(await updateWorktrees({ dryRun: true, upstream: "upstream" }, { git }));
+
+		// Only one feature is resolved, so any probe overlap can come only from the
+		// per-root probes within that single feature's resolution.
+		expect(tracker.peak).toBeGreaterThan(1);
+	});
+
+	test("R1 (many features): the per-feature resolution loop overlaps", async () => {
+		const feats: Worktree[] = [1, 2, 3, 4, 5].map((n) => ({
+			path: `/repo-f${n}`,
+			branch: `feat-${n}`,
+			head: `h${n}`,
+			isMain: false,
+			isPrunable: false,
+		}));
+		const worktrees = [mainWt, ...feats];
+		const base = createFakeGit({ worktrees, ...flatBranchesConfig(worktrees) });
+		const { git, tracker } = instrumentProbes(base);
+
+		expectOk(await updateWorktrees({ dryRun: true }, { git }));
+
+		// Five features off main, each probing the default plus four siblings — five
+		// probes. A single feature's inner probes alone peak at five; a peak above that
+		// can only come from the outer per-feature loop overlapping too.
+		expect(tracker.peak).toBeGreaterThan(5);
+	});
+
+	test("R2: probe concurrency never exceeds DEFAULT_PROBE_CONCURRENCY", async () => {
+		const fWt: Worktree = { path: "/repo-f", branch: "f", head: "fTip", isMain: false, isPrunable: false };
+		const { mergeBaseMap, commitCountMap, upstreamBranches } = manyAbsentRootsConfig(40, "f");
+		const base = createFakeGit({
+			worktrees: [mainWt, fWt],
+			branches: ["main"],
+			remoteBranchesByRemote: new Map([["upstream", upstreamBranches]]),
+			mergeBaseMap,
+			commitCountMap,
+		});
+		const { git, tracker } = instrumentProbes(base);
+
+		expectOk(await updateWorktrees({ dryRun: true, upstream: "upstream" }, { git }));
+
+		// 41 candidate probes contend for a fixed pool: concurrency is real but bounded.
+		expect(tracker.peak).toBeGreaterThan(1);
+		expect(tracker.peak).toBeLessThanOrEqual(DEFAULT_PROBE_CONCURRENCY);
+	});
+
+	test("R3 (parity): each feature resolves to the exact nearest base; ties break default-first then discovery order", async () => {
+		// Three features, three absent roots (core1, core2, core3) discovered in that
+		// order plus the default. Distances are chosen so each feature's winner is fixed
+		// and two of them exercise a tie — the point where completion order could leak.
+		const fTie: Worktree = { path: "/repo-tie", branch: "f-tie", head: "tTip", isMain: false, isPrunable: false };
+		const fDefault: Worktree = { path: "/repo-def", branch: "f-def", head: "dTip", isMain: false, isPrunable: false };
+		const fNear: Worktree = { path: "/repo-near", branch: "f-near", head: "nTip", isMain: false, isPrunable: false };
+
+		const mergeBaseMap = new Map<string, string>([
+			// f-tie: default far (10); core1 and core2 tie (3); core3 farther (5).
+			["f-tie:main", "T0"],
+			["main:f-tie", "T0"],
+			["f-tie:upstream/core1", "T1"],
+			["upstream/core1:f-tie", "T1"],
+			["f-tie:upstream/core2", "T2"],
+			["upstream/core2:f-tie", "T2"],
+			["f-tie:upstream/core3", "T3"],
+			["upstream/core3:f-tie", "T3"],
+			// f-def: default and core1 tie (2) → default wins the tie.
+			["f-def:main", "D0"],
+			["main:f-def", "D0"],
+			["f-def:upstream/core1", "D1"],
+			["upstream/core1:f-def", "D1"],
+			// f-near: core3 is strictly nearest (1).
+			["f-near:main", "N0"],
+			["main:f-near", "N0"],
+			["f-near:upstream/core1", "N1"],
+			["upstream/core1:f-near", "N1"],
+			["f-near:upstream/core2", "N2"],
+			["upstream/core2:f-near", "N2"],
+			["f-near:upstream/core3", "N3"],
+			["upstream/core3:f-near", "N3"],
+		]);
+		const commitCountMap = new Map<string, number>([
+			["T0..f-tie", 10],
+			["T1..f-tie", 3],
+			["T2..f-tie", 3],
+			["T3..f-tie", 5],
+			["D0..f-def", 2],
+			["D1..f-def", 2],
+			["N0..f-near", 8],
+			["N1..f-near", 6],
+			["N2..f-near", 4],
+			["N3..f-near", 1],
+		]);
+
+		const git = createFakeGit({
+			worktrees: [mainWt, fTie, fDefault, fNear],
+			branches: ["main"],
+			remoteBranchesByRemote: new Map([["upstream", ["main", "core1", "core2", "core3"]]]),
+			mergeBaseMap,
+			commitCountMap,
+		});
+
+		const output = expectOk(await updateWorktrees({ dryRun: true, upstream: "upstream" }, { git }));
+
+		// core1 and core2 tie for f-tie; discovery order picks the earlier core1.
+		expect(output.reports.find((r) => r.branch === "f-tie")?.parent).toBe("upstream/core1");
+		// default and core1 tie for f-def; default-first tie-break picks main.
+		expect(output.reports.find((r) => r.branch === "f-def")?.parent).toBe("main");
+		// f-near has a strict nearest — core3.
+		expect(output.reports.find((r) => r.branch === "f-near")?.parent).toBe("upstream/core3");
 	});
 });
