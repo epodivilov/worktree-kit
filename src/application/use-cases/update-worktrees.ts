@@ -316,6 +316,12 @@ async function findParentBranch(
 
 	const [defaultResult, rootDistances, siblingDistances] = await Promise.all([defaultProbe, rootProbes, siblingProbes]);
 
+	// The old sequential code returned here — feature fully contained in the default —
+	// BEFORE probing any root or sibling. We deliberately launch all probes eagerly
+	// above so the default probe overlaps the root/sibling probes (the overlap the
+	// concurrency win relies on, asserted by the R1 tests); a fully-contained feature
+	// therefore runs a few extra bounded, concurrent reads. Do not reinstate a
+	// default-only early return before the probe launch without re-checking those tests.
 	if (defaultResult === "contained") {
 		return { parent: defaultBranch };
 	}
