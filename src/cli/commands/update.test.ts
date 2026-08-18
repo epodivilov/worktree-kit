@@ -38,6 +38,18 @@ interface MultiSpinnerCapture {
 	updates: { key: string; message: string }[];
 }
 
+/**
+ * Records how the CLI drives the single-line phase spinner (`createSpinner`).
+ * `starts` holds every label passed to `start`; `stops` holds every `stop` message
+ * (one entry per stop call). The shared ordered `calls` log (returned alongside)
+ * records spinner and multi-spinner events across the run so a test can assert the
+ * phase spinner stopped before the multi-spinner list was created (R2).
+ */
+interface SpinnerCapture {
+	starts: string[];
+	stops: (string | undefined)[];
+}
+
 const CANCEL_SYMBOL = Symbol("cancel");
 
 function createFakeUi(opts: FakeUiOptions = {}): {
@@ -46,11 +58,15 @@ function createFakeUi(opts: FakeUiOptions = {}): {
 	confirmMessages: string[];
 	selectCalls: { message: string; values: string[] }[];
 	multiSpinner: MultiSpinnerCapture;
+	spinner: SpinnerCapture;
+	calls: string[];
 } {
 	const log: FakeUiLog = { info: [], success: [], warn: [], error: [], outro: [] };
 	const confirmMessages: string[] = [];
 	const selectCalls: { message: string; values: string[] }[] = [];
 	const multiSpinner: MultiSpinnerCapture = { keys: [], terminals: [], updates: [] };
+	const spinner: SpinnerCapture = { starts: [], stops: [] };
+	const calls: string[] = [];
 	const ui = {
 		nonInteractive: opts.nonInteractive ?? false,
 		intro() {},
@@ -73,10 +89,21 @@ function createFakeUi(opts: FakeUiOptions = {}): {
 			return fn();
 		},
 		createSpinner() {
-			return { start() {}, message() {}, stop() {} };
+			return {
+				start(message: string) {
+					spinner.starts.push(message);
+					calls.push(`spinner:start:${message}`);
+				},
+				message() {},
+				stop(message?: string) {
+					spinner.stops.push(message);
+					calls.push("spinner:stop");
+				},
+			};
 		},
 		createMultiSpinner(keys: string[]) {
 			multiSpinner.keys = [...keys];
+			calls.push("multiSpinner:create");
 			return {
 				update(key: string, message: string) {
 					multiSpinner.updates.push({ key, message });
@@ -110,7 +137,7 @@ function createFakeUi(opts: FakeUiOptions = {}): {
 		},
 		cancel() {},
 	} satisfies UiPort;
-	return { ui, log, confirmMessages, selectCalls, multiSpinner };
+	return { ui, log, confirmMessages, selectCalls, multiSpinner, spinner, calls };
 }
 
 function buildContainer(
@@ -666,5 +693,110 @@ describe("update — unmergeable gone branches", () => {
 		expect(confirmMessages).toEqual([]);
 		expect(log.info.some((m) => m.includes("kept"))).toBe(true);
 		expect(log.outro).toEqual(["Done!"]);
+	});
+});
+
+describe("update — fetch/analysis phase spinner (WTK-67)", () => {
+	// upstream opt-out keeps the first-run prompt out of the way so the run is
+	// non-interactive from the CLI's point of view (the spinner still starts after
+	// the prompt gate, per the spec).
+	const CONFIG_OPTOUT = JSON.stringify({ rootDir: ".worktrees", upstream: false }, null, 2);
+	const PHASE_LABEL = "Fetching and analyzing worktrees…";
+
+	function phaseScenario(gitOverrides: Partial<FakeGitOptions> = {}) {
+		const fs = createFakeFilesystem({
+			files: { [`${ROOT}/${CONFIG_FILENAME}`]: CONFIG_OPTOUT },
+			directories: [ROOT, `${ROOT}/.worktrees`, featureWt.path],
+		});
+		const git = createFakeGit({
+			root: ROOT,
+			mainRoot: ROOT,
+			worktrees: [mainWt, featureWt],
+			branches: ["main", "feature"],
+			goneBranches: [],
+			...gitOverrides,
+		});
+		return { fs, git };
+	}
+
+	test("R1: starts the phase spinner once with the fetch/analysis label", async () => {
+		const { fs, git } = phaseScenario();
+		const { ui, spinner } = createFakeUi();
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runUpdate(container, { "dry-run": false });
+
+		expect(code).toBe(0);
+		expect(spinner.starts).toEqual([PHASE_LABEL]);
+	});
+
+	test("R1: the phase spinner also starts on a --dry-run run", async () => {
+		const { fs, git } = phaseScenario();
+		const { ui, spinner } = createFakeUi();
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runUpdate(container, { "dry-run": true });
+
+		expect(code).toBe(0);
+		expect(spinner.starts).toEqual([PHASE_LABEL]);
+	});
+
+	test("R2: stops the phase spinner before the multi-spinner list is created", async () => {
+		const { fs, git } = phaseScenario();
+		const { ui, calls } = createFakeUi();
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runUpdate(container, { "dry-run": false });
+
+		expect(code).toBe(0);
+		const stopIdx = calls.indexOf("spinner:stop");
+		const listIdx = calls.indexOf("multiSpinner:create");
+		expect(stopIdx).toBeGreaterThanOrEqual(0);
+		expect(listIdx).toBeGreaterThanOrEqual(0);
+		// The phase spinner must be stopped before the multi-spinner starts drawing,
+		// so the two TTY renderers never interleave.
+		expect(stopIdx).toBeLessThan(listIdx);
+	});
+
+	test("R3: stops the phase spinner when the fetch fails before the list is created", async () => {
+		// git.fetchPrune() fails, so updateWorktrees returns an error before `begin`
+		// ever fires — the only path where stopping solely inside `begin` would leave
+		// the spinner spinning.
+		const { fs, git } = phaseScenario({ fetchFails: true });
+		const { ui, spinner, multiSpinner } = createFakeUi();
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runUpdate(container, { "dry-run": false });
+
+		expect(code).not.toBe(0);
+		// `begin` never fired, so no multi-spinner was created…
+		expect(multiSpinner.keys).toEqual([]);
+		// …yet the phase spinner was still stopped rather than left running.
+		expect(spinner.stops).toHaveLength(1);
+	});
+
+	test("R4 (empty target set): begin([]) stops the phase spinner exactly once", async () => {
+		// Only the default branch exists, so there is no feature worktree to update:
+		// `begin` fires with an empty array. The phase spinner is stopped there and the
+		// post-return fallback must not double-stop it.
+		const { fs, git } = phaseScenario({ worktrees: [mainWt], branches: ["main"] });
+		const { ui, spinner } = createFakeUi();
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runUpdate(container, { "dry-run": false });
+
+		expect(code).toBe(0);
+		expect(spinner.stops).toHaveLength(1);
+	});
+
+	test("R4 (normal path): the phase spinner is stopped exactly once", async () => {
+		const { fs, git } = phaseScenario();
+		const { ui, spinner } = createFakeUi();
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runUpdate(container, { "dry-run": false });
+
+		expect(code).toBe(0);
+		expect(spinner.stops).toHaveLength(1);
 	});
 });
