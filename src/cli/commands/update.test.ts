@@ -701,7 +701,7 @@ describe("update — fetch/analysis phase spinner (WTK-67)", () => {
 	// non-interactive from the CLI's point of view (the spinner still starts after
 	// the prompt gate, per the spec).
 	const CONFIG_OPTOUT = JSON.stringify({ rootDir: ".worktrees", upstream: false }, null, 2);
-	const PHASE_LABEL = "Fetching and analyzing worktrees…";
+	const PHASE_LABEL = "Fetching and analyzing worktrees...";
 
 	function phaseScenario(gitOverrides: Partial<FakeGitOptions> = {}) {
 		const fs = createFakeFilesystem({

@@ -241,7 +241,7 @@ export function updateCommand(container: Container) {
 				// window (which lives inside `updateWorktrees`) without ever wrapping a
 				// prompt (WTK-67, R1). Applies to normal and --dry-run runs alike.
 				phaseSpinner = ui.createSpinner();
-				phaseSpinner.start("Fetching and analyzing worktrees…");
+				phaseSpinner.start("Fetching and analyzing worktrees...");
 				const result = await updateWorktrees(
 					{ dryRun, branch, postUpdateHooks, onConflictHooks, repoRoot, upstream, jobs },
 					{ git, shell: needsShell ? shell : undefined, progress },
