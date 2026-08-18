@@ -11,7 +11,7 @@ import {
 	updateWorktrees,
 	type WorktreeReport,
 } from "../../application/use-cases/update-worktrees.ts";
-import type { MultiSpinnerHandle, UiPort } from "../../domain/ports/ui-port.ts";
+import type { MultiSpinnerHandle, SpinnerHandle, UiPort } from "../../domain/ports/ui-port.ts";
 import { UpdateArgsSchema } from "../../domain/schemas/command-args-schema.ts";
 import type { Container } from "../../infrastructure/container.ts";
 import { formatDisplayPath } from "../../shared/format-path.ts";
@@ -186,8 +186,17 @@ export function updateCommand(container: Container) {
 				// use case's `begin` callback, once the full targeted-worktree set (keys)
 				// is known — including children that will be skipped under a failed parent.
 				let updateSpinner: MultiSpinnerHandle | undefined;
+				// Single-line spinner for the otherwise-silent fetch/analysis window
+				// (git fetch --prune, gone-branch detection, parent resolution) that runs
+				// inside `updateWorktrees` before the per-worktree list appears (WTK-67).
+				let phaseSpinner: SpinnerHandle | undefined;
 				const progress: UpdateProgressReporter = {
 					begin(branches) {
+						// Stop the phase spinner BEFORE the multi-spinner draws its first
+						// lines, so the two TTY renderers never interleave. Clearing the
+						// handle makes the post-return fallback stop a no-op (R2, R4).
+						phaseSpinner?.stop();
+						phaseSpinner = undefined;
 						updateSpinner = ui.createMultiSpinner(branches);
 					},
 					rebasing(branchName, onto) {
@@ -227,12 +236,25 @@ export function updateCommand(container: Container) {
 				});
 
 				const needsShell = postUpdateHooks.length > 0 || onConflictHooks.length > 0;
+				// Start the phase spinner immediately before the fetch/analysis phase and
+				// after the interactive upstream prompt above, so it covers the whole silent
+				// window (which lives inside `updateWorktrees`) without ever wrapping a
+				// prompt (WTK-67, R1). Applies to normal and --dry-run runs alike.
+				phaseSpinner = ui.createSpinner();
+				phaseSpinner.start("Fetching and analyzing worktrees…");
 				const result = await updateWorktrees(
 					{ dryRun, branch, postUpdateHooks, onConflictHooks, repoRoot, upstream, jobs },
 					{ git, shell: needsShell ? shell : undefined, progress },
 				);
 
 				cleanup.clear();
+				// The phase spinner is still active here only when `begin` never fired —
+				// i.e. the fetch/analysis phase errored before the per-worktree list was
+				// created (fetch failure, discovery failure, branch-not-found). Stop it as a
+				// failure so it is never left spinning (R3). On every success path `begin`
+				// already stopped and cleared it, so this is an idempotent no-op (R4).
+				phaseSpinner?.stop(pc.red("Failed"));
+				phaseSpinner = undefined;
 				updateSpinner?.stop();
 
 				if (Result.isErr(result)) {
