@@ -900,8 +900,55 @@ describe("update — gone-branch classification spinner (WTK-69)", () => {
 		expect(confirmIdx).toBeGreaterThan(stopIdx);
 	});
 
-	test("R4: no stale branches and nothing rebase-merged → classification spinner never starts", async () => {
+	test("R4a: no stale branches and nothing rebase-merged → early-return path never reaches the classification block", async () => {
+		// goneBranches: [] and mergedBranches: [] together mean staleBranches and
+		// rebaseMerged are BOTH empty, so this run exits via the pre-existing
+		// `staleBranches.length === 0 && rebaseMerged.length === 0` guard before the
+		// classification block even runs — the classify spinner's own `if
+		// (staleBranches.length > 0)` guard is never evaluated on this path. Kept as
+		// coverage of that early-return behavior; R4b below is what actually exercises
+		// the classify spinner's own guard.
 		const { fs, git } = classifyScenario({ goneBranches: [], mergedBranches: [] });
+		const { ui, calls } = createFakeUi();
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runUpdate(container, { "dry-run": false });
+
+		expect(code).toBe(0);
+		const starts = calls.filter((c) => c.startsWith(`spinner:start:${CLASSIFY_LABEL_PREFIX}`));
+		expect(starts).toHaveLength(0);
+	});
+
+	test("R4b: rebase-merged branch with zero gone branches → reaches the classification block with an empty staleBranches, spinner still never starts", async () => {
+		// "feature" is proven fully merged during the REBASE phase (all commits
+		// cherry-picked into main — revListCherryPickMap returns none unmatched), so
+		// update-worktrees reports it "skipped: fully merged" and it lands in
+		// `rebaseMerged`, not in `staleBranches` (goneBranches is empty). That makes
+		// `rebaseMerged.length > 0` while `staleBranches.length === 0`, which is the
+		// ONLY combination that passes the line-338 early-return guard while still
+		// leaving `staleBranches` empty — the one path that actually exercises the
+		// classify spinner's own `if (staleBranches.length > 0)` guard rather than
+		// bypassing it. Mirrors the "fully cherry-picked branch — skipped without
+		// rebase" scenario in update-worktrees.test.ts.
+		const fs = createFakeFilesystem({
+			files: { [`${ROOT}/${CONFIG_FILENAME}`]: CONFIG_OPTOUT },
+			directories: [ROOT, `${ROOT}/.worktrees`, featureWt.path],
+		});
+		const git = createFakeGit({
+			root: ROOT,
+			mainRoot: ROOT,
+			worktrees: [mainWt, featureWt],
+			branches: ["main", "feature"],
+			goneBranches: [],
+			mergedBranches: ["feature"],
+			mergeBaseMap: new Map([
+				["feature:main", "M0"],
+				["main:feature", "M0"],
+			]),
+			commitCountMap: new Map([["M0..feature", 2]]),
+			revListMap: new Map([["main..feature", ["f2", "f1"]]]),
+			revListCherryPickMap: new Map([["main...feature", []]]),
+		});
 		const { ui, calls } = createFakeUi();
 		const container = buildContainer(ui, git, fs);
 
