@@ -354,14 +354,31 @@ export function updateCommand(container: Container) {
 				// "empty" (ahead=0 without merge proof) and unmerged/dirty are kept.
 				const mergedSet = new Set<string>();
 				const kept: string[] = [];
-				for (const b of staleBranches) {
+				// Each iteration spawns several git subprocesses (isDirty, getCommitCount,
+				// isFullyMerged's patch-id / cherry detection), which can take seconds
+				// across many stale branches. The WTK-67 phase spinner has already
+				// stopped by now and the root-sync lines are on screen, so without its own
+				// indicator this second silent phase looks like the run has finished
+				// while work continues. Show a single-line spinner with an advancing
+				// "X of N" counter for its duration (WTK-69).
+				let classifySpinner: SpinnerHandle | undefined;
+				if (staleBranches.length > 0) {
+					classifySpinner = ui.createSpinner();
+					classifySpinner.start(`Classifying gone branches (0 of ${staleBranches.length})...`);
+				}
+				for (const [index, b] of staleBranches.entries()) {
 					const classification = await classifyGoneBranch(
 						{ branch: b, defaultBranch, worktreePath: worktreePathByBranch.get(b) ?? null, force: false },
 						{ git },
 					);
 					if (classification === "merged") mergedSet.add(b);
 					else kept.push(b);
+					classifySpinner?.message(`Classifying gone branches (${index + 1} of ${staleBranches.length})...`);
 				}
+				// Stop before any downstream output of this phase — the gone-branch list,
+				// the cleanup confirm prompt, the kept-branches note, or the outro — so the
+				// live spinner line and the static log never compete for the terminal (R3).
+				classifySpinner?.stop();
 				// Rebase-merged branches are positively merged via patch-id / subject+files.
 				// Dedupe against the gone-branch set so a branch in both lists appears once.
 				for (const b of rebaseMerged) {

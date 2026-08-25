@@ -39,15 +39,22 @@ interface MultiSpinnerCapture {
 }
 
 /**
- * Records how the CLI drives the single-line phase spinner (`createSpinner`).
- * `starts` holds every label passed to `start`; `stops` holds every `stop` message
- * (one entry per stop call). The shared ordered `calls` log (returned alongside)
- * records spinner and multi-spinner events across the run so a test can assert the
- * phase spinner stopped before the multi-spinner list was created (R2).
+ * Records how the CLI drives single-line spinners (`createSpinner`) — shared across
+ * every instance (the WTK-67 phase spinner, the WTK-69 classification spinner, and
+ * the cleanup spinner). `starts` holds every label passed to `start`; `stops` holds
+ * every `stop` message (one entry per stop call); `messages` holds every `.message()`
+ * text (one entry per call, in order — used to assert the WTK-69 "X of N" counter).
+ * The shared ordered `calls` log (returned alongside) records spinner start/stop
+ * (each stop labeled with the start message of its own instance, so distinct
+ * spinners never collide), spinner message, multi-spinner, info, and confirm events
+ * across the run — used to assert both "stopped before the multi-spinner list" (WTK-67
+ * R2) and "the classification spinner stopped before the gone-branch list / confirm
+ * prompt" (WTK-69 R3).
  */
 interface SpinnerCapture {
 	starts: string[];
 	stops: (string | undefined)[];
+	messages: string[];
 }
 
 const CANCEL_SYMBOL = Symbol("cancel");
@@ -65,7 +72,7 @@ function createFakeUi(opts: FakeUiOptions = {}): {
 	const confirmMessages: string[] = [];
 	const selectCalls: { message: string; values: string[] }[] = [];
 	const multiSpinner: MultiSpinnerCapture = { keys: [], terminals: [], updates: [] };
-	const spinner: SpinnerCapture = { starts: [], stops: [] };
+	const spinner: SpinnerCapture = { starts: [], stops: [], messages: [] };
 	const calls: string[] = [];
 	const ui = {
 		nonInteractive: opts.nonInteractive ?? false,
@@ -75,6 +82,7 @@ function createFakeUi(opts: FakeUiOptions = {}): {
 		},
 		info(message: string) {
 			log.info.push(message);
+			calls.push(`info:${message}`);
 		},
 		success(message: string) {
 			log.success.push(message);
@@ -89,15 +97,23 @@ function createFakeUi(opts: FakeUiOptions = {}): {
 			return fn();
 		},
 		createSpinner() {
+			// Tracks this instance's own start label so its `stop` entry in the shared
+			// `calls` log is self-identifying — needed because several distinct spinner
+			// instances (phase, classification, cleanup) share one `SpinnerCapture`.
+			let label = "";
 			return {
 				start(message: string) {
+					label = message;
 					spinner.starts.push(message);
 					calls.push(`spinner:start:${message}`);
 				},
-				message() {},
+				message(message: string) {
+					spinner.messages.push(message);
+					calls.push(`spinner:message:${message}`);
+				},
 				stop(message?: string) {
 					spinner.stops.push(message);
-					calls.push("spinner:stop");
+					calls.push(`spinner:stop:${label}`);
 				},
 			};
 		},
@@ -123,6 +139,7 @@ function createFakeUi(opts: FakeUiOptions = {}): {
 		},
 		async confirm(options: { message: string }) {
 			confirmMessages.push(options.message);
+			calls.push(`confirm:${options.message}`);
 			return opts.confirm ?? true;
 		},
 		async select<T>(options: { message: string; options: Array<{ value: T; label: string }> }) {
@@ -749,7 +766,7 @@ describe("update — fetch/analysis phase spinner (WTK-67)", () => {
 		const code = await runUpdate(container, { "dry-run": false });
 
 		expect(code).toBe(0);
-		const stopIdx = calls.indexOf("spinner:stop");
+		const stopIdx = calls.findIndex((c) => c.startsWith("spinner:stop:"));
 		const listIdx = calls.indexOf("multiSpinner:create");
 		expect(stopIdx).toBeGreaterThanOrEqual(0);
 		expect(listIdx).toBeGreaterThanOrEqual(0);
@@ -798,5 +815,100 @@ describe("update — fetch/analysis phase spinner (WTK-67)", () => {
 
 		expect(code).toBe(0);
 		expect(spinner.stops).toHaveLength(1);
+	});
+});
+
+describe("update — gone-branch classification spinner (WTK-69)", () => {
+	// The classification loop runs after the WTK-67 phase spinner has already
+	// stopped (inside `begin`), so opting out of upstream sync here just keeps the
+	// scenario free of the interactive upstream prompt — it isn't needed to avoid
+	// overlap with the phase spinner.
+	const CONFIG_OPTOUT = JSON.stringify({ rootDir: ".worktrees", upstream: false }, null, 2);
+	// Every classification-spinner label starts with this — distinguishes it from
+	// the WTK-67 phase spinner ("Fetching and analyzing worktrees...") and the
+	// cleanup spinner ("Cleaning up stale branches...") in the shared capture.
+	const CLASSIFY_LABEL_PREFIX = "Classifying gone branches";
+
+	// Two stale branches: merged-one is positively merged (proof via patch-id),
+	// empty-one has zero commits ahead (no merge proof, kept). Both still go
+	// through the classification loop — only rebase-merged branches skip it.
+	function classifyScenario(gitOverrides: Partial<FakeGitOptions> = {}) {
+		const fs = createFakeFilesystem({
+			files: { [`${ROOT}/${CONFIG_FILENAME}`]: CONFIG_OPTOUT },
+			directories: [ROOT, `${ROOT}/.worktrees`],
+		});
+		const git = createFakeGit({
+			root: ROOT,
+			mainRoot: ROOT,
+			worktrees: [mainWt],
+			branches: ["main", "merged-one", "empty-one"],
+			goneBranches: ["merged-one", "empty-one"],
+			mergedBranches: ["merged-one"],
+			commitCountMap: new Map([
+				["main..merged-one", 2],
+				["main..empty-one", 0],
+			]),
+			revListMap: new Map([["main..merged-one", ["sha1", "sha2"]]]),
+			revListCherryPickMap: new Map([["main...merged-one", []]]),
+			...gitOverrides,
+		});
+		return { fs, git };
+	}
+
+	test("R1: starts and stops the classification spinner exactly once", async () => {
+		const { fs, git } = classifyScenario();
+		const { ui, calls } = createFakeUi();
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runUpdate(container, { "dry-run": false });
+
+		expect(code).toBe(0);
+		const starts = calls.filter((c) => c.startsWith(`spinner:start:${CLASSIFY_LABEL_PREFIX}`));
+		const stops = calls.filter((c) => c.startsWith(`spinner:stop:${CLASSIFY_LABEL_PREFIX}`));
+		expect(starts).toHaveLength(1);
+		expect(stops).toHaveLength(1);
+	});
+
+	test("R2: message updates show an advancing X of N counter, ending at N of N", async () => {
+		const { fs, git } = classifyScenario();
+		const { ui, spinner } = createFakeUi();
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runUpdate(container, { "dry-run": false });
+
+		expect(code).toBe(0);
+		const classifyMessages = spinner.messages.filter((m) => m.startsWith(CLASSIFY_LABEL_PREFIX));
+		// Two stale branches (merged-one, empty-one) → two per-iteration updates.
+		expect(classifyMessages).toHaveLength(2);
+		expect(classifyMessages[0]).toContain("1 of 2");
+		expect(classifyMessages[1]).toContain("2 of 2");
+	});
+
+	test("R3: classification spinner stops before the gone-branch list and the confirm prompt", async () => {
+		const { fs, git } = classifyScenario();
+		const { ui, calls } = createFakeUi();
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runUpdate(container, { "dry-run": false });
+
+		expect(code).toBe(0);
+		const stopIdx = calls.findIndex((c) => c.startsWith(`spinner:stop:${CLASSIFY_LABEL_PREFIX}`));
+		const infoIdx = calls.indexOf("info:Branches with gone remotes:");
+		const confirmIdx = calls.findIndex((c) => c.startsWith("confirm:"));
+		expect(stopIdx).toBeGreaterThanOrEqual(0);
+		expect(infoIdx).toBeGreaterThan(stopIdx);
+		expect(confirmIdx).toBeGreaterThan(stopIdx);
+	});
+
+	test("R4: no stale branches and nothing rebase-merged → classification spinner never starts", async () => {
+		const { fs, git } = classifyScenario({ goneBranches: [], mergedBranches: [] });
+		const { ui, calls } = createFakeUi();
+		const container = buildContainer(ui, git, fs);
+
+		const code = await runUpdate(container, { "dry-run": false });
+
+		expect(code).toBe(0);
+		const starts = calls.filter((c) => c.startsWith(`spinner:start:${CLASSIFY_LABEL_PREFIX}`));
+		expect(starts).toHaveLength(0);
 	});
 });
