@@ -2,6 +2,25 @@ import * as clack from "@clack/prompts";
 import pc from "picocolors";
 import type { MultiSpinnerHandle, SpinnerHandle, UiPort } from "../../domain/ports/ui-port.ts";
 
+const ESC = "\x1b";
+const ANSI_SGR_PATTERN = new RegExp(`${ESC}\\[[0-9;]*m`, "g");
+
+/**
+ * Number of physical terminal rows a rendered multi-spinner frame occupies, accounting
+ * for line-wrapping when a line's visible width exceeds the terminal's column count.
+ * ANSI color escapes are stripped before measuring width (they render zero-width), and a
+ * default of 80 columns is used when the real terminal width is unavailable.
+ */
+export function computeFrameHeight(lines: string[], columns: number = 80): number {
+	const width = columns > 0 ? columns : 80;
+	let height = 0;
+	for (const line of lines) {
+		const visibleLength = line.replace(ANSI_SGR_PATTERN, "").length;
+		height += Math.max(1, Math.ceil(visibleLength / width));
+	}
+	return height;
+}
+
 export function createClackUiAdapter(options?: { nonInteractive?: boolean }): UiPort {
 	return {
 		nonInteractive: options?.nonInteractive ?? false,
@@ -72,6 +91,12 @@ export function createClackUiAdapter(options?: { nonInteractive?: boolean }): Ui
 			const frames = ["◒", "◐", "◓", "◑"];
 			let frameIndex = 0;
 			let rendered = false;
+			// Physical row count of the previously drawn frame. A logical line whose
+			// content wraps across more than one terminal row advances the cursor by
+			// more than one row per line, so the next repaint must rewind by this
+			// physical height - not by `lines.size` - or the rewind under-shoots and
+			// stale copies of already-settled lines accumulate below the cursor.
+			let lastHeight = 0;
 
 			const lines = new Map<string, { status: "active" | "done" | "error" | "skipped"; message: string }>();
 			for (const key of keys) {
@@ -79,14 +104,9 @@ export function createClackUiAdapter(options?: { nonInteractive?: boolean }): Ui
 			}
 
 			function render() {
-				if (rendered) {
-					process.stdout.write(`\x1b[${lines.size}A`);
-				} else {
-					process.stdout.write("\x1b[?25l");
-				}
-				rendered = true;
-
+				const columns = process.stdout.columns ?? 80;
 				const frame = frames[frameIndex % frames.length];
+				const frameLines: string[] = [];
 				for (const [key, line] of lines) {
 					let prefix: string;
 					let msg: string;
@@ -103,8 +123,23 @@ export function createClackUiAdapter(options?: { nonInteractive?: boolean }): Ui
 						prefix = pc.magenta(frame);
 						msg = line.message;
 					}
-					process.stdout.write(`\x1b[2K  ${prefix}  ${key}: ${msg}\n`);
+					frameLines.push(`  ${prefix}  ${key}: ${msg}`);
 				}
+
+				if (rendered) {
+					// Rewind by the previous frame's physical height, return to column 1,
+					// then erase everything below in one shot. This clears wrapped rows
+					// correctly (R1) and leaves no residue when the new frame is shorter
+					// than the previous one (R2), unlike a per-line `\x1b[2K` clear keyed
+					// to logical-line count.
+					process.stdout.write(`\x1b[${lastHeight}A\x1b[1G\x1b[J`);
+				} else {
+					process.stdout.write("\x1b[?25l");
+				}
+				rendered = true;
+
+				process.stdout.write(`${frameLines.join("\n")}\n`);
+				lastHeight = computeFrameHeight(frameLines, columns);
 			}
 
 			const interval = setInterval(() => {
