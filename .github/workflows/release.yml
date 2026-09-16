@@ -27,7 +27,7 @@ jobs:
     # Darwin artifacts are ad-hoc signed and verified on the native arm64 runner
     # before the draft release is created. A Linux cross-build cannot repair or
     # validate the embedded Mach-O signatures produced by Bun.
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v6
         with:
