@@ -54,6 +54,14 @@ export interface GitPort {
 	 */
 	getPrimaryRemote(): string;
 	listGoneBranches(): Promise<Result<string[], GitError>>;
+	/** Configured upstream ref for an arbitrary local branch, or null when none is configured. */
+	getBranchUpstream(branch: string): Promise<Result<string | null, GitError>>;
+	/** Save the current branch tip below the internal recovery namespace and return that ref. */
+	createRecoveryRef(branch: string): Promise<Result<string, GitError>>;
+	/** Fast-forward a checked-out branch to an arbitrary ref. */
+	fastForwardToRef(worktreePath: string, ref: string): Promise<Result<void, GitError>>;
+	/** Hard-reset a checked-out branch to an arbitrary ref. */
+	resetHardToRef(worktreePath: string, ref: string): Promise<Result<void, GitError>>;
 	mergeFFOnly(worktreePath: string, branch: string, remote?: string): Promise<Result<void, GitError>>;
 	/** Fast-forward a local branch ref that is not checked out anywhere, from `remote` (default: primary remote). */
 	updateBranchRef(branch: string, remote?: string): Promise<Result<void, GitError>>;

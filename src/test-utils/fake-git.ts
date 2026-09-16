@@ -39,6 +39,10 @@ export interface FakeGitOptions {
 	updateBranchRefCalls?: { branch: string; remote: string }[];
 	resetHardToRemoteCalls?: { worktreePath: string; branch: string; remote: string }[];
 	forceUpdateBranchRefCalls?: { branch: string; remote: string }[];
+	branchUpstreams?: Map<string, string | null>;
+	createRecoveryRefCalls?: string[];
+	fastForwardToRefCalls?: { worktreePath: string; ref: string }[];
+	resetHardToRefCalls?: { worktreePath: string; ref: string }[];
 	mergeBaseMap?: Map<string, string>;
 	commitCountMap?: Map<string, number>;
 	trackedPaths?: Set<string>;
@@ -282,6 +286,25 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 				return Result.err({ code: "NOT_A_REPO", message: "Not inside a git repository" });
 			}
 			return Result.ok([...goneBranches]);
+		},
+
+		async getBranchUpstream(branch: string): Promise<Result<string | null, GitError>> {
+			return Result.ok(options.branchUpstreams?.get(branch) ?? null);
+		},
+
+		async createRecoveryRef(branch: string): Promise<Result<string, GitError>> {
+			options.createRecoveryRefCalls?.push(branch);
+			return Result.ok(`refs/worktree-kit/recovery/${branch}/fake-timestamp`);
+		},
+
+		async fastForwardToRef(worktreePath: string, ref: string): Promise<Result<void, GitError>> {
+			options.fastForwardToRefCalls?.push({ worktreePath, ref });
+			return Result.ok(undefined);
+		},
+
+		async resetHardToRef(worktreePath: string, ref: string): Promise<Result<void, GitError>> {
+			options.resetHardToRefCalls?.push({ worktreePath, ref });
+			return Result.ok(undefined);
 		},
 
 		async mergeFFOnly(worktreePath: string, branch: string, remote = primaryRemote): Promise<Result<void, GitError>> {

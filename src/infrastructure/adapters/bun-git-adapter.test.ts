@@ -976,6 +976,28 @@ describe("BunGitAdapter", () => {
 			expect(error.code).toBe("MERGE_FAILED");
 		});
 
+		test("feature reconciliation primitives use the configured tracking ref and preserve recovery", async () => {
+			await using tmp = await createTempDir();
+			const fixture = await createRemoteFixture(tmp.path);
+			await fixture.addTrackedBranch("feat");
+			const wtPath = join(tmp.path, "feat-wt");
+			await Bun.$`git -C ${fixture.repoPath} worktree add -q ${wtPath} feat`.quiet();
+
+			await withCwd(fixture.repoPath, async () => {
+				expect(expectOk(await git.getBranchUpstream("feat"))).toBe("origin/feat");
+				expect(expectOk(await git.getBranchUpstream("main"))).toBe("origin/main");
+
+				const before = (await Bun.$`git -C ${fixture.repoPath} rev-parse feat`.quiet().text()).trim();
+				const recovery = expectOk(await git.createRecoveryRef("feat"));
+				expect(recovery).toStartWith("refs/worktree-kit/recovery/feat/");
+				expect((await Bun.$`git -C ${fixture.repoPath} rev-parse ${recovery}`.quiet().text()).trim()).toBe(before);
+
+				await Bun.$`git -C ${wtPath} commit --allow-empty -m local`.quiet();
+				expectOk(await git.resetHardToRef(wtPath, "origin/feat"));
+				expect((await Bun.$`git -C ${wtPath} rev-parse HEAD`.quiet().text()).trim()).toBe(before);
+			});
+		});
+
 		test("createWorktreeFromRemote checks out a remote-only branch with tracking", async () => {
 			await using tmp = await createTempDir();
 			const fixture = await createRemoteFixture(tmp.path);

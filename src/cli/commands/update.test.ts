@@ -357,6 +357,48 @@ describe("update upstream auto-detection", () => {
 	});
 });
 
+describe("update --reconcile (WTK-70)", () => {
+	const fs = () =>
+		createFakeFilesystem({
+			files: { [`${ROOT}/${CONFIG_FILENAME}`]: JSON.stringify({ rootDir: ".worktrees", upstream: false }) },
+			directories: [ROOT, `${ROOT}/.worktrees`, featureWt.path],
+		});
+
+	test("reset is rejected without a named branch before git mutation", async () => {
+		const mergeFFOnlyCalls: { worktreePath: string; branch: string; remote: string }[] = [];
+		const git = createFakeGit({ worktrees: [mainWt, featureWt], mergeFFOnlyCalls });
+		const { ui } = createFakeUi({ nonInteractive: true });
+
+		const code = await runUpdate(buildContainer(ui, git, fs()), {
+			"dry-run": false,
+			reconcile: "reset",
+		});
+
+		expect(code).toBe(3);
+		expect(mergeFFOnlyCalls).toEqual([]);
+	});
+
+	test("interactive genuine divergence offers rebase first and renders the recovery ref", async () => {
+		const commitCountMap = new Map<string, number>([
+			["feature..origin/feature", 1],
+			["origin/feature..feature", 1],
+		]);
+		const git = createFakeGit({
+			worktrees: [mainWt, featureWt],
+			branchUpstreams: new Map([["feature", "origin/feature"]]),
+			commitCountMap,
+			revListCherryPickMap: new Map([["origin/feature...feature", ["local"]]]),
+		});
+		const { ui, log, selectCalls } = createFakeUi({ select: "rebase" });
+
+		const code = await runUpdate(buildContainer(ui, git, fs()), { "dry-run": false });
+
+		expect(code).toBe(0);
+		expect(selectCalls[0]?.values).toEqual(["rebase", "reset", "abort"]);
+		expect(log.info.some((line) => line.includes("refs/worktree-kit/recovery/feature/"))).toBe(true);
+	});
+});
+
 describe("update --cleanup — dirty worktree", () => {
 	test("dirty gone branch is hidden from cleanup and reported as kept", async () => {
 		const { fs, git } = dirtyGoneScenario();
@@ -587,7 +629,8 @@ describe("update — per-worktree progress (WTK-58)", () => {
 
 		const code = await runUpdate(container, { "dry-run": false });
 
-		expect(code).toBe(0);
+		// An unresolved parent conflict now makes the overall update fail (WTK-70 R7).
+		expect(code).toBe(3);
 		// The spinner is seeded with every targeted worktree, including the child
 		// that will be skipped because its parent conflicted.
 		expect([...multiSpinner.keys].sort()).toEqual(["a", "b", "c"]);

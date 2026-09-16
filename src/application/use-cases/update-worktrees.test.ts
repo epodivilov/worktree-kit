@@ -271,6 +271,97 @@ describe("updateWorktrees", () => {
 	});
 });
 
+describe("updateWorktrees — feature tracking reconciliation (WTK-70)", () => {
+	function reconciliationGit(options: Parameters<typeof createFakeGit>[0] = {}) {
+		const worktrees = [mainWt, featureA];
+		return createFakeGit({
+			worktrees,
+			...flatBranchesConfig(worktrees),
+			branchUpstreams: new Map([["feature-a", "fork/topic"]]),
+			...options,
+		});
+	}
+
+	test("R2: remote-only advance fast-forwards the feature before its parent rebase", async () => {
+		const fastForwardToRefCalls: { worktreePath: string; ref: string }[] = [];
+		const git = reconciliationGit({
+			commitCountMap: new Map([
+				...flatBranchesConfig([mainWt, featureA]).commitCountMap,
+				["feature-a..fork/topic", 2],
+				["fork/topic..feature-a", 0],
+			]),
+			fastForwardToRefCalls,
+		});
+		const output = expectOk(await updateWorktrees({ dryRun: false }, { git }));
+
+		expect(fastForwardToRefCalls).toEqual([{ worktreePath: "/repo-a", ref: "fork/topic" }]);
+		expect(output.reconciliations[0]).toMatchObject({ state: "remote-only", action: "fast-forwarded" });
+		expect(output.unresolved).toBe(false);
+	});
+
+	test("R3: patch-equivalent rewrite saves a recovery ref and realigns", async () => {
+		const createRecoveryRefCalls: string[] = [];
+		const resetHardToRefCalls: { worktreePath: string; ref: string }[] = [];
+		const git = reconciliationGit({
+			commitCountMap: new Map([
+				...flatBranchesConfig([mainWt, featureA]).commitCountMap,
+				["feature-a..fork/topic", 2],
+				["fork/topic..feature-a", 2],
+			]),
+			revListCherryPickMap: new Map([["fork/topic...feature-a", []]]),
+			createRecoveryRefCalls,
+			resetHardToRefCalls,
+		});
+		const output = expectOk(await updateWorktrees({ dryRun: false }, { git }));
+
+		expect(createRecoveryRefCalls).toEqual(["feature-a"]);
+		expect(resetHardToRefCalls).toEqual([{ worktreePath: "/repo-a", ref: "fork/topic" }]);
+		expect(output.reconciliations[0]).toMatchObject({ state: "remote-rewrite", action: "realigned" });
+	});
+
+	test("R4: genuine divergence rebases only under the selected policy", async () => {
+		const recoveryCalls: string[] = [];
+		const rebaseCalls: FakeRebaseCall[] = [];
+		const git = reconciliationGit({
+			commitCountMap: new Map([
+				...flatBranchesConfig([mainWt, featureA]).commitCountMap,
+				["feature-a..fork/topic", 1],
+				["fork/topic..feature-a", 1],
+			]),
+			revListCherryPickMap: new Map([["fork/topic...feature-a", ["local"]]]),
+			createRecoveryRefCalls: recoveryCalls,
+			rebaseCalls,
+		});
+		const output = expectOk(await updateWorktrees({ dryRun: false, reconcile: "rebase" }, { git }));
+
+		expect(recoveryCalls).toEqual(["feature-a"]);
+		expect(rebaseCalls[0]).toMatchObject({ worktreePath: "/repo-a", onto: "fork/topic" });
+		expect(output.reconciliations[0]).toMatchObject({ state: "diverged", action: "rebased" });
+	});
+
+	test("R5/R6: dirty dry-run reports the block and performs no mutation", async () => {
+		const fastForwardToRefCalls: { worktreePath: string; ref: string }[] = [];
+		const git = reconciliationGit({
+			commitCountMap: new Map([
+				...flatBranchesConfig([mainWt, featureA]).commitCountMap,
+				["feature-a..fork/topic", 1],
+				["fork/topic..feature-a", 0],
+			]),
+			dirtyWorktrees: new Set(["/repo-a"]),
+			fastForwardToRefCalls,
+		});
+		const output = expectOk(await updateWorktrees({ dryRun: true }, { git }));
+
+		expect(fastForwardToRefCalls).toEqual([]);
+		expect(output.reconciliations[0]).toMatchObject({ action: "skipped-dirty" });
+		expect(output.reports.find((report) => report.branch === "feature-a")?.result).toMatchObject({
+			status: "skipped",
+			reason: "remote reconciliation unresolved",
+		});
+		expect(output.unresolved).toBe(true);
+	});
+});
+
 describe("updateWorktrees — parent detection", () => {
 	// main: A — B — C
 	// feat-a:        C — D — E

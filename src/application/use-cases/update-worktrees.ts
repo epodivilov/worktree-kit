@@ -32,6 +32,28 @@ export interface UpdateWorktreesInput {
 	upstream?: string;
 	/** Max worktrees to rebase concurrently. Defaults to {@link DEFAULT_JOBS}. */
 	jobs?: number;
+	/** Policy for genuine feature/upstream divergence. */
+	reconcile?: "rebase" | "abort" | "reset";
+}
+
+export type ReconcileChoice = "rebase" | "reset" | "abort";
+
+export interface ReconciliationReport {
+	branch: string;
+	upstream?: string;
+	state: "missing" | "gone" | "equal" | "local-only" | "remote-only" | "remote-rewrite" | "diverged";
+	action:
+		| "unchanged"
+		| "fast-forwarded"
+		| "realigned"
+		| "rebased"
+		| "aborted"
+		| "skipped-dirty"
+		| "would-fast-forward"
+		| "would-realign"
+		| "would-rebase"
+		| "would-reset";
+	recoveryRef?: string;
 }
 
 /**
@@ -129,13 +151,16 @@ export interface UpdateWorktreesOutput {
 	 * root (no upstream, or upstream has no other same-named local branch).
 	 */
 	rootSyncs: RootSyncReport[];
+	reconciliations: ReconciliationReport[];
 	reports: WorktreeReport[];
+	unresolved: boolean;
 }
 
 export interface UpdateWorktreesDeps {
 	git: GitPort;
 	shell?: ShellPort;
 	progress?: UpdateProgressReporter;
+	chooseReconciliation?: (branch: string, upstream: string) => Promise<ReconcileChoice>;
 }
 
 /**
@@ -495,6 +520,163 @@ export async function updateWorktrees(
 	const localRootNames = new Set(roots.filter((r) => r.local).map((r) => r.name));
 	const rootBases = new Set(roots.map((r) => r.base));
 
+	// Freeze the mutation scope from the pre-reconciliation graph. Reconciliation can
+	// change ancestry, so this graph is used only for target selection; the normal
+	// parent-discovery pass below runs again from the reconciled tips (WTK-70 R1).
+	const initialParentMap: Record<string, string> = {};
+	const initialProbeSem = new Semaphore(DEFAULT_PROBE_CONCURRENCY);
+	const initialFeatures = worktrees.filter((wt) => wt.branch && !localRootNames.has(wt.branch));
+	await Promise.all(
+		initialFeatures.map(async (wt) => {
+			initialParentMap[wt.branch] = (
+				await findParentBranch(
+					wt.branch,
+					worktrees,
+					defaultBranch,
+					roots,
+					localRootNames,
+					goneSet,
+					git,
+					initialProbeSem,
+				)
+			).parent;
+		}),
+	);
+	const initialOrder = buildRebaseOrder(worktrees, initialParentMap, defaultBranch, rootBases, localRootNames);
+	if (input.branch && input.branch !== defaultBranch && !worktrees.some((w) => w.branch === input.branch)) {
+		return R.err(new Error(`Branch "${input.branch}" not found in worktrees`));
+	}
+	const reconciliationTargets =
+		input.branch && input.branch !== defaultBranch
+			? filterDescendants(input.branch, initialOrder, initialParentMap)
+			: initialOrder;
+	const reconciliationFailed = new Set<string>();
+	const reconciliations: ReconciliationReport[] = [];
+
+	for (const wt of reconciliationTargets) {
+		const parent = initialParentMap[wt.branch];
+		if (parent && reconciliationFailed.has(parent)) {
+			reconciliationFailed.add(wt.branch);
+			reconciliations.push({ branch: wt.branch, state: "diverged", action: "aborted" });
+			continue;
+		}
+		if (goneSet.has(wt.branch)) {
+			reconciliations.push({ branch: wt.branch, state: "gone", action: "unchanged" });
+			continue;
+		}
+		const upstreamResult = await git.getBranchUpstream(wt.branch);
+		const upstream = upstreamResult.success ? upstreamResult.data : null;
+		if (!upstream) {
+			reconciliations.push({ branch: wt.branch, state: "missing", action: "unchanged" });
+			continue;
+		}
+		const [behindResult, aheadResult] = await Promise.all([
+			git.getCommitCount(wt.branch, upstream),
+			git.getCommitCount(upstream, wt.branch),
+		]);
+		if (!behindResult.success || !aheadResult.success) {
+			reconciliationFailed.add(wt.branch);
+			reconciliations.push({ branch: wt.branch, upstream, state: "diverged", action: "aborted" });
+			continue;
+		}
+		const behind = behindResult.data;
+		const ahead = aheadResult.data;
+		if (behind === 0) {
+			reconciliations.push({
+				branch: wt.branch,
+				upstream,
+				state: ahead === 0 ? "equal" : "local-only",
+				action: "unchanged",
+			});
+			continue;
+		}
+
+		if (ahead === 0) {
+			const dirty = await git.isDirty(wt.path);
+			if (!dirty.success || dirty.data) {
+				reconciliationFailed.add(wt.branch);
+				reconciliations.push({
+					branch: wt.branch,
+					upstream,
+					state: "remote-only",
+					action: "skipped-dirty",
+				});
+				continue;
+			}
+			if (input.dryRun) {
+				reconciliations.push({ branch: wt.branch, upstream, state: "remote-only", action: "would-fast-forward" });
+				continue;
+			}
+			const moved = await git.fastForwardToRef(wt.path, upstream);
+			if (!moved.success) reconciliationFailed.add(wt.branch);
+			reconciliations.push({
+				branch: wt.branch,
+				upstream,
+				state: "remote-only",
+				action: moved.success ? "fast-forwarded" : "aborted",
+			});
+			continue;
+		}
+
+		const uniqueLocal = await git.revListCherryPick({ base: upstream, feature: wt.branch });
+		const remoteRewrite = uniqueLocal.success && uniqueLocal.data.length === 0;
+		const dirty = await git.isDirty(wt.path);
+		if (!dirty.success || dirty.data) {
+			reconciliationFailed.add(wt.branch);
+			reconciliations.push({
+				branch: wt.branch,
+				upstream,
+				state: remoteRewrite ? "remote-rewrite" : "diverged",
+				action: "skipped-dirty",
+			});
+			continue;
+		}
+		let choice: ReconcileChoice = remoteRewrite ? "reset" : (input.reconcile ?? "abort");
+		if (!remoteRewrite && input.reconcile === "reset" && wt.branch !== input.branch) choice = "abort";
+		if (!remoteRewrite && !input.dryRun && input.reconcile === undefined && deps.chooseReconciliation) {
+			choice = await deps.chooseReconciliation(wt.branch, upstream);
+		}
+		if (choice === "abort") {
+			reconciliationFailed.add(wt.branch);
+			reconciliations.push({ branch: wt.branch, upstream, state: "diverged", action: "aborted" });
+			continue;
+		}
+		if (input.dryRun) {
+			reconciliations.push({
+				branch: wt.branch,
+				upstream,
+				state: remoteRewrite ? "remote-rewrite" : "diverged",
+				action: remoteRewrite ? "would-realign" : choice === "reset" ? "would-reset" : "would-rebase",
+				recoveryRef: "refs/worktree-kit/recovery/<branch>/<timestamp>",
+			});
+			continue;
+		}
+		const recovery = await git.createRecoveryRef(wt.branch);
+		if (!recovery.success) {
+			reconciliationFailed.add(wt.branch);
+			reconciliations.push({
+				branch: wt.branch,
+				upstream,
+				state: remoteRewrite ? "remote-rewrite" : "diverged",
+				action: "aborted",
+			});
+			continue;
+		}
+		const moved =
+			choice === "reset" ? await git.resetHardToRef(wt.path, upstream) : await git.rebase(wt.path, upstream);
+		if (!moved.success) {
+			if (choice === "rebase") await git.rebaseAbort(wt.path);
+			reconciliationFailed.add(wt.branch);
+		}
+		reconciliations.push({
+			branch: wt.branch,
+			upstream,
+			state: remoteRewrite ? "remote-rewrite" : "diverged",
+			action: moved.success ? (remoteRewrite ? "realigned" : choice === "reset" ? "realigned" : "rebased") : "aborted",
+			recoveryRef: recovery.data,
+		});
+	}
+
 	// Sync every LOCAL root from its own upstream (R1), each with the WTK-61
 	// divergence handling (R5). Absent roots are rebase targets only and cannot
 	// diverge, so they are skipped here.
@@ -581,17 +763,13 @@ export async function updateWorktrees(
 
 	const orderedWorktrees = buildRebaseOrder(worktrees, parentMap, defaultBranch, rootBases, localRootNames);
 
-	if (input.branch && input.branch !== defaultBranch && !worktrees.some((w) => w.branch === input.branch)) {
-		return R.err(new Error(`Branch "${input.branch}" not found in worktrees`));
-	}
-
 	const targetWorktrees =
 		input.branch && input.branch !== defaultBranch
 			? filterDescendants(input.branch, orderedWorktrees, parentMap)
 			: orderedWorktrees;
 
 	const reports: WorktreeReport[] = [];
-	const failedBranches = new Set<string>();
+	const failedBranches = new Set<string>(reconciliationFailed);
 
 	// The default branch is reported when it has a worktree; without one there is
 	// nothing to rebase, but hook results still need somewhere to surface.
@@ -613,6 +791,14 @@ export async function updateWorktrees(
 		const parent = parentMap[wt.branch] ?? defaultBranch;
 		const retargetedFrom = retargetMap[wt.branch];
 		const base = { branch: wt.branch, path: wt.path, parent, retargetedFrom };
+
+		if (reconciliationFailed.has(wt.branch)) {
+			return {
+				...base,
+				result: { status: "skipped", reason: "remote reconciliation unresolved" },
+				hookNotifications: [],
+			};
+		}
 
 		if (failedBranches.has(parent)) {
 			failedBranches.add(wt.branch);
@@ -820,6 +1006,8 @@ export async function updateWorktrees(
 		defaultBranchRemoteRef,
 		syncedFromUpstream,
 		rootSyncs,
+		reconciliations,
 		reports,
+		unresolved: failedBranches.size > 0,
 	});
 }
