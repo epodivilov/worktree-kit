@@ -360,6 +360,45 @@ describe("updateWorktrees — feature tracking reconciliation (WTK-70)", () => {
 		});
 		expect(output.unresolved).toBe(true);
 	});
+
+	test("R7: upstream lookup failures leave the branch unresolved", async () => {
+		const git = reconciliationGit({
+			getBranchUpstreamFail: { code: "UNKNOWN", message: "cannot read config" },
+		});
+		const output = expectOk(await updateWorktrees({ dryRun: false }, { git }));
+
+		expect(output.reconciliations[0]).toMatchObject({
+			branch: "feature-a",
+			state: "missing",
+			action: "aborted",
+			warning: "Failed to resolve tracking ref: cannot read config",
+		});
+		expect(output.reports.find((report) => report.branch === "feature-a")?.result).toMatchObject({
+			status: "skipped",
+			reason: "remote reconciliation unresolved",
+		});
+		expect(output.unresolved).toBe(true);
+	});
+
+	test("R7: a failed reconciliation rebase reports a failed abort", async () => {
+		const git = reconciliationGit({
+			commitCountMap: new Map([
+				...flatBranchesConfig([mainWt, featureA]).commitCountMap,
+				["feature-a..fork/topic", 1],
+				["fork/topic..feature-a", 1],
+			]),
+			revListCherryPickMap: new Map([["fork/topic...feature-a", ["local"]]]),
+			rebaseConflicts: new Set(["/repo-a"]),
+			rebaseAbortFail: { code: "UNKNOWN", message: "abort failed" },
+		});
+		const output = expectOk(await updateWorktrees({ dryRun: false, reconcile: "rebase" }, { git }));
+
+		expect(output.reconciliations[0]).toMatchObject({
+			action: "aborted",
+			warning: "Rebase abort failed: abort failed",
+		});
+		expect(output.unresolved).toBe(true);
+	});
 });
 
 describe("updateWorktrees — parent detection", () => {

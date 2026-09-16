@@ -40,6 +40,7 @@ export interface FakeGitOptions {
 	resetHardToRemoteCalls?: { worktreePath: string; branch: string; remote: string }[];
 	forceUpdateBranchRefCalls?: { branch: string; remote: string }[];
 	branchUpstreams?: Map<string, string | null>;
+	getBranchUpstreamFail?: { code: GitError["code"]; message: string };
 	createRecoveryRefCalls?: string[];
 	fastForwardToRefCalls?: { worktreePath: string; ref: string }[];
 	resetHardToRefCalls?: { worktreePath: string; ref: string }[];
@@ -289,6 +290,9 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 		},
 
 		async getBranchUpstream(branch: string): Promise<Result<string | null, GitError>> {
+			if (options.getBranchUpstreamFail !== undefined) {
+				return Result.err(options.getBranchUpstreamFail);
+			}
 			return Result.ok(options.branchUpstreams?.get(branch) ?? null);
 		},
 

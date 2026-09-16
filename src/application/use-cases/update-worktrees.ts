@@ -40,6 +40,7 @@ export type ReconcileChoice = "rebase" | "reset" | "abort";
 
 export interface ReconciliationReport {
 	branch: string;
+	worktreePath: string;
 	upstream?: string;
 	state: "missing" | "gone" | "equal" | "local-only" | "remote-only" | "remote-rewrite" | "diverged";
 	action:
@@ -54,6 +55,7 @@ export interface ReconciliationReport {
 		| "would-rebase"
 		| "would-reset";
 	recoveryRef?: string;
+	warning?: string;
 }
 
 /**
@@ -550,6 +552,7 @@ export async function updateWorktrees(
 		input.branch && input.branch !== defaultBranch
 			? filterDescendants(input.branch, initialOrder, initialParentMap)
 			: initialOrder;
+	const reconciliationTargetBranches = new Set(reconciliationTargets.map((wt) => wt.branch));
 	const reconciliationFailed = new Set<string>();
 	const reconciliations: ReconciliationReport[] = [];
 
@@ -557,17 +560,28 @@ export async function updateWorktrees(
 		const parent = initialParentMap[wt.branch];
 		if (parent && reconciliationFailed.has(parent)) {
 			reconciliationFailed.add(wt.branch);
-			reconciliations.push({ branch: wt.branch, state: "diverged", action: "aborted" });
+			reconciliations.push({ branch: wt.branch, worktreePath: wt.path, state: "diverged", action: "aborted" });
 			continue;
 		}
 		if (goneSet.has(wt.branch)) {
-			reconciliations.push({ branch: wt.branch, state: "gone", action: "unchanged" });
+			reconciliations.push({ branch: wt.branch, worktreePath: wt.path, state: "gone", action: "unchanged" });
 			continue;
 		}
 		const upstreamResult = await git.getBranchUpstream(wt.branch);
-		const upstream = upstreamResult.success ? upstreamResult.data : null;
+		if (!upstreamResult.success) {
+			reconciliationFailed.add(wt.branch);
+			reconciliations.push({
+				branch: wt.branch,
+				worktreePath: wt.path,
+				state: "missing",
+				action: "aborted",
+				warning: `Failed to resolve tracking ref: ${upstreamResult.error.message}`,
+			});
+			continue;
+		}
+		const upstream = upstreamResult.data;
 		if (!upstream) {
-			reconciliations.push({ branch: wt.branch, state: "missing", action: "unchanged" });
+			reconciliations.push({ branch: wt.branch, worktreePath: wt.path, state: "missing", action: "unchanged" });
 			continue;
 		}
 		const [behindResult, aheadResult] = await Promise.all([
@@ -576,7 +590,13 @@ export async function updateWorktrees(
 		]);
 		if (!behindResult.success || !aheadResult.success) {
 			reconciliationFailed.add(wt.branch);
-			reconciliations.push({ branch: wt.branch, upstream, state: "diverged", action: "aborted" });
+			reconciliations.push({
+				branch: wt.branch,
+				worktreePath: wt.path,
+				upstream,
+				state: "diverged",
+				action: "aborted",
+			});
 			continue;
 		}
 		const behind = behindResult.data;
@@ -584,6 +604,7 @@ export async function updateWorktrees(
 		if (behind === 0) {
 			reconciliations.push({
 				branch: wt.branch,
+				worktreePath: wt.path,
 				upstream,
 				state: ahead === 0 ? "equal" : "local-only",
 				action: "unchanged",
@@ -597,6 +618,7 @@ export async function updateWorktrees(
 				reconciliationFailed.add(wt.branch);
 				reconciliations.push({
 					branch: wt.branch,
+					worktreePath: wt.path,
 					upstream,
 					state: "remote-only",
 					action: "skipped-dirty",
@@ -604,13 +626,20 @@ export async function updateWorktrees(
 				continue;
 			}
 			if (input.dryRun) {
-				reconciliations.push({ branch: wt.branch, upstream, state: "remote-only", action: "would-fast-forward" });
+				reconciliations.push({
+					branch: wt.branch,
+					worktreePath: wt.path,
+					upstream,
+					state: "remote-only",
+					action: "would-fast-forward",
+				});
 				continue;
 			}
 			const moved = await git.fastForwardToRef(wt.path, upstream);
 			if (!moved.success) reconciliationFailed.add(wt.branch);
 			reconciliations.push({
 				branch: wt.branch,
+				worktreePath: wt.path,
 				upstream,
 				state: "remote-only",
 				action: moved.success ? "fast-forwarded" : "aborted",
@@ -625,6 +654,7 @@ export async function updateWorktrees(
 			reconciliationFailed.add(wt.branch);
 			reconciliations.push({
 				branch: wt.branch,
+				worktreePath: wt.path,
 				upstream,
 				state: remoteRewrite ? "remote-rewrite" : "diverged",
 				action: "skipped-dirty",
@@ -638,12 +668,19 @@ export async function updateWorktrees(
 		}
 		if (choice === "abort") {
 			reconciliationFailed.add(wt.branch);
-			reconciliations.push({ branch: wt.branch, upstream, state: "diverged", action: "aborted" });
+			reconciliations.push({
+				branch: wt.branch,
+				worktreePath: wt.path,
+				upstream,
+				state: "diverged",
+				action: "aborted",
+			});
 			continue;
 		}
 		if (input.dryRun) {
 			reconciliations.push({
 				branch: wt.branch,
+				worktreePath: wt.path,
 				upstream,
 				state: remoteRewrite ? "remote-rewrite" : "diverged",
 				action: remoteRewrite ? "would-realign" : choice === "reset" ? "would-reset" : "would-rebase",
@@ -656,6 +693,7 @@ export async function updateWorktrees(
 			reconciliationFailed.add(wt.branch);
 			reconciliations.push({
 				branch: wt.branch,
+				worktreePath: wt.path,
 				upstream,
 				state: remoteRewrite ? "remote-rewrite" : "diverged",
 				action: "aborted",
@@ -664,16 +702,22 @@ export async function updateWorktrees(
 		}
 		const moved =
 			choice === "reset" ? await git.resetHardToRef(wt.path, upstream) : await git.rebase(wt.path, upstream);
+		let warning: string | undefined;
 		if (!moved.success) {
-			if (choice === "rebase") await git.rebaseAbort(wt.path);
+			if (choice === "rebase") {
+				const abortResult = await git.rebaseAbort(wt.path);
+				if (!abortResult.success) warning = `Rebase abort failed: ${abortResult.error.message}`;
+			}
 			reconciliationFailed.add(wt.branch);
 		}
 		reconciliations.push({
 			branch: wt.branch,
+			worktreePath: wt.path,
 			upstream,
 			state: remoteRewrite ? "remote-rewrite" : "diverged",
 			action: moved.success ? (remoteRewrite ? "realigned" : choice === "reset" ? "realigned" : "rebased") : "aborted",
 			recoveryRef: recovery.data,
+			warning,
 		});
 	}
 
@@ -765,7 +809,7 @@ export async function updateWorktrees(
 
 	const targetWorktrees =
 		input.branch && input.branch !== defaultBranch
-			? filterDescendants(input.branch, orderedWorktrees, parentMap)
+			? orderedWorktrees.filter((wt) => reconciliationTargetBranches.has(wt.branch))
 			: orderedWorktrees;
 
 	const reports: WorktreeReport[] = [];
