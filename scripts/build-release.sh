@@ -22,5 +22,16 @@ for entry in "${targets[@]}"; do
   bun build ./src/index.ts --compile --target="$target" --outfile "$DIST/$output"
 done
 
+# Bun cross-compilation can leave an invalid embedded Mach-O signature. Sign only
+# after every artifact's final bytes have been written. The release workflow runs
+# this script on macOS; non-macOS local builds remain useful for compilation checks
+# but are deliberately not publishable (release-publish.sh enforces verification).
+if [ "$(uname -s)" = "Darwin" ]; then
+  for artifact in "$DIST/wt-darwin-arm64" "$DIST/wt-darwin-x64"; do
+    echo "Ad-hoc signing $artifact..."
+    codesign --force --sign - "$artifact"
+  done
+fi
+
 echo "Built binaries for v$VERSION:"
 ls -la "$DIST"

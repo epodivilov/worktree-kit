@@ -24,7 +24,10 @@ permissions:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    # Darwin artifacts are ad-hoc signed and verified on the native arm64 runner
+    # before the draft release is created. A Linux cross-build cannot repair or
+    # validate the embedded Mach-O signatures produced by Bun.
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v6
         with:
@@ -42,7 +45,7 @@ jobs:
       # build-release.sh compiles the binaries with `bun build --compile`; bun must be on PATH.
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.3.14
 
       - run: pnpm install --frozen-lockfile
 

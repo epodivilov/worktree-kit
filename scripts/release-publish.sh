@@ -62,6 +62,12 @@ rm -f "$view_err"
 echo "==> Building release binaries for $tag..."
 bash scripts/build-release.sh
 
+# This must complete before even the draft/tag is created. Both Darwin assets are
+# verified, then the one matching this macOS runner is executed natively. Keeping
+# this gate here (rather than after upload) makes an invalid or non-launching binary
+# incapable of reaching the final `--draft=false` transition.
+bash scripts/verify-release.sh
+
 # Confirm the build actually produced the platform binaries before creating a release around them;
 # otherwise `gh release upload dist/wt-*` would pass an unexpanded glob straight to the API.
 shopt -s nullglob
