@@ -236,6 +236,7 @@ wt update [branch] [options]
 |------|-------------|
 | `--dry-run` | Show what would be done without making changes |
 | `--cleanup` | Automatically clean up branches with gone remotes after update |
+| `--reconcile rebase\|abort\|reset` | Resolve genuine feature/upstream divergence (`reset` requires a named branch) |
 
 **Examples:**
 
@@ -256,9 +257,14 @@ wt update --cleanup
 **How it works:**
 
 1. Fetches all remotes
-2. Fast-forwards the default branch (or updates its ref if no worktree exists for it)
-3. Detects parent branches via merge-base
-4. Rebases feature branches in correct order — parents before children
+2. Reconciles each targeted feature worktree with that branch's configured Git upstream
+3. Fast-forwards the default branch (or updates its ref if no worktree exists for it)
+4. Re-detects parent branches from the reconciled tips
+5. Rebases feature branches in correct order — parents before children
+
+Feature reconciliation keeps equal and local-only tips unchanged, fast-forwards remote-only advances, and automatically accepts a patch-equivalent remote rewrite after saving the old tip under `refs/worktree-kit/recovery/`. Genuine local/remote divergence prompts in interactive mode, defaulting to rebase. Non-interactive runs must choose `--reconcile rebase` or leave the branch unresolved with `--reconcile abort`; destructive `--reconcile reset` is accepted only for an explicitly named branch and also creates a recovery ref. A dirty worktree that would have to move is left untouched together with its dependent subtree.
+
+Use `--dry-run` to inspect classifications, policies, recovery actions, root synchronization, and the final rebase plan without changing refs, running hooks, or opening a reconciliation prompt.
 
 **Fork workflow** — when `upstream` is set in config (see `wt init --upstream`), the default branch is synced from `<upstream>/<default>` instead of `origin/<default>`, whether it is fast-forwarded in its own worktree or updated by ref because no worktree has it checked out. After a successful upstream sync, `post-update` hooks also run for the default branch (so you can, for example, push the synced default branch back to your fork); with no worktree for the default branch they run in the repository root.
 

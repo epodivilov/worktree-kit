@@ -128,6 +128,11 @@ export function updateCommand(container: Container) {
 				description: "Max worktrees to rebase concurrently (default 4)",
 				required: false,
 			},
+			reconcile: {
+				type: "string",
+				description: "Divergence policy for feature tracking refs: rebase, abort, or targeted reset",
+				required: false,
+			},
 		},
 		async run({ args }) {
 			const { ui, git, fs, shell } = container;
@@ -136,8 +141,11 @@ export function updateCommand(container: Container) {
 
 			await runCommand(async () => {
 				const parsed = v.parse(UpdateArgsSchema, args);
-				const { branch, cleanup: autoCleanup, jobs } = parsed;
+				const { branch, cleanup: autoCleanup, jobs, reconcile } = parsed;
 				const dryRun = parsed["dry-run"];
+				if (reconcile === "reset" && !branch) {
+					throw new CommandError("--reconcile reset requires a branch", EXIT_FAILURE);
+				}
 				const configResult = await loadConfig({ git, fs });
 				const postUpdateHooks = configResult.success ? configResult.data.config.hooks["post-update"] : [];
 				const onConflictHooks = configResult.success ? configResult.data.config.hooks["on-conflict"] : [];
@@ -243,8 +251,38 @@ export function updateCommand(container: Container) {
 				phaseSpinner = ui.createSpinner();
 				phaseSpinner.start("Fetching and analyzing worktrees...");
 				const result = await updateWorktrees(
-					{ dryRun, branch, postUpdateHooks, onConflictHooks, repoRoot, upstream, jobs },
-					{ git, shell: needsShell ? shell : undefined, progress },
+					{
+						dryRun,
+						branch,
+						postUpdateHooks,
+						onConflictHooks,
+						repoRoot,
+						upstream,
+						jobs,
+						reconcile: reconcile ?? (dryRun && !ui.nonInteractive ? "rebase" : undefined),
+					},
+					{
+						git,
+						shell: needsShell ? shell : undefined,
+						progress,
+						chooseReconciliation: ui.nonInteractive
+							? undefined
+							: async (branchName, trackingRef) => {
+									phaseSpinner?.stop();
+									phaseSpinner = undefined;
+									const choice = await ui.select({
+										message: `${branchName} diverged from ${trackingRef}`,
+										options: [
+											{ value: "rebase" as const, label: "Rebase local changes", hint: "recommended" },
+											{ value: "reset" as const, label: "Accept remote", hint: "saved under a recovery ref" },
+											{ value: "abort" as const, label: "Leave unchanged" },
+										],
+									});
+									phaseSpinner = ui.createSpinner();
+									phaseSpinner.start("Fetching and analyzing worktrees...");
+									return ui.isCancel(choice) ? "abort" : choice;
+								},
+					},
 				);
 
 				cleanup.clear();
@@ -268,8 +306,18 @@ export function updateCommand(container: Container) {
 					defaultBranchRemoteRef,
 					syncedFromUpstream,
 					rootSyncs,
+					reconciliations,
 					reports,
+					unresolved,
 				} = result.data;
+
+				for (const report of reconciliations) {
+					const tracking = report.upstream ? ` (${report.upstream})` : "";
+					const recovery = report.recoveryRef ? `; recover with: git reset --hard ${report.recoveryRef}` : "";
+					const message = `${report.branch}: ${report.state}${tracking} — ${report.action}${recovery}`;
+					if (report.action === "aborted" || report.action === "skipped-dirty") ui.warn(message);
+					else ui.info(message);
+				}
 
 				// One summary line for the default branch, then one per extra fork root
 				// (WTK-64). The default branch keeps its dedicated output fields; the extra
@@ -318,6 +366,10 @@ export function updateCommand(container: Container) {
 						const failMsgs = hookFailures.map((n) => n.message).join("; ");
 						ui.warn(`${report.branch} post-update hooks — ${failMsgs}`);
 					}
+				}
+
+				if (unresolved) {
+					throw new CommandError("Some worktree subtrees remain unresolved", EXIT_FAILURE);
 				}
 
 				const outroMessage = dryRun ? "Dry run — no changes made" : "Done!";

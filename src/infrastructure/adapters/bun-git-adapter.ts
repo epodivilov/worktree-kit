@@ -561,6 +561,59 @@ export function createBunGitAdapter(logger: LoggerPort, primaryRemote: string): 
 			}
 		},
 
+		async getBranchUpstream(branch: string): Promise<Result<string | null, GitError>> {
+			try {
+				const { exitCode, stdout, stderr } = await runGit([
+					"for-each-ref",
+					"--format=%(upstream:short)",
+					`refs/heads/${branch}`,
+				]);
+				if (exitCode !== 0) {
+					return Result.err({ code: "UNKNOWN", message: stderr || `Failed to resolve upstream for ${branch}` });
+				}
+				return Result.ok(stdout.trim() || null);
+			} catch {
+				return Result.err({ code: "UNKNOWN", message: `Failed to resolve upstream for ${branch}` });
+			}
+		},
+
+		async createRecoveryRef(branch: string): Promise<Result<string, GitError>> {
+			const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+			const ref = `refs/worktree-kit/recovery/${branch}/${stamp}-${process.pid}`;
+			try {
+				const zeroOid = "0000000000000000000000000000000000000000";
+				const { exitCode, stderr } = await runGit(["update-ref", ref, branch, zeroOid]);
+				if (exitCode !== 0) {
+					return Result.err({ code: "UNKNOWN", message: stderr || `Failed to create recovery ref for ${branch}` });
+				}
+				return Result.ok(ref);
+			} catch {
+				return Result.err({ code: "UNKNOWN", message: `Failed to create recovery ref for ${branch}` });
+			}
+		},
+
+		async fastForwardToRef(worktreePath: string, ref: string): Promise<Result<void, GitError>> {
+			try {
+				const { exitCode, stderr } = await runGit(["-C", worktreePath, "merge", "--ff-only", ref]);
+				return exitCode === 0
+					? Result.ok(undefined)
+					: Result.err({ code: "MERGE_FAILED", message: stderr || `Failed to fast-forward to ${ref}` });
+			} catch {
+				return Result.err({ code: "UNKNOWN", message: `Failed to fast-forward to ${ref}` });
+			}
+		},
+
+		async resetHardToRef(worktreePath: string, ref: string): Promise<Result<void, GitError>> {
+			try {
+				const { exitCode, stderr } = await runGit(["-C", worktreePath, "reset", "--hard", ref]);
+				return exitCode === 0
+					? Result.ok(undefined)
+					: Result.err({ code: "MERGE_FAILED", message: stderr || `Failed to reset to ${ref}` });
+			} catch {
+				return Result.err({ code: "UNKNOWN", message: `Failed to reset to ${ref}` });
+			}
+		},
+
 		async mergeFFOnly(worktreePath: string, branch: string, remote?: string): Promise<Result<void, GitError>> {
 			try {
 				const remoteName = remote ?? primaryRemote;

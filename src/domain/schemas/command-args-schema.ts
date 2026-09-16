@@ -25,6 +25,7 @@ export const UpdateArgsSchema = v.object({
 	branch: v.optional(v.string()),
 	"dry-run": v.optional(v.boolean(), false),
 	cleanup: v.optional(v.boolean(), false),
+	reconcile: v.optional(v.picklist(["rebase", "abort", "reset"])),
 	// Max worktrees to rebase concurrently. citty hands the flag over as a string
 	// (or a number if already numeric); coerce, then reject anything that is not a
 	// positive integer as an argument validation error.
