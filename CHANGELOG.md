@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.11.0
+
+### Minor Changes
+
+- 1f911b1: Reconcile active feature worktrees with their configured tracking refs before updating their parent stacks.
+
+### Patch Changes
+
+- 7a81070: Ad-hoc sign and verify both macOS release binaries before publishing.
+
 ## 0.10.2
 
 ### Patch Changes
