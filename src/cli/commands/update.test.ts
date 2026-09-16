@@ -395,7 +395,37 @@ describe("update --reconcile (WTK-70)", () => {
 
 		expect(code).toBe(0);
 		expect(selectCalls[0]?.values).toEqual(["rebase", "reset", "abort"]);
-		expect(log.info.some((line) => line.includes("refs/worktree-kit/recovery/feature/"))).toBe(true);
+		expect(
+			log.info.some((line) =>
+				line.includes(`recover with: git -C '${featureWt.path}' reset --hard 'refs/worktree-kit/recovery/feature/`),
+			),
+		).toBe(true);
+	});
+
+	test("unresolved reconciliation still runs requested cleanup before failing", async () => {
+		const git = createFakeGit({
+			worktrees: [mainWt, featureWt],
+			branches: ["main", "feature", "gone"],
+			goneBranches: ["gone"],
+			mergedBranches: ["gone"],
+			branchUpstreams: new Map([["feature", "origin/feature"]]),
+			commitCountMap: new Map([
+				["feature..origin/feature", 1],
+				["origin/feature..feature", 1],
+				["main..gone", 1],
+			]),
+			revListMap: new Map([["main..gone", ["gone-sha"]]]),
+			revListCherryPickMap: new Map([
+				["origin/feature...feature", ["local"]],
+				["main...gone", []],
+			]),
+		});
+		const { ui, log } = createFakeUi({ nonInteractive: true });
+
+		const code = await runUpdate(buildContainer(ui, git, fs()), { "dry-run": false, cleanup: true });
+
+		expect(code).toBe(3);
+		expect(log.success).toContain("gone — branch removed (no matching worktree found)");
 	});
 });
 

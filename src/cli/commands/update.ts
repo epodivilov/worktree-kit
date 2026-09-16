@@ -23,6 +23,10 @@ import { type LockedWorktree, warnLockedWorktreesGroup } from "../locked-worktre
 import { resolveUpstream } from "../resolve-upstream.ts";
 import { CommandError, runCommand } from "../run-command.ts";
 
+function shellQuote(value: string): string {
+	return `'${value.replaceAll("'", `'"'"'`)}'`;
+}
+
 /**
  * Maps a per-worktree report to a single terminal spinner line. `complete` (✓) is
  * used for benign outcomes (rebased, would-be-rebased, already-merged skip); `fail`
@@ -313,8 +317,11 @@ export function updateCommand(container: Container) {
 
 				for (const report of reconciliations) {
 					const tracking = report.upstream ? ` (${report.upstream})` : "";
-					const recovery = report.recoveryRef ? `; recover with: git reset --hard ${report.recoveryRef}` : "";
-					const message = `${report.branch}: ${report.state}${tracking} — ${report.action}${recovery}`;
+					const recovery = report.recoveryRef
+						? `; recover with: git -C ${shellQuote(report.worktreePath)} reset --hard ${shellQuote(report.recoveryRef)}`
+						: "";
+					const warning = report.warning ? `; ${report.warning}` : "";
+					const message = `${report.branch}: ${report.state}${tracking} — ${report.action}${recovery}${warning}`;
 					if (report.action === "aborted" || report.action === "skipped-dirty") ui.warn(message);
 					else ui.info(message);
 				}
@@ -368,11 +375,13 @@ export function updateCommand(container: Container) {
 					}
 				}
 
-				if (unresolved) {
-					throw new CommandError("Some worktree subtrees remain unresolved", EXIT_FAILURE);
-				}
-
 				const outroMessage = dryRun ? "Dry run — no changes made" : "Done!";
+				const finish = () => {
+					if (unresolved) {
+						throw new CommandError("Some worktree subtrees remain unresolved", EXIT_FAILURE);
+					}
+					ui.outro(outroMessage);
+				};
 
 				const goneResult = await git.listGoneBranches();
 				const staleBranches = Result.isOk(goneResult) ? goneResult.data.filter((b) => b !== defaultBranch) : [];
@@ -388,7 +397,7 @@ export function updateCommand(container: Container) {
 					.map((r) => r.branch);
 
 				if (staleBranches.length === 0 && rebaseMerged.length === 0) {
-					ui.outro(outroMessage);
+					finish();
 					return;
 				}
 
@@ -444,13 +453,13 @@ export function updateCommand(container: Container) {
 					if (kept.length > 0) {
 						ui.info(keptMessage);
 					}
-					ui.outro(outroMessage);
+					finish();
 					return;
 				}
 
 				if (ui.nonInteractive && !autoCleanup) {
 					ui.warn(`${merged.length} branch(es) have gone remotes, run 'wt cleanup'`);
-					ui.outro(outroMessage);
+					finish();
 					return;
 				}
 
@@ -478,7 +487,7 @@ export function updateCommand(container: Container) {
 				}
 
 				if (!shouldCleanup) {
-					ui.outro(outroMessage);
+					finish();
 					return;
 				}
 
@@ -565,7 +574,7 @@ export function updateCommand(container: Container) {
 
 				warnLockedWorktreesGroup(ui, lockedWorktrees, "wt update");
 
-				ui.outro(outroMessage);
+				finish();
 			}, ui);
 		},
 	});
