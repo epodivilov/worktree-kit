@@ -43,9 +43,11 @@ export interface FakeGitOptions {
 	getBranchUpstreamFail?: { code: GitError["code"]; message: string };
 	createRecoveryRefCalls?: string[];
 	fastForwardToRefCalls?: { worktreePath: string; ref: string }[];
+	fastForwardToRefFail?: GitError;
 	resetHardToRefCalls?: { worktreePath: string; ref: string }[];
 	mergeBaseMap?: Map<string, string>;
 	commitCountMap?: Map<string, number>;
+	commitCountFailures?: Map<string, GitError>;
 	trackedPaths?: Set<string>;
 	lockedWorktrees?: Map<string, string>;
 	pruneFailPaths?: Map<string, string>;
@@ -303,6 +305,7 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 
 		async fastForwardToRef(worktreePath: string, ref: string): Promise<Result<void, GitError>> {
 			options.fastForwardToRefCalls?.push({ worktreePath, ref });
+			if (options.fastForwardToRefFail !== undefined) return Result.err(options.fastForwardToRefFail);
 			return Result.ok(undefined);
 		},
 
@@ -443,6 +446,8 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 
 		async getCommitCount(from: string, to: string): Promise<Result<number, GitError>> {
 			const key = `${from}..${to}`;
+			const failure = options.commitCountFailures?.get(key);
+			if (failure !== undefined) return Result.err(failure);
 			const count = options.commitCountMap?.get(key);
 			if (count === undefined) {
 				return Result.err({
