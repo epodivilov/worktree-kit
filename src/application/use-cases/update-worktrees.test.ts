@@ -299,7 +299,7 @@ describe("updateWorktrees — feature tracking reconciliation (WTK-70)", () => {
 		expect(output.unresolved).toBe(false);
 	});
 
-	test("R3: patch-equivalent rewrite saves a recovery ref and realigns", async () => {
+	test("R2: patch-equivalent stale tracking history keeps the local rebased tip", async () => {
 		const createRecoveryRefCalls: string[] = [];
 		const resetHardToRefCalls: { worktreePath: string; ref: string }[] = [];
 		const git = reconciliationGit({
@@ -314,9 +314,45 @@ describe("updateWorktrees — feature tracking reconciliation (WTK-70)", () => {
 		});
 		const output = expectOk(await updateWorktrees({ dryRun: false }, { git }));
 
+		expect(createRecoveryRefCalls).toEqual([]);
+		expect(resetHardToRefCalls).toEqual([]);
+		expect(output.reconciliations[0]).toMatchObject({ state: "stale-tracking", action: "unchanged" });
+	});
+
+	test("R3: remote-only semantic work rebases automatically without a prompt", async () => {
+		const createRecoveryRefCalls: string[] = [];
+		const rebaseCalls: FakeRebaseCall[] = [];
+		let prompts = 0;
+		const git = reconciliationGit({
+			commitCountMap: new Map([
+				...flatBranchesConfig([mainWt, featureA]).commitCountMap,
+				["feature-a..fork/topic", 1],
+				["fork/topic..feature-a", 1],
+			]),
+			revListCherryPickMap: new Map([
+				["fork/topic...feature-a", []],
+				["feature-a...fork/topic", ["remote"]],
+			]),
+			createRecoveryRefCalls,
+			rebaseCalls,
+		});
+		const output = expectOk(
+			await updateWorktrees(
+				{ dryRun: false },
+				{
+					git,
+					chooseReconciliation: async () => {
+						prompts += 1;
+						return "abort";
+					},
+				},
+			),
+		);
+
+		expect(prompts).toBe(0);
 		expect(createRecoveryRefCalls).toEqual(["feature-a"]);
-		expect(resetHardToRefCalls).toEqual([{ worktreePath: "/repo-a", ref: "fork/topic" }]);
-		expect(output.reconciliations[0]).toMatchObject({ state: "remote-rewrite", action: "realigned" });
+		expect(rebaseCalls[0]).toMatchObject({ worktreePath: "/repo-a", onto: "fork/topic" });
+		expect(output.reconciliations[0]).toMatchObject({ state: "remote-only", action: "rebased" });
 	});
 
 	test("R4: genuine divergence rebases only under the selected policy", async () => {
@@ -328,7 +364,10 @@ describe("updateWorktrees — feature tracking reconciliation (WTK-70)", () => {
 				["feature-a..fork/topic", 1],
 				["fork/topic..feature-a", 1],
 			]),
-			revListCherryPickMap: new Map([["fork/topic...feature-a", ["local"]]]),
+			revListCherryPickMap: new Map([
+				["fork/topic...feature-a", ["local"]],
+				["feature-a...fork/topic", ["remote"]],
+			]),
 			createRecoveryRefCalls: recoveryCalls,
 			rebaseCalls,
 		});
