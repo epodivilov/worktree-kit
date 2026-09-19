@@ -644,6 +644,7 @@ export async function updateWorktrees(
 					upstream,
 					state: "remote-only",
 					action: "skipped-dirty",
+					warning: !dirty.success ? `Failed to inspect worktree: ${dirty.error.message}` : undefined,
 				});
 				continue;
 			}
@@ -1135,7 +1136,9 @@ export async function updateWorktrees(
 					: "remote reconciliation was not completed");
 		const nextAction =
 			reconciliation?.action === "skipped-dirty"
-				? "clean or stash the worktree, then re-run wt update"
+				? reconciliation.warning
+					? "resolve the worktree inspection error, then re-run wt update"
+					: "clean or stash the worktree, then re-run wt update"
 				: rootReport?.result.status === "rebase-conflict"
 					? "resolve the conflict, then re-run wt update"
 					: "inspect the preserved branch/recovery ref, then re-run wt update";
