@@ -355,6 +355,29 @@ describe("updateWorktrees — feature tracking reconciliation (WTK-70)", () => {
 		expect(output.reconciliations[0]).toMatchObject({ state: "remote-only", action: "rebased" });
 	});
 
+	test("R2: explicit rebase preserves local-only history", async () => {
+		const recoveryCalls: string[] = [];
+		const rebaseCalls: FakeRebaseCall[] = [];
+		const git = reconciliationGit({
+			commitCountMap: new Map([
+				...flatBranchesConfig([mainWt, featureA]).commitCountMap,
+				["feature-a..fork/topic", 1],
+				["fork/topic..feature-a", 1],
+			]),
+			revListCherryPickMap: new Map([
+				["fork/topic...feature-a", ["local"]],
+				["feature-a...fork/topic", []],
+			]),
+			createRecoveryRefCalls: recoveryCalls,
+			rebaseCalls,
+		});
+		const output = expectOk(await updateWorktrees({ dryRun: false, reconcile: "rebase" }, { git }));
+
+		expect(recoveryCalls).toEqual([]);
+		expect(rebaseCalls.some((call) => call.onto === "fork/topic")).toBe(false);
+		expect(output.reconciliations[0]).toMatchObject({ state: "local-only", action: "unchanged" });
+	});
+
 	test("R4: genuine divergence rebases only under the selected policy", async () => {
 		const recoveryCalls: string[] = [];
 		const rebaseCalls: FakeRebaseCall[] = [];
@@ -376,6 +399,53 @@ describe("updateWorktrees — feature tracking reconciliation (WTK-70)", () => {
 		expect(recoveryCalls).toEqual(["feature-a"]);
 		expect(rebaseCalls[0]).toMatchObject({ worktreePath: "/repo-a", onto: "fork/topic" });
 		expect(output.reconciliations[0]).toMatchObject({ state: "diverged", action: "rebased" });
+	});
+
+	test("R6: commit-count failures retain the exact comparison error", async () => {
+		const output = expectOk(
+			await updateWorktrees(
+				{ dryRun: false },
+				{
+					git: reconciliationGit({
+						commitCountFailures: new Map([
+							["feature-a..fork/topic", { code: "UNKNOWN", message: "count unavailable" }],
+						]),
+						commitCountMap: new Map([["fork/topic..feature-a", 0]]),
+					}),
+				},
+			),
+		);
+
+		expect(output.reconciliations[0]).toMatchObject({
+			action: "aborted",
+			warning:
+				"Failed to compare local and tracking commit counts: remote tracking count (feature-a..fork/topic): count unavailable",
+		});
+		expect(output.unresolvedProblems[0]?.reason).toContain("count unavailable");
+	});
+
+	test("R6: fast-forward failures retain the exact git error", async () => {
+		const output = expectOk(
+			await updateWorktrees(
+				{ dryRun: false },
+				{
+					git: reconciliationGit({
+						commitCountMap: new Map([
+							...flatBranchesConfig([mainWt, featureA]).commitCountMap,
+							["feature-a..fork/topic", 1],
+							["fork/topic..feature-a", 0],
+						]),
+						fastForwardToRefFail: { code: "MERGE_FAILED", message: "ref moved during update" },
+					}),
+				},
+			),
+		);
+
+		expect(output.reconciliations[0]).toMatchObject({
+			action: "aborted",
+			warning: "Failed to fast-forward to tracking ref: ref moved during update",
+		});
+		expect(output.unresolvedProblems[0]?.reason).toContain("ref moved during update");
 	});
 
 	test("R5/R6: dirty dry-run reports the block and performs no mutation", async () => {
@@ -426,7 +496,10 @@ describe("updateWorktrees — feature tracking reconciliation (WTK-70)", () => {
 				["feature-a..fork/topic", 1],
 				["fork/topic..feature-a", 1],
 			]),
-			revListCherryPickMap: new Map([["fork/topic...feature-a", ["local"]]]),
+			revListCherryPickMap: new Map([
+				["fork/topic...feature-a", ["local"]],
+				["feature-a...fork/topic", ["remote"]],
+			]),
 			rebaseConflicts: new Set(["/repo-a"]),
 			rebaseAbortFail: { code: "UNKNOWN", message: "abort failed" },
 		});

@@ -605,12 +605,19 @@ export async function updateWorktrees(
 		]);
 		if (!behindResult.success || !aheadResult.success) {
 			reconciliationFailed.add(wt.branch);
+			const countErrors = [
+				!behindResult.success
+					? `remote tracking count (${wt.branch}..${upstream}): ${behindResult.error.message}`
+					: undefined,
+				!aheadResult.success ? `local count (${upstream}..${wt.branch}): ${aheadResult.error.message}` : undefined,
+			].filter((message): message is string => message !== undefined);
 			reconciliations.push({
 				branch: wt.branch,
 				worktreePath: wt.path,
 				upstream,
 				state: "diverged",
 				action: "aborted",
+				warning: `Failed to compare local and tracking commit counts: ${countErrors.join("; ")}`,
 			});
 			continue;
 		}
@@ -658,6 +665,7 @@ export async function updateWorktrees(
 				upstream,
 				state: "remote-only",
 				action: moved.success ? "fast-forwarded" : "aborted",
+				warning: moved.success ? undefined : `Failed to fast-forward to tracking ref: ${moved.error.message}`,
 			});
 			continue;
 		}
@@ -698,8 +706,7 @@ export async function updateWorktrees(
 					? "remote-only"
 					: "diverged";
 		const explicitReset = input.reconcile === "reset" && wt.branch === input.branch;
-		const explicitRebase = input.reconcile === "rebase" && localUnique > 0;
-		const needsReconciliation = remoteUnique > 0 || explicitReset || explicitRebase;
+		const needsReconciliation = remoteUnique > 0 || explicitReset;
 		if (!needsReconciliation) {
 			reconciliations.push({ branch: wt.branch, worktreePath: wt.path, upstream, state, action: "unchanged" });
 			continue;
