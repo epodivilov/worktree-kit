@@ -21,6 +21,7 @@ export interface FakeGitOptions {
 	goneBranches?: string[];
 	defaultBranch?: string;
 	dirtyWorktrees?: Set<string>;
+	isDirtyFail?: GitError;
 	rebaseConflicts?: Set<string>;
 	mergeInProgress?: Set<string>;
 	onConflictResolved?: Set<string>;
@@ -396,6 +397,7 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 		},
 
 		async isDirty(worktreePath: string): Promise<Result<boolean, GitError>> {
+			if (options.isDirtyFail !== undefined) return Result.err(options.isDirtyFail);
 			return Result.ok(dirtyWorktrees?.has(worktreePath) ?? false);
 		},
 

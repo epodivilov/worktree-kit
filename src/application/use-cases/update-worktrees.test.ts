@@ -448,6 +448,33 @@ describe("updateWorktrees — feature tracking reconciliation (WTK-70)", () => {
 		expect(output.unresolvedProblems[0]?.reason).toContain("ref moved during update");
 	});
 
+	test("R6: dirty-state inspection failures are not reported as dirty", async () => {
+		const output = expectOk(
+			await updateWorktrees(
+				{ dryRun: false },
+				{
+					git: reconciliationGit({
+						commitCountMap: new Map([
+							...flatBranchesConfig([mainWt, featureA]).commitCountMap,
+							["feature-a..fork/topic", 1],
+							["fork/topic..feature-a", 0],
+						]),
+						isDirtyFail: { code: "UNKNOWN", message: "status unavailable" },
+					}),
+				},
+			),
+		);
+
+		expect(output.reconciliations[0]).toMatchObject({
+			action: "skipped-dirty",
+			warning: "Failed to inspect worktree: status unavailable",
+		});
+		expect(output.unresolvedProblems[0]).toMatchObject({
+			reason: "Failed to inspect worktree: status unavailable",
+			nextAction: "resolve the worktree inspection error, then re-run wt update",
+		});
+	});
+
 	test("R5/R6: dirty dry-run reports the block and performs no mutation", async () => {
 		const fastForwardToRefCalls: { worktreePath: string; ref: string }[] = [];
 		const git = reconciliationGit({
