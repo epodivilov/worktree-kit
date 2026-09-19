@@ -378,7 +378,7 @@ describe("update --reconcile (WTK-70)", () => {
 		expect(mergeFFOnlyCalls).toEqual([]);
 	});
 
-	test("interactive genuine divergence offers rebase first and renders the recovery ref", async () => {
+	test("genuine divergence rebases automatically without a prompt and renders the recovery ref", async () => {
 		const commitCountMap = new Map<string, number>([
 			["feature..origin/feature", 1],
 			["origin/feature..feature", 1],
@@ -387,14 +387,17 @@ describe("update --reconcile (WTK-70)", () => {
 			worktrees: [mainWt, featureWt],
 			branchUpstreams: new Map([["feature", "origin/feature"]]),
 			commitCountMap,
-			revListCherryPickMap: new Map([["origin/feature...feature", ["local"]]]),
+			revListCherryPickMap: new Map([
+				["origin/feature...feature", ["local"]],
+				["feature...origin/feature", ["remote"]],
+			]),
 		});
-		const { ui, log, selectCalls } = createFakeUi({ select: "rebase" });
+		const { ui, log, selectCalls } = createFakeUi();
 
 		const code = await runUpdate(buildContainer(ui, git, fs()), { "dry-run": false });
 
 		expect(code).toBe(0);
-		expect(selectCalls[0]?.values).toEqual(["rebase", "reset", "abort"]);
+		expect(selectCalls).toEqual([]);
 		expect(
 			log.info.some((line) =>
 				line.includes(`recover with: git -C '${featureWt.path}' reset --hard 'refs/worktree-kit/recovery/feature/`),
@@ -417,8 +420,10 @@ describe("update --reconcile (WTK-70)", () => {
 			revListMap: new Map([["main..gone", ["gone-sha"]]]),
 			revListCherryPickMap: new Map([
 				["origin/feature...feature", ["local"]],
+				["feature...origin/feature", ["remote"]],
 				["main...gone", []],
 			]),
+			rebaseConflicts: new Set([featureWt.path]),
 		});
 		const { ui, log } = createFakeUi({ nonInteractive: true });
 

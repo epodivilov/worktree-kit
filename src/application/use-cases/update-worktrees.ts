@@ -42,7 +42,7 @@ export interface ReconciliationReport {
 	branch: string;
 	worktreePath: string;
 	upstream?: string;
-	state: "missing" | "gone" | "equal" | "local-only" | "remote-only" | "remote-rewrite" | "diverged";
+	state: "missing" | "gone" | "equal" | "stale-tracking" | "local-only" | "remote-only" | "remote-rewrite" | "diverged";
 	action:
 		| "unchanged"
 		| "fast-forwarded"
@@ -66,9 +66,18 @@ export interface ReconciliationReport {
  * key and is never reported here.
  */
 export interface UpdateProgressReporter {
+	/** Update the label for a long-running analysis phase before per-worktree progress begins. */
+	phase?(message: string): void;
 	begin(branches: string[]): void;
 	rebasing(branch: string, onto: string): void;
 	settle(report: WorktreeReport): void;
+}
+
+export interface UnresolvedProblem {
+	rootBranch: string;
+	reason: string;
+	affectedBranches: string[];
+	nextAction: string;
 }
 
 export type WorktreeUpdateStatus =
@@ -156,6 +165,7 @@ export interface UpdateWorktreesOutput {
 	reconciliations: ReconciliationReport[];
 	reports: WorktreeReport[];
 	unresolved: boolean;
+	unresolvedProblems: UnresolvedProblem[];
 }
 
 export interface UpdateWorktreesDeps {
@@ -470,6 +480,7 @@ export async function updateWorktrees(
 ): Promise<Result<UpdateWorktreesOutput, Error>> {
 	const { git } = deps;
 
+	deps.progress?.phase?.("Listing worktrees...");
 	const listResult = await git.listWorktrees();
 	if (!listResult.success) {
 		return R.err(new Error(listResult.error.message));
@@ -482,11 +493,13 @@ export async function updateWorktrees(
 	}
 	const defaultBranch = defaultBranchResult.data;
 
+	deps.progress?.phase?.("Fetching remote refs...");
 	const fetchResult = await git.fetchPrune();
 	if (!fetchResult.success) {
 		return R.err(new Error(`Fetch failed: ${fetchResult.error.message}`));
 	}
 
+	deps.progress?.phase?.("Inspecting gone-branch metadata...");
 	const goneResult = await git.listGoneBranches();
 	const goneSet = new Set(goneResult.success ? goneResult.data.filter((b) => b !== defaultBranch) : []);
 
@@ -525,6 +538,7 @@ export async function updateWorktrees(
 	// Freeze the mutation scope from the pre-reconciliation graph. Reconciliation can
 	// change ancestry, so this graph is used only for target selection; the normal
 	// parent-discovery pass below runs again from the reconciled tips (WTK-70 R1).
+	deps.progress?.phase?.("Detecting branch parents...");
 	const initialParentMap: Record<string, string> = {};
 	const initialProbeSem = new Semaphore(DEFAULT_PROBE_CONCURRENCY);
 	const initialFeatures = worktrees.filter((wt) => wt.branch && !localRootNames.has(wt.branch));
@@ -556,6 +570,7 @@ export async function updateWorktrees(
 	const reconciliationFailed = new Set<string>();
 	const reconciliations: ReconciliationReport[] = [];
 
+	deps.progress?.phase?.("Comparing feature histories...");
 	for (const wt of reconciliationTargets) {
 		const parent = initialParentMap[wt.branch];
 		if (parent && reconciliationFailed.has(parent)) {
@@ -647,8 +662,49 @@ export async function updateWorktrees(
 			continue;
 		}
 
-		const uniqueLocal = await git.revListCherryPick({ base: upstream, feature: wt.branch });
-		const remoteRewrite = uniqueLocal.success && uniqueLocal.data.length === 0;
+		// Commit counts only tell us that the graph diverged. Compare both directions
+		// semantically before choosing a mutation: a locally rebased branch can have
+		// zero unique commits in either direction even though its SHA history differs.
+		const [uniqueLocalResult, uniqueRemoteResult] = await Promise.all([
+			git.revListCherryPick({ base: upstream, feature: wt.branch }),
+			git.revListCherryPick({ base: wt.branch, feature: upstream }),
+		]);
+		if (!uniqueLocalResult.success || !uniqueRemoteResult.success) {
+			reconciliationFailed.add(wt.branch);
+			const details = !uniqueLocalResult.success
+				? uniqueLocalResult.error.message
+				: uniqueRemoteResult.success
+					? "unknown comparison failure"
+					: uniqueRemoteResult.error.message;
+			reconciliations.push({
+				branch: wt.branch,
+				worktreePath: wt.path,
+				upstream,
+				state: "diverged",
+				action: "aborted",
+				warning: `Failed to compare local and tracking history: ${details}`,
+			});
+			continue;
+		}
+
+		const localUnique = uniqueLocalResult.data.length;
+		const remoteUnique = uniqueRemoteResult.data.length;
+		const state =
+			remoteUnique === 0
+				? localUnique === 0
+					? "stale-tracking"
+					: "local-only"
+				: localUnique === 0
+					? "remote-only"
+					: "diverged";
+		const explicitReset = input.reconcile === "reset" && wt.branch === input.branch;
+		const explicitRebase = input.reconcile === "rebase" && localUnique > 0;
+		const needsReconciliation = remoteUnique > 0 || explicitReset || explicitRebase;
+		if (!needsReconciliation) {
+			reconciliations.push({ branch: wt.branch, worktreePath: wt.path, upstream, state, action: "unchanged" });
+			continue;
+		}
+
 		const dirty = await git.isDirty(wt.path);
 		if (!dirty.success || dirty.data) {
 			reconciliationFailed.add(wt.branch);
@@ -656,24 +712,23 @@ export async function updateWorktrees(
 				branch: wt.branch,
 				worktreePath: wt.path,
 				upstream,
-				state: remoteRewrite ? "remote-rewrite" : "diverged",
+				state,
 				action: "skipped-dirty",
+				warning: !dirty.success ? `Failed to inspect worktree: ${dirty.error.message}` : undefined,
 			});
 			continue;
 		}
-		let choice: ReconcileChoice = remoteRewrite ? "reset" : (input.reconcile ?? "abort");
-		if (!remoteRewrite && input.reconcile === "reset" && wt.branch !== input.branch) choice = "abort";
-		if (!remoteRewrite && !input.dryRun && input.reconcile === undefined && deps.chooseReconciliation) {
-			choice = await deps.chooseReconciliation(wt.branch, upstream);
-		}
+		let choice: ReconcileChoice = explicitReset ? "reset" : (input.reconcile ?? "rebase");
+		if (input.reconcile === "reset" && !explicitReset) choice = "abort";
 		if (choice === "abort") {
 			reconciliationFailed.add(wt.branch);
 			reconciliations.push({
 				branch: wt.branch,
 				worktreePath: wt.path,
 				upstream,
-				state: "diverged",
+				state,
 				action: "aborted",
+				warning: "Reconciliation was explicitly aborted",
 			});
 			continue;
 		}
@@ -682,8 +737,8 @@ export async function updateWorktrees(
 				branch: wt.branch,
 				worktreePath: wt.path,
 				upstream,
-				state: remoteRewrite ? "remote-rewrite" : "diverged",
-				action: remoteRewrite ? "would-realign" : choice === "reset" ? "would-reset" : "would-rebase",
+				state,
+				action: choice === "reset" ? "would-reset" : "would-rebase",
 				recoveryRef: "refs/worktree-kit/recovery/<branch>/<timestamp>",
 			});
 			continue;
@@ -695,8 +750,9 @@ export async function updateWorktrees(
 				branch: wt.branch,
 				worktreePath: wt.path,
 				upstream,
-				state: remoteRewrite ? "remote-rewrite" : "diverged",
+				state,
 				action: "aborted",
+				warning: `Failed to create recovery ref: ${recovery.error.message}`,
 			});
 			continue;
 		}
@@ -714,8 +770,8 @@ export async function updateWorktrees(
 			branch: wt.branch,
 			worktreePath: wt.path,
 			upstream,
-			state: remoteRewrite ? "remote-rewrite" : "diverged",
-			action: moved.success ? (remoteRewrite ? "realigned" : choice === "reset" ? "realigned" : "rebased") : "aborted",
+			state,
+			action: moved.success ? (choice === "reset" ? "realigned" : "rebased") : "aborted",
 			recoveryRef: recovery.data,
 			warning,
 		});
@@ -724,6 +780,7 @@ export async function updateWorktrees(
 	// Sync every LOCAL root from its own upstream (R1), each with the WTK-61
 	// divergence handling (R5). Absent roots are rebase targets only and cannot
 	// diverge, so they are skipped here.
+	deps.progress?.phase?.("Synchronizing base branches...");
 	const rootSyncByName = new Map<string, { report: RootSyncReport; synced: boolean }>();
 	for (const root of roots) {
 		if (!root.local) continue;
@@ -781,6 +838,7 @@ export async function updateWorktrees(
 	// semaphore. Every feature writes only its own `parentMap` / `retargetMap` keys
 	// (safe under single-threaded JS), and the `Promise.all` barrier below guarantees
 	// resolution is fully complete before `buildRebaseOrder` consumes `parentMap`.
+	deps.progress?.phase?.("Refreshing branch parents after reconciliation...");
 	const parentMap: Record<string, string> = {};
 	const retargetMap: Record<string, string> = {};
 	const probeSem = new Semaphore(DEFAULT_PROBE_CONCURRENCY);
@@ -1043,6 +1101,39 @@ export async function updateWorktrees(
 		if (report) reports.push(report);
 	}
 
+	const reconciliationByBranch = new Map(reconciliations.map((report) => [report.branch, report]));
+	const reportByBranchFinal = new Map(reports.map((report) => [report.branch, report]));
+	const failureRoot = (branch: string): string => {
+		let current = branch;
+		while (true) {
+			const parent = initialParentMap[current];
+			if (!parent || !failedBranches.has(parent)) return current;
+			current = parent;
+		}
+	};
+	const unresolvedRootBranches = [...failedBranches].filter((branch) => failureRoot(branch) === branch);
+	const unresolvedProblems: UnresolvedProblem[] = unresolvedRootBranches.map((rootBranch) => {
+		const affectedBranches = reports
+			.filter((report) => failureRoot(report.branch) === rootBranch)
+			.map((report) => report.branch);
+		const reconciliation = reconciliationByBranch.get(rootBranch);
+		const rootReport = reportByBranchFinal.get(rootBranch);
+		const reason =
+			reconciliation?.warning ??
+			(rootReport?.result.status === "rebase-conflict"
+				? rootReport.result.message
+				: reconciliation?.action === "skipped-dirty"
+					? "worktree is dirty"
+					: "remote reconciliation was not completed");
+		const nextAction =
+			reconciliation?.action === "skipped-dirty"
+				? "clean or stash the worktree, then re-run wt update"
+				: rootReport?.result.status === "rebase-conflict"
+					? "resolve the conflict, then re-run wt update"
+					: "inspect the preserved branch/recovery ref, then re-run wt update";
+		return { rootBranch, reason, affectedBranches, nextAction };
+	});
+
 	return R.ok({
 		defaultBranch,
 		defaultBranchUpdate,
@@ -1053,5 +1144,6 @@ export async function updateWorktrees(
 		reconciliations,
 		reports,
 		unresolved: failedBranches.size > 0,
+		unresolvedProblems,
 	});
 }

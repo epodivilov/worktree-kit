@@ -203,6 +203,9 @@ export function updateCommand(container: Container) {
 				// inside `updateWorktrees` before the per-worktree list appears (WTK-67).
 				let phaseSpinner: SpinnerHandle | undefined;
 				const progress: UpdateProgressReporter = {
+					phase(message) {
+						phaseSpinner?.message(message);
+					},
 					begin(branches) {
 						// Stop the phase spinner BEFORE the multi-spinner draws its first
 						// lines, so the two TTY renderers never interleave. Clearing the
@@ -315,7 +318,11 @@ export function updateCommand(container: Container) {
 					unresolved,
 				} = result.data;
 
+				const verbose = container.logger.isVerbose?.() ?? false;
 				for (const report of reconciliations) {
+					// Equal, local-only, and stale patch-equivalent refs are useful
+					// diagnostics but require no action. Keep them behind --verbose.
+					if (!verbose && report.action === "unchanged") continue;
 					const tracking = report.upstream ? ` (${report.upstream})` : "";
 					const recovery = report.recoveryRef
 						? `; recover with: git -C ${shellQuote(report.worktreePath)} reset --hard ${shellQuote(report.recoveryRef)}`
@@ -375,10 +382,17 @@ export function updateCommand(container: Container) {
 					}
 				}
 
+				for (const problem of result.data.unresolvedProblems) {
+					const affected =
+						problem.affectedBranches.length > 0 ? `; affected: ${problem.affectedBranches.join(", ")}` : "";
+					ui.warn(`Unresolved ${problem.rootBranch}: ${problem.reason}${affected}; next: ${problem.nextAction}`);
+				}
+
 				const outroMessage = dryRun ? "Dry run — no changes made" : "Done!";
 				const finish = () => {
 					if (unresolved) {
-						throw new CommandError("Some worktree subtrees remain unresolved", EXIT_FAILURE);
+						const roots = result.data.unresolvedProblems.map((problem) => problem.rootBranch).join(", ");
+						throw new CommandError(`Unresolved worktree branches: ${roots || "unknown"}`, EXIT_FAILURE);
 					}
 					ui.outro(outroMessage);
 				};
