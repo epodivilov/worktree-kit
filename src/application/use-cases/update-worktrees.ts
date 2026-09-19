@@ -760,9 +760,10 @@ export async function updateWorktrees(
 			choice === "reset" ? await git.resetHardToRef(wt.path, upstream) : await git.rebase(wt.path, upstream);
 		let warning: string | undefined;
 		if (!moved.success) {
+			warning = `Reconciliation failed: ${moved.error.message}`;
 			if (choice === "rebase") {
 				const abortResult = await git.rebaseAbort(wt.path);
-				if (!abortResult.success) warning = `Rebase abort failed: ${abortResult.error.message}`;
+				if (!abortResult.success) warning += `; rebase abort failed: ${abortResult.error.message}`;
 			}
 			reconciliationFailed.add(wt.branch);
 		}
@@ -1106,7 +1107,7 @@ export async function updateWorktrees(
 	const failureRoot = (branch: string): string => {
 		let current = branch;
 		while (true) {
-			const parent = initialParentMap[current];
+			const parent = parentMap[current] ?? initialParentMap[current];
 			if (!parent || !failedBranches.has(parent)) return current;
 			current = parent;
 		}
