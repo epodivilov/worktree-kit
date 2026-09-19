@@ -432,10 +432,9 @@ describe("updateWorktrees — feature tracking reconciliation (WTK-70)", () => {
 		});
 		const output = expectOk(await updateWorktrees({ dryRun: false, reconcile: "rebase" }, { git }));
 
-		expect(output.reconciliations[0]).toMatchObject({
-			action: "aborted",
-			warning: "Rebase abort failed: abort failed",
-		});
+		expect(output.reconciliations[0]).toMatchObject({ action: "aborted" });
+		expect(output.reconciliations[0]?.warning).toContain("Reconciliation failed: Rebase conflict");
+		expect(output.reconciliations[0]?.warning).toContain("rebase abort failed: abort failed");
 		expect(output.unresolved).toBe(true);
 	});
 });
