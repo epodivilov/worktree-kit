@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.11.1
+
+### Patch Changes
+
+- 7dcf9f2: Make feature update reconciliation automatic for semantic remote changes, preserve locally rebased histories when tracking refs are stale, and report unresolved work with actionable branch details.
+
 ## 0.11.0
 
 ### Minor Changes
