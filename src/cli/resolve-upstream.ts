@@ -13,6 +13,17 @@ import { EXIT_CANCEL } from "./exit-codes.ts";
 export type ResolveUpstreamResult = { kind: "selected"; name: string } | { kind: "declined" } | { kind: "none" };
 
 const SKIP = "__skip__";
+const URL_UNAVAILABLE = "URL unavailable";
+
+interface UpstreamCandidate {
+	name: string;
+	url: string;
+}
+
+interface ResolveUpstreamOptions {
+	declineLabel: string;
+	singleCandidateMessage?: (candidate: UpstreamCandidate) => string;
+}
 
 /**
  * Detect candidate upstream remotes (every remote except the primary remote)
@@ -24,12 +35,13 @@ const SKIP = "__skip__";
  * original project) stays offerable; when `origin` is primary, it is excluded.
  *
  * All UI lives here in the CLI layer. The `declineLabel` parametrizes the
- * opt-out option's label so callers can phrase it for their flow.
+ * opt-out option's label so callers can phrase it for their flow, while the
+ * single-candidate message lets update describe its immediate side effect.
  */
 export async function resolveUpstream(
 	git: GitPort,
 	ui: UiPort,
-	options: { declineLabel: string },
+	options: ResolveUpstreamOptions,
 ): Promise<ResolveUpstreamResult> {
 	if (ui.nonInteractive) {
 		return { kind: "none" };
@@ -43,24 +55,35 @@ export async function resolveUpstream(
 	if (candidates.length === 0) {
 		return { kind: "none" };
 	}
+	const candidatesWithUrls = await Promise.all(
+		candidates.map(async (name): Promise<UpstreamCandidate> => {
+			const remoteUrl = await git.getRemoteUrl(name);
+			return { name, url: remoteUrl.success ? remoteUrl.data : URL_UNAVAILABLE };
+		}),
+	);
 
-	if (candidates.length === 1) {
-		const name = candidates[0] as string;
+	if (candidatesWithUrls.length === 1) {
+		const candidate = candidatesWithUrls[0] as UpstreamCandidate;
 		const confirmed = await ui.confirm({
-			message: `Use '${name}' as the upstream remote for syncing the default branch?`,
-			initialValue: true,
+			message:
+				options.singleCandidateMessage?.(candidate) ??
+				`Use '${candidate.name}' (fetch URL: ${candidate.url}) as a possible upstream for syncing the default branch?`,
+			initialValue: false,
 		});
 		if (ui.isCancel(confirmed)) {
 			ui.cancel("Cancelled");
 			process.exit(EXIT_CANCEL);
 		}
-		return confirmed === true ? { kind: "selected", name } : { kind: "declined" };
+		return confirmed === true ? { kind: "selected", name: candidate.name } : { kind: "declined" };
 	}
 
 	const chosen = await ui.select<string>({
-		message: "Which remote should be used as the upstream for syncing the default branch?",
+		message: "Which possible upstream should be used for syncing the default branch?",
 		options: [
-			...candidates.map((name) => ({ value: name, label: name })),
+			...candidatesWithUrls.map((candidate) => ({
+				value: candidate.name,
+				label: `${candidate.name} (fetch URL: ${candidate.url})`,
+			})),
 			{ value: SKIP, label: options.declineLabel },
 		],
 	});

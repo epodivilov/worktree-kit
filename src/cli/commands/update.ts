@@ -170,7 +170,11 @@ export function updateCommand(container: Container) {
 				let upstream: string | undefined = typeof configuredUpstream === "string" ? configuredUpstream : undefined;
 
 				if (configResult.success && configuredUpstream === undefined && !ui.nonInteractive && !dryRun) {
-					const detected = await resolveUpstream(git, ui, { declineLabel: "Skip and don't ask again" });
+					const detected = await resolveUpstream(git, ui, {
+						declineLabel: "Skip and don't ask again",
+						singleCandidateMessage: ({ name, url }) =>
+							`Use '${name}' (fetch URL: ${url}) as a possible upstream? Accepting will sync the default branch from it before worktrees are updated.`,
+					});
 					const { configPath, isLegacyConfig } = configResult.data;
 
 					const persist = async (value: string | false): Promise<void> => {

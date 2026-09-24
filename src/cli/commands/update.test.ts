@@ -63,14 +63,20 @@ function createFakeUi(opts: FakeUiOptions = {}): {
 	ui: UiPort;
 	log: FakeUiLog;
 	confirmMessages: string[];
-	selectCalls: { message: string; values: string[] }[];
+	confirmCalls: { message: string; initialValue?: boolean }[];
+	selectCalls: { message: string; values: string[]; options: Array<{ value: string; label: string; hint?: string }> }[];
 	multiSpinner: MultiSpinnerCapture;
 	spinner: SpinnerCapture;
 	calls: string[];
 } {
 	const log: FakeUiLog = { info: [], success: [], warn: [], error: [], outro: [] };
 	const confirmMessages: string[] = [];
-	const selectCalls: { message: string; values: string[] }[] = [];
+	const confirmCalls: { message: string; initialValue?: boolean }[] = [];
+	const selectCalls: {
+		message: string;
+		values: string[];
+		options: Array<{ value: string; label: string; hint?: string }>;
+	}[] = [];
 	const multiSpinner: MultiSpinnerCapture = { keys: [], terminals: [], updates: [] };
 	const spinner: SpinnerCapture = { starts: [], stops: [], messages: [] };
 	const calls: string[] = [];
@@ -137,13 +143,18 @@ function createFakeUi(opts: FakeUiOptions = {}): {
 		async text() {
 			return "";
 		},
-		async confirm(options: { message: string }) {
+		async confirm(options: { message: string; initialValue?: boolean }) {
 			confirmMessages.push(options.message);
+			confirmCalls.push(options);
 			calls.push(`confirm:${options.message}`);
 			return opts.confirm ?? true;
 		},
 		async select<T>(options: { message: string; options: Array<{ value: T; label: string }> }) {
-			selectCalls.push({ message: options.message, values: options.options.map((o) => String(o.value)) });
+			selectCalls.push({
+				message: options.message,
+				values: options.options.map((o) => String(o.value)),
+				options: options.options.map((o) => ({ ...o, value: String(o.value) })),
+			});
 			return (opts.select ?? options.options[0]?.value) as T;
 		},
 		async multiselect() {
@@ -154,7 +165,7 @@ function createFakeUi(opts: FakeUiOptions = {}): {
 		},
 		cancel() {},
 	} satisfies UiPort;
-	return { ui, log, confirmMessages, selectCalls, multiSpinner, spinner, calls };
+	return { ui, log, confirmMessages, confirmCalls, selectCalls, multiSpinner, spinner, calls };
 }
 
 function buildContainer(
@@ -260,19 +271,31 @@ async function readConfigUpstream(fs: ReturnType<typeof createFakeFilesystem>): 
 describe("update upstream auto-detection", () => {
 	const CONFIG_NO_UPSTREAM = JSON.stringify({ rootDir: ".worktrees" }, null, 2);
 
-	test("undefined + one non-origin remote + confirm yes → persists name and syncs from it", async () => {
+	test("one candidate shows its URL, explains update effects, defaults to rejection, and persists acceptance", async () => {
 		const mergeFFOnlyCalls: { worktreePath: string; branch: string; remote: string }[] = [];
 		const { fs, git } = upstreamScenario(CONFIG_NO_UPSTREAM, {
 			remotes: ["origin", "upstream"],
+			remoteUrls: new Map([["upstream", "https://github.com/contributor/project.git"]]),
 			mergeFFOnlyCalls,
 		});
-		const { ui, confirmMessages } = createFakeUi({ confirm: true });
+		const { ui, confirmCalls } = createFakeUi({ confirm: true });
 		const container = buildContainer(ui, git, fs);
 
 		const code = await runUpdate(container, { "dry-run": false });
 
 		expect(code).toBe(0);
-		expect(confirmMessages.some((m) => m.includes("upstream"))).toBe(true);
+		expect(confirmCalls).toEqual([
+			expect.objectContaining({
+				initialValue: false,
+				message: expect.stringContaining("upstream"),
+			}),
+		]);
+		const message = confirmCalls[0]?.message ?? "";
+		expect(message).toContain("https://github.com/contributor/project.git");
+		expect(message).toContain("fetch URL");
+		expect(message).toContain("possible upstream");
+		expect(message).toContain("sync the default branch");
+		expect(message).toContain("before worktrees are updated");
 		expect(await readConfigUpstream(fs)).toBe("upstream");
 		// The default branch was fast-forwarded from the picked remote.
 		expect(mergeFFOnlyCalls.some((c) => c.branch === "main" && c.remote === "upstream")).toBe(true);
@@ -293,6 +316,52 @@ describe("update upstream auto-detection", () => {
 		expect(await readConfigUpstream(fs)).toBe(false);
 		// Fast-forward fell back to origin (no upstream remote used).
 		expect(mergeFFOnlyCalls.every((c) => c.remote === "origin")).toBe(true);
+	});
+
+	test("multiple candidates show names and URLs, retain skip, and persist the chosen upstream", async () => {
+		const mergeFFOnlyCalls: { worktreePath: string; branch: string; remote: string }[] = [];
+		const { fs, git } = upstreamScenario(CONFIG_NO_UPSTREAM, {
+			remotes: ["origin", "contributor", "mirror"],
+			remoteUrls: new Map([
+				["contributor", "https://github.com/contributor/project.git"],
+				["mirror", "https://git.example.test/mirror/project.git"],
+			]),
+			mergeFFOnlyCalls,
+		});
+		const { ui, selectCalls } = createFakeUi({ select: "mirror" });
+
+		const code = await runUpdate(buildContainer(ui, git, fs), { "dry-run": false });
+
+		expect(code).toBe(0);
+		expect(selectCalls).toHaveLength(1);
+		expect(selectCalls[0]?.options).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ value: "contributor", label: expect.stringContaining("contributor") }),
+				expect.objectContaining({
+					value: "contributor",
+					label: expect.stringContaining("https://github.com/contributor/project.git"),
+				}),
+				expect.objectContaining({ value: "mirror", label: expect.stringContaining("mirror") }),
+				expect.objectContaining({
+					value: "mirror",
+					label: expect.stringContaining("https://git.example.test/mirror/project.git"),
+				}),
+				expect.objectContaining({ value: "__skip__", label: "Skip and don't ask again" }),
+			]),
+		);
+		expect(await readConfigUpstream(fs)).toBe("mirror");
+		expect(mergeFFOnlyCalls.some((c) => c.branch === "main" && c.remote === "mirror")).toBe(true);
+	});
+
+	test("a candidate with an unavailable URL remains offerable", async () => {
+		const { fs, git } = upstreamScenario(CONFIG_NO_UPSTREAM, { remotes: ["origin", "upstream"] });
+		const { ui, confirmCalls } = createFakeUi({ confirm: true });
+
+		const code = await runUpdate(buildContainer(ui, git, fs), { "dry-run": false });
+
+		expect(code).toBe(0);
+		expect(confirmCalls[0]?.message).toContain("URL unavailable");
+		expect(await readConfigUpstream(fs)).toBe("upstream");
 	});
 
 	test("upstream === false → no prompt, no detect, no upstream sync", async () => {
