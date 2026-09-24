@@ -793,6 +793,16 @@ describe("BunGitAdapter", () => {
 			expect(expectOk(await git.getLastCommitMessage(repoPath))).toBe("edit README.md on feature");
 		});
 
+		test("rebase error without an in-progress rebase is not classified as a conflict", async () => {
+			await using tmp = await createTempDir();
+			const repoPath = await initTestRepo(tmp.path);
+
+			const error = expectErr(await git.rebase(repoPath, "missing-base"));
+
+			expect(error.code).toBe("UNKNOWN");
+			expect(expectOk(await git.isRebaseInProgress(repoPath))).toBe(false);
+		});
+
 		test("isMergeInProgress true mid-conflict, false after abort", async () => {
 			await using tmp = await createTempDir();
 			const repoPath = await initConflictRepo(tmp.path);
