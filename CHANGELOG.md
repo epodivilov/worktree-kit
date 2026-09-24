@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.11.2
+
+### Patch Changes
+
+- 9874ff7: Clarify possible upstream remotes in update prompts.
+- 3493ba4: `wt update` now presents rebase conflicts once as a compact, actionable summary with each root branch's target and affected descendants. It no longer prints stale Git rebase advice after aborting the rebase, and unresolved updates end with the short `Update incomplete` error.
+
 ## 0.11.1
 
 ### Patch Changes
