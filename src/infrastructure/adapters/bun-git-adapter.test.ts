@@ -785,7 +785,7 @@ describe("BunGitAdapter", () => {
 			await Bun.$`git -C ${repoPath} checkout -q feature`.quiet();
 
 			const rebaseResult = await git.rebase(repoPath, "main");
-			expectErr(rebaseResult);
+			expect(expectErr(rebaseResult).code).toBe("REBASE_CONFLICT");
 			expect(expectOk(await git.isRebaseInProgress(repoPath))).toBe(true);
 
 			expectOk(await git.rebaseAbort(repoPath));
