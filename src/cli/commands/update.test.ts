@@ -504,7 +504,7 @@ describe("update --reconcile (WTK-70)", () => {
 		expect(code).toBe(3);
 		expect(log.success).toContain("gone — branch removed (no matching worktree found)");
 		expect(log.warn).toEqual([
-			"1 root conflict:\n  feature onto origin/feature (affected: feature; rebase abort did not complete)\nFirst inspect and abort the in-progress rebase for every root where abort did not complete. Then resolve the conflict and rerun wt update.",
+			"1 root conflict:\n  feature onto origin/feature (affected: feature; rebase abort did not complete)\nFirst inspect and abort the in-progress rebase for every root where abort did not complete. Then manually rebase each root onto its listed target, resolve the conflict, and rerun wt update.",
 		]);
 		expect(log.warn.join("\n")).not.toContain(rawGitAdvice);
 		expect(log.error).toEqual(["Update incomplete"]);
@@ -804,7 +804,7 @@ describe("update — per-worktree progress (WTK-58)", () => {
 		expect(code).toBe(3);
 		expect(multiSpinner.terminals.find((line) => line.key === "a")?.message).toBe("conflict, rebase abort failed");
 		expect(log.warn.join("\n")).toContain("First inspect and abort the in-progress rebase");
-		expect(log.warn.join("\n")).not.toContain("Manually rebase each root onto its target");
+		expect(log.warn.join("\n")).toContain("Then manually rebase each root onto its listed target");
 	});
 
 	test("R7: dry-run reports would-be-rebased per worktree and performs no rebase", async () => {
