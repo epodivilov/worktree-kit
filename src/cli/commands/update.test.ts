@@ -475,6 +475,7 @@ describe("update --reconcile (WTK-70)", () => {
 	});
 
 	test("unresolved reconciliation still runs requested cleanup before failing", async () => {
+		const rawGitAdvice = "could not apply deadbeef\ngit rebase --continue";
 		const git = createFakeGit({
 			worktrees: [mainWt, featureWt],
 			branches: ["main", "feature", "gone"],
@@ -493,6 +494,7 @@ describe("update --reconcile (WTK-70)", () => {
 				["main...gone", []],
 			]),
 			rebaseConflicts: new Set([featureWt.path]),
+			rebaseConflictError: { code: "REBASE_CONFLICT", message: rawGitAdvice },
 		});
 		const { ui, log } = createFakeUi({ nonInteractive: true });
 
@@ -500,6 +502,11 @@ describe("update --reconcile (WTK-70)", () => {
 
 		expect(code).toBe(3);
 		expect(log.success).toContain("gone — branch removed (no matching worktree found)");
+		expect(log.warn).toEqual([
+			"1 root conflict:\n  feature onto origin/feature (affected: feature)\nManually rebase each root onto its target, resolve it, then rerun wt update.",
+		]);
+		expect(log.warn.join("\n")).not.toContain(rawGitAdvice);
+		expect(log.error).toEqual(["Update incomplete"]);
 	});
 });
 
@@ -752,6 +759,29 @@ describe("update — per-worktree progress (WTK-58)", () => {
 		expect(lineFor("c")?.message).toContain("rebased onto main");
 		expect(lineFor("b")?.type).toBe("fail");
 		expect(lineFor("b")?.message).toContain("parent a failed");
+	});
+
+	test("WTK-74: reports a compact conflict summary without stale Git advice", async () => {
+		const rawGitAdvice =
+			"could not apply deadbeef\nResolve all conflicts manually, mark them as resolved with git add/rm <conflicted_files>, then run git rebase --continue";
+		const { fs, git } = stackScenario({
+			rebaseConflicts: new Set([`${ROOT}/.worktrees/a`]),
+			rebaseConflictError: { code: "REBASE_CONFLICT", message: rawGitAdvice },
+		});
+		const { ui, log, multiSpinner } = createFakeUi();
+
+		const code = await runUpdate(buildContainer(ui, git, fs), { "dry-run": false });
+
+		expect(code).toBe(3);
+		expect(multiSpinner.terminals).toHaveLength(3);
+		expect(multiSpinner.terminals.find((line) => line.key === "a")?.message).toBe("conflict, rebase aborted");
+		expect(multiSpinner.terminals.find((line) => line.key === "b")?.message).toBe("skipped: parent a failed");
+		expect(log.warn).toHaveLength(1);
+		expect(log.warn[0]).toContain("1 root conflict");
+		expect(log.warn[0]).toContain("a onto main (affected: a, b)");
+		expect(log.warn[0]).toContain("Manually rebase each root onto its target, resolve it, then rerun wt update.");
+		expect(log.warn.join("\n")).not.toContain(rawGitAdvice);
+		expect(log.error).toEqual(["Update incomplete"]);
 	});
 
 	test("R7: dry-run reports would-be-rebased per worktree and performs no rebase", async () => {

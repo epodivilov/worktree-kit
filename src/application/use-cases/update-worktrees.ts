@@ -56,6 +56,8 @@ export interface ReconciliationReport {
 		| "would-reset";
 	recoveryRef?: string;
 	warning?: string;
+	/** Set only when reconciliation's fresh rebase conflicted and was aborted. */
+	failure?: "rebase-conflict";
 }
 
 /**
@@ -78,6 +80,8 @@ export interface UnresolvedProblem {
 	reason: string;
 	affectedBranches: string[];
 	nextAction: string;
+	/** Rebase base for a root conflict. Kept structured so the CLI never parses Git's captured stderr. */
+	rebaseTarget?: string;
 }
 
 export type WorktreeUpdateStatus =
@@ -767,11 +771,15 @@ export async function updateWorktrees(
 		const moved =
 			choice === "reset" ? await git.resetHardToRef(wt.path, upstream) : await git.rebase(wt.path, upstream);
 		let warning: string | undefined;
+		let failure: ReconciliationReport["failure"];
 		if (!moved.success) {
-			warning = `Reconciliation failed: ${moved.error.message}`;
 			if (choice === "rebase") {
+				failure = "rebase-conflict";
+				warning = "rebase conflict";
 				const abortResult = await git.rebaseAbort(wt.path);
 				if (!abortResult.success) warning += `; rebase abort failed: ${abortResult.error.message}`;
+			} else {
+				warning = `Reconciliation failed: ${moved.error.message}`;
 			}
 			reconciliationFailed.add(wt.branch);
 		}
@@ -783,6 +791,7 @@ export async function updateWorktrees(
 			action: moved.success ? (choice === "reset" ? "realigned" : "rebased") : "aborted",
 			recoveryRef: recovery.data,
 			warning,
+			failure,
 		});
 	}
 
@@ -1127,22 +1136,30 @@ export async function updateWorktrees(
 			.map((report) => report.branch);
 		const reconciliation = reconciliationByBranch.get(rootBranch);
 		const rootReport = reportByBranchFinal.get(rootBranch);
-		const reason =
-			reconciliation?.warning ??
-			(rootReport?.result.status === "rebase-conflict"
-				? rootReport.result.message
-				: reconciliation?.action === "skipped-dirty"
-					? "worktree is dirty"
-					: "remote reconciliation was not completed");
+		const reconciliationConflict = reconciliation?.failure === "rebase-conflict";
+		const rebaseTarget =
+			rootReport?.result.status === "rebase-conflict"
+				? rootReport.parent
+				: reconciliationConflict
+					? reconciliation.upstream
+					: undefined;
+		const reason = reconciliationConflict
+			? (reconciliation.warning ?? "rebase conflict")
+			: (reconciliation?.warning ??
+				(rootReport?.result.status === "rebase-conflict"
+					? "rebase conflict"
+					: reconciliation?.action === "skipped-dirty"
+						? "worktree is dirty"
+						: "remote reconciliation was not completed"));
 		const nextAction =
 			reconciliation?.action === "skipped-dirty"
 				? reconciliation.warning
 					? "resolve the worktree inspection error, then re-run wt update"
 					: "clean or stash the worktree, then re-run wt update"
-				: rootReport?.result.status === "rebase-conflict"
-					? "resolve the conflict, then re-run wt update"
+				: rootReport?.result.status === "rebase-conflict" || reconciliationConflict
+					? "manually rebase the root onto its target, resolve it, then re-run wt update"
 					: "inspect the preserved branch/recovery ref, then re-run wt update";
-		return { rootBranch, reason, affectedBranches, nextAction };
+		return { rootBranch, reason, affectedBranches, nextAction, rebaseTarget };
 	});
 
 	return R.ok({

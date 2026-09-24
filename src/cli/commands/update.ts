@@ -7,6 +7,7 @@ import { loadConfig } from "../../application/use-cases/load-config.ts";
 import { setConfigUpstream } from "../../application/use-cases/set-config-upstream.ts";
 import {
 	type RootSyncReport,
+	type UnresolvedProblem,
 	type UpdateProgressReporter,
 	updateWorktrees,
 	type WorktreeReport,
@@ -56,6 +57,32 @@ function progressLine(report: WorktreeReport): { terminal: "complete" | "fail"; 
 			// The default branch is never a spinner key, so this is unreachable via
 			// `settle`; kept for exhaustiveness.
 			return { terminal: "complete", message: "up to date" };
+	}
+}
+
+/**
+ * Keeps conflict guidance independent of the Git error text. `wt` has already
+ * aborted each failed rebase, so the valid recovery path is to start a fresh
+ * manual rebase from the reported branch and target before running update again.
+ */
+function renderUnresolvedProblems(ui: UiPort, problems: readonly UnresolvedProblem[]): void {
+	const conflicts = problems.filter((problem) => problem.rebaseTarget);
+	if (conflicts.length > 0) {
+		const count = conflicts.length;
+		const groups = conflicts.map((problem) => {
+			const affected = problem.affectedBranches.length > 0 ? problem.affectedBranches.join(", ") : problem.rootBranch;
+			const detail = problem.reason === "rebase conflict" ? "" : `; ${problem.reason}`;
+			return `  ${problem.rootBranch} onto ${problem.rebaseTarget} (affected: ${affected}${detail})`;
+		});
+		ui.warn(
+			`${count} root conflict${count === 1 ? "" : "s"}:\n${groups.join("\n")}\nManually rebase each root onto its target, resolve it, then rerun wt update.`,
+		);
+	}
+
+	for (const problem of problems) {
+		if (problem.rebaseTarget) continue;
+		const affected = problem.affectedBranches.length > 0 ? `; affected: ${problem.affectedBranches.join(", ")}` : "";
+		ui.warn(`Unresolved ${problem.rootBranch}: ${problem.reason}${affected}; next: ${problem.nextAction}`);
 	}
 }
 
@@ -333,6 +360,7 @@ export function updateCommand(container: Container) {
 						: "";
 					const warning = report.warning ? `; ${report.warning}` : "";
 					const message = `${report.branch}: ${report.state}${tracking} — ${report.action}${recovery}${warning}`;
+					if (report.failure === "rebase-conflict") continue;
 					if (report.action === "aborted" || report.action === "skipped-dirty") ui.warn(message);
 					else ui.info(message);
 				}
@@ -386,17 +414,12 @@ export function updateCommand(container: Container) {
 					}
 				}
 
-				for (const problem of result.data.unresolvedProblems) {
-					const affected =
-						problem.affectedBranches.length > 0 ? `; affected: ${problem.affectedBranches.join(", ")}` : "";
-					ui.warn(`Unresolved ${problem.rootBranch}: ${problem.reason}${affected}; next: ${problem.nextAction}`);
-				}
+				renderUnresolvedProblems(ui, result.data.unresolvedProblems);
 
 				const outroMessage = dryRun ? "Dry run — no changes made" : "Done!";
 				const finish = () => {
 					if (unresolved) {
-						const roots = result.data.unresolvedProblems.map((problem) => problem.rootBranch).join(", ");
-						throw new CommandError(`Unresolved worktree branches: ${roots || "unknown"}`, EXIT_FAILURE);
+						throw new CommandError("Update incomplete", EXIT_FAILURE);
 					}
 					ui.outro(outroMessage);
 				};

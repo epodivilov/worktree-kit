@@ -23,6 +23,8 @@ export interface FakeGitOptions {
 	dirtyWorktrees?: Set<string>;
 	isDirtyFail?: GitError;
 	rebaseConflicts?: Set<string>;
+	/** Exact diagnostic returned for configured rebase conflicts. */
+	rebaseConflictError?: GitError;
 	mergeInProgress?: Set<string>;
 	onConflictResolved?: Set<string>;
 	fetchFails?: boolean;
@@ -352,7 +354,7 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 		): Promise<Result<void, GitError>> {
 			options.rebaseCalls?.push({ worktreePath, onto, opts });
 			if (rebaseConflicts?.has(worktreePath)) {
-				return Result.err({ code: "REBASE_CONFLICT", message: "Rebase conflict" });
+				return Result.err(options.rebaseConflictError ?? { code: "REBASE_CONFLICT", message: "Rebase conflict" });
 			}
 			return Result.ok(undefined);
 		},
