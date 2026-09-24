@@ -69,6 +69,27 @@ export async function resolvePrimaryRemote(logger: LoggerPort): Promise<string> 
  */
 export function createBunGitAdapter(logger: LoggerPort, primaryRemote: string): GitPort {
 	const runGit = (args: string[]) => execGit(logger, args);
+	const checkRebaseInProgress = async (worktreePath: string): Promise<Result<boolean, GitError>> => {
+		try {
+			const { exitCode, stdout } = await runGit(["-C", worktreePath, "rev-parse", "--git-dir"]);
+			if (exitCode !== 0) {
+				return Result.err({ code: "UNKNOWN", message: `Failed to resolve git directory for "${worktreePath}"` });
+			}
+			const gitDir = stdout.startsWith("/") ? stdout : `${worktreePath}/${stdout}`;
+			const dirExists = async (path: string): Promise<boolean> => {
+				try {
+					const status = await stat(path);
+					return status.isDirectory();
+				} catch {
+					return false;
+				}
+			};
+			if (await dirExists(`${gitDir}/rebase-merge`)) return Result.ok(true);
+			return Result.ok(await dirExists(`${gitDir}/rebase-apply`));
+		} catch {
+			return Result.err({ code: "UNKNOWN", message: `Failed to check rebase status for "${worktreePath}"` });
+		}
+	};
 
 	return {
 		async isGitRepository(): Promise<Result<boolean, GitError>> {
@@ -690,7 +711,11 @@ export function createBunGitAdapter(logger: LoggerPort, primaryRemote: string): 
 					: ["-C", worktreePath, "rebase", onto];
 				const { exitCode, stderr } = await runGit(args);
 				if (exitCode !== 0) {
-					return Result.err({ code: "REBASE_CONFLICT", message: stderr || `Rebase onto ${onto} failed` });
+					const inProgress = await checkRebaseInProgress(worktreePath);
+					return Result.err({
+						code: inProgress.success && inProgress.data ? "REBASE_CONFLICT" : "UNKNOWN",
+						message: stderr || `Rebase onto ${onto} failed`,
+					});
 				}
 				return Result.ok(undefined);
 			} catch {
@@ -794,25 +819,7 @@ export function createBunGitAdapter(logger: LoggerPort, primaryRemote: string): 
 		},
 
 		async isRebaseInProgress(worktreePath: string): Promise<Result<boolean, GitError>> {
-			try {
-				const { exitCode, stdout } = await runGit(["-C", worktreePath, "rev-parse", "--git-dir"]);
-				if (exitCode !== 0) {
-					return Result.err({ code: "UNKNOWN", message: `Failed to resolve git directory for "${worktreePath}"` });
-				}
-				const gitDir = stdout.startsWith("/") ? stdout : `${worktreePath}/${stdout}`;
-				const dirExists = async (path: string): Promise<boolean> => {
-					try {
-						const s = await stat(path);
-						return s.isDirectory();
-					} catch {
-						return false;
-					}
-				};
-				if (await dirExists(`${gitDir}/rebase-merge`)) return Result.ok(true);
-				return Result.ok(await dirExists(`${gitDir}/rebase-apply`));
-			} catch {
-				return Result.err({ code: "UNKNOWN", message: `Failed to check rebase status for "${worktreePath}"` });
-			}
+			return checkRebaseInProgress(worktreePath);
 		},
 
 		async isMergeInProgress(worktreePath: string): Promise<Result<boolean, GitError>> {
