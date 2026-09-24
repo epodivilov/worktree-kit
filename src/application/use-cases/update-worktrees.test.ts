@@ -234,6 +234,28 @@ describe("updateWorktrees", () => {
 		expect(output.reports[2]).toMatchObject({ branch: "feature-b", result: { status: "rebased" } });
 	});
 
+	test("worktree inspection failure is not reported as a rebase conflict", async () => {
+		const git = createFakeGit({
+			worktrees: [mainWt, featureA],
+			isDirtyFail: { code: "UNKNOWN", message: "status unavailable" },
+			...flatBranchesConfig([mainWt, featureA]),
+		});
+
+		const output = expectOk(await updateWorktrees({ dryRun: false }, { git }));
+
+		expect(output.reports.find((report) => report.branch === "feature-a")).toMatchObject({
+			result: { status: "update-failed", message: "Could not check worktree status" },
+		});
+		expect(output.unresolvedProblems).toEqual([
+			expect.objectContaining({
+				rootBranch: "feature-a",
+				reason: "Could not check worktree status",
+				nextAction: "resolve the update failure, then re-run wt update",
+			}),
+		]);
+		expect(output.unresolvedProblems[0]?.rebaseTarget).toBeUndefined();
+	});
+
 	test("conflicting roots retain their targets and group their skipped descendants", async () => {
 		const a: Worktree = { path: "/repo-a", branch: "a", head: "a2", isMain: false, isPrunable: false };
 		const b: Worktree = { path: "/repo-b", branch: "b", head: "b2", isMain: false, isPrunable: false };
@@ -286,6 +308,7 @@ describe("updateWorktrees", () => {
 				affectedBranches: ["a", "b"],
 				nextAction: "manually rebase the root onto its target, resolve it, then re-run wt update",
 				rebaseTarget: "main",
+				rebaseAborted: true,
 			},
 			{
 				rootBranch: "c",
@@ -293,6 +316,7 @@ describe("updateWorktrees", () => {
 				affectedBranches: ["c", "d"],
 				nextAction: "manually rebase the root onto its target, resolve it, then re-run wt update",
 				rebaseTarget: "main",
+				rebaseAborted: true,
 			},
 		]);
 	});
@@ -596,14 +620,43 @@ describe("updateWorktrees — feature tracking reconciliation (WTK-70)", () => {
 		const output = expectOk(await updateWorktrees({ dryRun: false, reconcile: "rebase" }, { git }));
 
 		expect(output.reconciliations[0]).toMatchObject({ action: "aborted" });
-		expect(output.reconciliations[0]).toMatchObject({ failure: "rebase-conflict" });
+		expect(output.reconciliations[0]).toMatchObject({ failure: "rebase-conflict", rebaseAborted: false });
 		expect(output.reconciliations[0]?.warning).toContain("rebase conflict");
 		expect(output.reconciliations[0]?.warning).toContain("rebase abort failed: abort failed");
 		expect(output.unresolvedProblems[0]).toMatchObject({
 			reason: "rebase conflict; rebase abort failed: abort failed",
 			rebaseTarget: "fork/topic",
+			rebaseAborted: false,
+			nextAction: "inspect and abort the in-progress rebase before rebasing the root onto its target",
 		});
 		expect(output.unresolved).toBe(true);
+	});
+
+	test("non-conflict reconciliation rebase failure retains its diagnostic", async () => {
+		const git = reconciliationGit({
+			commitCountMap: new Map([
+				...flatBranchesConfig([mainWt, featureA]).commitCountMap,
+				["feature-a..fork/topic", 1],
+				["fork/topic..feature-a", 1],
+			]),
+			revListCherryPickMap: new Map([
+				["fork/topic...feature-a", ["local"]],
+				["feature-a...fork/topic", ["remote"]],
+			]),
+			rebaseFailure: { code: "UNKNOWN", message: "Failed to spawn git" },
+		});
+
+		const output = expectOk(await updateWorktrees({ dryRun: false, reconcile: "rebase" }, { git }));
+
+		expect(output.reconciliations[0]).toMatchObject({
+			action: "aborted",
+			warning: "Reconciliation failed: Failed to spawn git",
+		});
+		expect(output.reconciliations[0]?.failure).toBeUndefined();
+		expect(output.unresolvedProblems[0]).toMatchObject({
+			reason: "Reconciliation failed: Failed to spawn git",
+		});
+		expect(output.unresolvedProblems[0]?.rebaseTarget).toBeUndefined();
 	});
 });
 

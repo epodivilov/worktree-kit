@@ -495,6 +495,7 @@ describe("update --reconcile (WTK-70)", () => {
 			]),
 			rebaseConflicts: new Set([featureWt.path]),
 			rebaseConflictError: { code: "REBASE_CONFLICT", message: rawGitAdvice },
+			rebaseAbortFail: { code: "UNKNOWN", message: "abort unavailable" },
 		});
 		const { ui, log } = createFakeUi({ nonInteractive: true });
 
@@ -503,7 +504,7 @@ describe("update --reconcile (WTK-70)", () => {
 		expect(code).toBe(3);
 		expect(log.success).toContain("gone — branch removed (no matching worktree found)");
 		expect(log.warn).toEqual([
-			"1 root conflict:\n  feature onto origin/feature (affected: feature)\nManually rebase each root onto its target, resolve it, then rerun wt update.",
+			"1 root conflict:\n  feature onto origin/feature (affected: feature; rebase abort did not complete)\nFirst inspect and abort the in-progress rebase for every root where abort did not complete. Then resolve the conflict and rerun wt update.",
 		]);
 		expect(log.warn.join("\n")).not.toContain(rawGitAdvice);
 		expect(log.error).toEqual(["Update incomplete"]);
@@ -780,8 +781,30 @@ describe("update — per-worktree progress (WTK-58)", () => {
 		expect(log.warn[0]).toContain("1 root conflict");
 		expect(log.warn[0]).toContain("a onto main (affected: a, b)");
 		expect(log.warn[0]).toContain("Manually rebase each root onto its target, resolve it, then rerun wt update.");
-		expect(log.warn.join("\n")).not.toContain(rawGitAdvice);
+		const userOutput = [...log.info, ...log.success, ...log.warn, ...log.error, ...log.outro].join("\n");
+		for (const stderrFragment of [
+			"could not apply deadbeef",
+			"git add/rm <conflicted_files>",
+			"git rebase --continue",
+		]) {
+			expect(userOutput).not.toContain(stderrFragment);
+		}
 		expect(log.error).toEqual(["Update incomplete"]);
+	});
+
+	test("WTK-74: failed rebase abort requires recovery before another rebase", async () => {
+		const { fs, git } = stackScenario({
+			rebaseConflicts: new Set([`${ROOT}/.worktrees/a`]),
+			rebaseAbortFail: { code: "UNKNOWN", message: "abort unavailable" },
+		});
+		const { ui, log, multiSpinner } = createFakeUi();
+
+		const code = await runUpdate(buildContainer(ui, git, fs), { "dry-run": false });
+
+		expect(code).toBe(3);
+		expect(multiSpinner.terminals.find((line) => line.key === "a")?.message).toBe("conflict, rebase abort failed");
+		expect(log.warn.join("\n")).toContain("First inspect and abort the in-progress rebase");
+		expect(log.warn.join("\n")).not.toContain("Manually rebase each root onto its target");
 	});
 
 	test("R7: dry-run reports would-be-rebased per worktree and performs no rebase", async () => {

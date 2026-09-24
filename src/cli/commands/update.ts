@@ -48,7 +48,12 @@ function progressLine(report: WorktreeReport): { terminal: "complete" | "fail"; 
 			return { terminal: "complete", message: `would be rebased onto ${onto}${wip}${reparent}` };
 		}
 		case "rebase-conflict":
-			return { terminal: "fail", message: `conflict, rebase aborted${reparent}` };
+			return {
+				terminal: "fail",
+				message: `conflict, rebase ${report.result.rebaseAborted ? "aborted" : "abort failed"}${reparent}`,
+			};
+		case "update-failed":
+			return { terminal: "fail", message: `failed: ${report.result.message}${reparent}` };
 		case "skipped":
 			return report.result.reason === "fully merged"
 				? { terminal: "complete", message: "skipped: fully merged" }
@@ -61,21 +66,26 @@ function progressLine(report: WorktreeReport): { terminal: "complete" | "fail"; 
 }
 
 /**
- * Keeps conflict guidance independent of the Git error text. `wt` has already
- * aborted each failed rebase, so the valid recovery path is to start a fresh
- * manual rebase from the reported branch and target before running update again.
+ * Keeps conflict guidance independent of the Git error text. A fresh manual
+ * rebase is valid only after `wt` confirms that its failed rebase was aborted.
  */
 function renderUnresolvedProblems(ui: UiPort, problems: readonly UnresolvedProblem[]): void {
 	const conflicts = problems.filter((problem) => problem.rebaseTarget);
 	if (conflicts.length > 0) {
+		const needsRecovery = conflicts.some((problem) => problem.rebaseAborted === false);
 		const count = conflicts.length;
 		const groups = conflicts.map((problem) => {
 			const affected = problem.affectedBranches.length > 0 ? problem.affectedBranches.join(", ") : problem.rootBranch;
-			const detail = problem.reason === "rebase conflict" ? "" : `; ${problem.reason}`;
+			const detail =
+				problem.rebaseAborted === false
+					? "; rebase abort did not complete"
+					: problem.reason === "rebase conflict"
+						? ""
+						: `; ${problem.reason}`;
 			return `  ${problem.rootBranch} onto ${problem.rebaseTarget} (affected: ${affected}${detail})`;
 		});
 		ui.warn(
-			`${count} root conflict${count === 1 ? "" : "s"}:\n${groups.join("\n")}\nManually rebase each root onto its target, resolve it, then rerun wt update.`,
+			`${count} root conflict${count === 1 ? "" : "s"}:\n${groups.join("\n")}\n${needsRecovery ? "First inspect and abort the in-progress rebase for every root where abort did not complete. Then resolve the conflict and rerun wt update." : "Manually rebase each root onto its target, resolve it, then rerun wt update."}`,
 		);
 	}
 

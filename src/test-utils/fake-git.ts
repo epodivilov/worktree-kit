@@ -25,6 +25,8 @@ export interface FakeGitOptions {
 	rebaseConflicts?: Set<string>;
 	/** Exact diagnostic returned for configured rebase conflicts. */
 	rebaseConflictError?: GitError;
+	/** Non-conflict failure returned from rebase, such as a process-start failure. */
+	rebaseFailure?: GitError;
 	mergeInProgress?: Set<string>;
 	onConflictResolved?: Set<string>;
 	fetchFails?: boolean;
@@ -356,6 +358,7 @@ export function createFakeGit(options: FakeGitOptions = {}): GitPort {
 			if (rebaseConflicts?.has(worktreePath)) {
 				return Result.err(options.rebaseConflictError ?? { code: "REBASE_CONFLICT", message: "Rebase conflict" });
 			}
+			if (options.rebaseFailure !== undefined) return Result.err(options.rebaseFailure);
 			return Result.ok(undefined);
 		},
 
