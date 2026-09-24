@@ -85,7 +85,7 @@ function renderUnresolvedProblems(ui: UiPort, problems: readonly UnresolvedProbl
 			return `  ${problem.rootBranch} onto ${problem.rebaseTarget} (affected: ${affected}${detail})`;
 		});
 		ui.warn(
-			`${count} root conflict${count === 1 ? "" : "s"}:\n${groups.join("\n")}\n${needsRecovery ? "First inspect and abort the in-progress rebase for every root where abort did not complete. Then resolve the conflict and rerun wt update." : "Manually rebase each root onto its target, resolve it, then rerun wt update."}`,
+			`${count} root conflict${count === 1 ? "" : "s"}:\n${groups.join("\n")}\n${needsRecovery ? "First inspect and abort the in-progress rebase for every root where abort did not complete. Then manually rebase each root onto its listed target, resolve the conflict, and rerun wt update." : "Manually rebase each root onto its target, resolve it, then rerun wt update."}`,
 		);
 	}
 
