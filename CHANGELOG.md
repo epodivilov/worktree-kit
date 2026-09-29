@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.11.3
+
+### Patch Changes
+
+- 740a457: Restore cached update notices for version commands and refresh stale update data after short-lived commands.
+
 ## 0.11.2
 
 ### Patch Changes
