@@ -12,7 +12,9 @@ import { syncCommand } from "./cli/commands/sync.ts";
 import { updateCommand } from "./cli/commands/update.ts";
 import { GLOBAL_ARGS } from "./cli/global-args.ts";
 import { resolveNonInteractive } from "./cli/resolve-non-interactive.ts";
-import { runUpdateNotifier } from "./cli/update-notifier.ts";
+import { runUpdateNotifier, runUpdateRefreshWorker, UPDATE_REFRESH_FLAG } from "./cli/update-notifier.ts";
+import { createBunFilesystemAdapter } from "./infrastructure/adapters/bun-filesystem-adapter.ts";
+import { createConsoleLoggerAdapter } from "./infrastructure/adapters/console-logger-adapter.ts";
 import { type Container, createContainer } from "./infrastructure/container.ts";
 
 let container: Container;
@@ -54,4 +56,13 @@ const main = defineCommand({
 	}),
 });
 
-runMain(main);
+if (process.argv.length === 3 && process.argv[2] === UPDATE_REFRESH_FLAG) {
+	await runUpdateRefreshWorker();
+} else {
+	// Citty handles --version before setup, so read the cached notice here.
+	const versionFlag = process.argv[2];
+	if (process.argv.length === 3 && versionFlag && ["--version", "-v"].includes(versionFlag)) {
+		await runUpdateNotifier({ fs: createBunFilesystemAdapter(createConsoleLoggerAdapter(false)) }, pkg.version);
+	}
+	await runMain(main);
+}
