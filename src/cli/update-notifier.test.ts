@@ -60,7 +60,11 @@ describe("runUpdateNotifier", () => {
 				const notice = process.listeners("exit").find((listener) => !exitListeners.has(listener));
 				expect(notice).toBeDefined();
 				notice?.(0);
-				expect(output.mock.calls.some(([message]) => String(message).includes("wt self-update"))).toBe(true);
+				expect(
+					output.mock.calls.some(([message]) =>
+						["1.0.0", "2.0.0", "wt self-update"].every((part) => String(message).includes(part)),
+					),
+				).toBe(true);
 			} finally {
 				for (const listener of process.listeners("exit")) {
 					if (!exitListeners.has(listener)) process.removeListener("exit", listener);
@@ -75,11 +79,14 @@ describe("runUpdateNotifier", () => {
 		const container = makeBombContainer();
 		container.fs.readFile = async () => Result.ok(JSON.stringify({ checkedAt: 0, latestVersion: "1.0.0" }));
 		const spawn = spyOn(Bun, "spawn");
+		const fetch = spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 404 }));
 		try {
 			await runUpdateNotifier(container, "1.0.0");
 			expect(spawn).not.toHaveBeenCalled();
+			expect(fetch).not.toHaveBeenCalled();
 		} finally {
 			spawn.mockRestore();
+			fetch.mockRestore();
 		}
 	});
 
