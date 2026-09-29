@@ -1,5 +1,6 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import type { Container } from "../infrastructure/container.ts";
+import { Result } from "../shared/result.ts";
 import { runUpdateNotifier } from "./update-notifier.ts";
 
 function makeBombContainer(): Container {
@@ -46,6 +47,79 @@ describe("runUpdateNotifier", () => {
 		process.argv = originalArgv;
 	});
 
+	for (const flag of ["--version", "-v"]) {
+		test(`${flag} prints a cached newer-version notice on exit`, async () => {
+			process.argv = ["bun", "wt", flag];
+			const container = makeBombContainer();
+			container.fs.readFile = async () => Result.ok(JSON.stringify({ checkedAt: Date.now(), latestVersion: "2.0.0" }));
+			const exitListeners = new Set(process.listeners("exit"));
+			const output = spyOn(console, "log").mockImplementation(() => {});
+
+			try {
+				await runUpdateNotifier(container, "1.0.0");
+				const notice = process.listeners("exit").find((listener) => !exitListeners.has(listener));
+				expect(notice).toBeDefined();
+				notice?.(0);
+				expect(output.mock.calls.some(([message]) => String(message).includes("wt self-update"))).toBe(true);
+			} finally {
+				for (const listener of process.listeners("exit")) {
+					if (!exitListeners.has(listener)) process.removeListener("exit", listener);
+				}
+				output.mockRestore();
+			}
+		});
+	}
+
+	test("version invocation never starts a refresh for stale cached data", async () => {
+		process.argv = ["bun", "wt", "--version"];
+		const container = makeBombContainer();
+		container.fs.readFile = async () => Result.ok(JSON.stringify({ checkedAt: 0, latestVersion: "1.0.0" }));
+		const spawn = spyOn(Bun, "spawn");
+		try {
+			await runUpdateNotifier(container, "1.0.0");
+			expect(spawn).not.toHaveBeenCalled();
+		} finally {
+			spawn.mockRestore();
+		}
+	});
+
+	test("ordinary invocation starts a detached refresh for missing cache", async () => {
+		const container = makeBombContainer();
+		container.fs.readFile = async () => Result.err({ code: "NOT_FOUND", message: "missing", path: "cache" });
+		const unref = mock(() => {});
+		const spawn = spyOn(Bun, "spawn").mockImplementation(() => ({ unref }) as never);
+		const fetch = spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 404 }));
+		try {
+			await runUpdateNotifier(container, "1.0.0");
+			expect(spawn).toHaveBeenCalledTimes(1);
+			expect(unref).toHaveBeenCalledTimes(1);
+			expect(spawn.mock.calls[0]?.[1]).toMatchObject({
+				detached: true,
+				stdin: "ignore",
+				stdout: "ignore",
+				stderr: "ignore",
+			});
+		} finally {
+			spawn.mockRestore();
+			fetch.mockRestore();
+		}
+	});
+
+	test("refresh spawn failure does not change ordinary command behavior", async () => {
+		const container = makeBombContainer();
+		container.fs.readFile = async () => Result.err({ code: "NOT_FOUND", message: "missing", path: "cache" });
+		const spawn = spyOn(Bun, "spawn").mockImplementation(() => {
+			throw new Error("spawn denied");
+		});
+		const fetch = spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 404 }));
+		try {
+			await expect(runUpdateNotifier(container, "1.0.0")).resolves.toBeUndefined();
+		} finally {
+			spawn.mockRestore();
+			fetch.mockRestore();
+		}
+	});
+
 	test("skips when stdout is not a TTY", async () => {
 		process.stdout.isTTY = undefined as unknown as boolean;
 		await runUpdateNotifier(makeBombContainer(), "1.0.0");
@@ -58,16 +132,6 @@ describe("runUpdateNotifier", () => {
 
 	test("skips when argv contains -h", async () => {
 		process.argv = ["bun", "wt", "-h"];
-		await runUpdateNotifier(makeBombContainer(), "1.0.0");
-	});
-
-	test("skips when argv contains --version", async () => {
-		process.argv = ["bun", "wt", "--version"];
-		await runUpdateNotifier(makeBombContainer(), "1.0.0");
-	});
-
-	test("skips when argv contains -v", async () => {
-		process.argv = ["bun", "wt", "-v"];
 		await runUpdateNotifier(makeBombContainer(), "1.0.0");
 	});
 
